@@ -74,6 +74,22 @@ public class ConfigurationAndSecretsTests
     }
 
     [Test]
+    public async Task A_site_url_that_carries_a_user_name_or_password_is_refused_and_not_shown()
+    {
+        // The file holds no secrets, and a password in the address is one.
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config["jira"]!["siteUrl"] = "https://fake.user:synthetic-password@example.invalid/";
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid: jira.siteUrl must not carry a user name or password.");
+        await Assert.That(pipeline.Error.ToString()).DoesNotContain("synthetic-password");
+        await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
+    }
+
+    [Test]
     [Arguments("missing")]
     [Arguments("null")]
     [Arguments("empty")]

@@ -9,8 +9,11 @@ public sealed record FakeResolution(string Id, string Name);
 /// <summary>A field as the site lists it. <see cref="SchemaCustom"/> is the custom field type; null for a system field.</summary>
 public sealed record FakeField(string Id, string Name, string SchemaType, string? SchemaCustom);
 
+/// <summary>A column of the board and the statuses mapped to it, by ID.</summary>
+public sealed record FakeColumn(string Name, List<string> StatusIds);
+
 /// <summary>
-/// The endpoints only <c>discover</c> calls: the resolution list, the field list and the board's projects.
+/// The endpoints only <c>discover</c> calls: the board's configuration, the resolution list, the field list and the board's projects.
 /// The collector must never call the board's projects (owner decision D2); it reads the keys from the configuration.
 /// </summary>
 public sealed partial class FakeJira
@@ -21,6 +24,16 @@ public sealed partial class FakeJira
 
     public static readonly FakeResolution ResolutionDone = new("300001", "Fake Done");
     public static readonly FakeResolution ResolutionWontDo = new("300002", "Fake Won't Do");
+
+    public string BoardConfigurationPath => $"/rest/agile/1.0/board/{BoardId}/configuration";
+
+    /// <summary>The board's columns, left to right, with every status of the workflow mapped. Edit the list to change the board.</summary>
+    public List<FakeColumn> BoardColumns { get; } =
+    [
+        new("Fake To Do", [Workflow.New.Id, Workflow.Approved.Id, Workflow.Committed.Id]),
+        new("Fake In Progress", [Workflow.Development.Id, Workflow.Review.Id, Workflow.QE.Id, Workflow.Blocked.Id]),
+        new("Fake Done", [Workflow.Done.Id, Workflow.Shipped.Id]),
+    ];
 
     public string BoardProjectPath => $"/rest/agile/1.0/board/{BoardId}/project";
 
@@ -45,6 +58,7 @@ public sealed partial class FakeJira
     private void AddDiscoverRoutes()
     {
         Handler
+            .On(HttpMethod.Get, BoardConfigurationPath, _ => Respond(BoardConfiguration()))
             .On(HttpMethod.Get, "/rest/api/3/resolution/search", request => Respond(Page(request, Resolutions.Select(resolution => (JsonNode)new JsonObject
             {
                 ["id"] = resolution.Id,
@@ -89,6 +103,31 @@ public sealed partial class FakeJira
 
         return page;
     }
+
+    /// <summary>The board's configuration as Atlassian's documentation shows it. Not seen from a real site.</summary>
+    private JsonObject BoardConfiguration() => new()
+    {
+        ["id"] = BoardId,
+        ["name"] = "Fake Board",
+        ["type"] = "scrum",
+        ["self"] = $"{SiteUrl}rest/agile/1.0/board/{BoardId}/configuration",
+        ["filter"] = new JsonObject { ["id"] = "700001", ["self"] = $"{SiteUrl}rest/api/3/filter/700001" },
+        ["columnConfig"] = new JsonObject
+        {
+            ["columns"] = new JsonArray(BoardColumns.Select(column => (JsonNode)new JsonObject
+            {
+                ["name"] = column.Name,
+                ["statuses"] = new JsonArray(column.StatusIds.Select(id => (JsonNode)new JsonObject { ["id"] = id, ["self"] = $"{SiteUrl}rest/api/3/status/{id}" }).ToArray()),
+            }).ToArray()),
+            ["constraintType"] = "issueCount",
+        },
+        ["estimation"] = new JsonObject
+        {
+            ["type"] = "field",
+            ["field"] = new JsonObject { ["fieldId"] = StoryPointFieldId, ["displayName"] = "Fake Story point estimate" },
+        },
+        ["ranking"] = new JsonObject { ["rankCustomFieldId"] = 10019 },
+    };
 
     private static JsonObject FieldDetails(FakeField field)
     {

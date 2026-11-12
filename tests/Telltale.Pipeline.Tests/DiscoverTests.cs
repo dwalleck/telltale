@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Net;
 using System.Text.Json.Nodes;
 using Telltale.Cli;
 using Telltale.Core.Secrets;
@@ -13,6 +15,10 @@ public class DiscoverTests
     [
         "discover", "--site-url", FakeJira.SiteUrl, "--board", "400001", "--time-zone", ZoneId, "--backfill-start", "2025-01-01",
     ];
+
+    /// <summary>What discover says before the failure itself when its first call, the connection check, fails.</summary>
+    private const string FirstCallFailed =
+        "discover's first call to Jira failed. When this call fails, the likely cause is the system proxy or trust in the corporate root certificate. The failure was: ";
 
     [Test]
     public async Task Run_accepts_the_file_discover_wrote_without_any_edit()
@@ -50,7 +56,7 @@ public class DiscoverTests
             + "  600004  Fake Development  indeterminate  work (proposed)\n"
             + "  600005  Fake Review  indeterminate  work (proposed)\n"
             + "  600006  Fake QE  indeterminate  work (proposed)\n"
-            + "  600007  Fake Blocked  indeterminate  work (proposed)\n"
+            + "  600007  Fake Blocked  indeterminate  blocked (proposed)\n"
             + "  600008  Fake Done  done  done (proposed)\n"
             + "  600009  Fake Shipped  done  done (proposed)\n");
     }
@@ -102,7 +108,8 @@ public class DiscoverTests
 
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            $"Could not reach Jira (GET rest/api/3/status): {failure}. "
+            FirstCallFailed
+            + $"Could not reach Jira (GET rest/api/3/status): {failure}. "
             + "On the corporate network this usually means the proxy or the certificate: check that the system proxy is set and that the corporate root certificate is trusted.\n");
 
         // The check is the first call and the only one: nothing else is asked of a site that cannot be reached.
@@ -176,13 +183,13 @@ public class DiscoverTests
     }
 
     [Test]
-    public async Task A_rerun_keeps_the_roles_the_owner_edited_and_says_where_jiras_category_differs()
+    public async Task A_rerun_keeps_the_roles_the_owner_edited_and_says_where_the_proposal_differs()
     {
         await using var pipeline = new PipelineHarness();
         await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
         await EditWrittenConfigAsync(pipeline, config =>
         {
-            config["statusRoles"]![Workflow.Blocked.Id] = "blocked";
+            config["statusRoles"]![Workflow.Blocked.Id] = "work";
             config["statusRoles"]![Workflow.Committed.Id] = "work";
         });
         pipeline.Out.GetStringBuilder().Clear();
@@ -192,11 +199,11 @@ public class DiscoverTests
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
         var roles = (await ReadWrittenConfigAsync(pipeline))["statusRoles"]!;
-        await Assert.That(roles[Workflow.Blocked.Id]!.GetValue<string>()).IsEqualTo("blocked");
+        await Assert.That(roles[Workflow.Blocked.Id]!.GetValue<string>()).IsEqualTo("work");
         await Assert.That(roles[Workflow.Committed.Id]!.GetValue<string>()).IsEqualTo("work");
         await Assert.That(roles[Workflow.Done.Id]!.GetValue<string>()).IsEqualTo("done");
-        await Assert.That(Output(pipeline)).Contains("  600007  Fake Blocked  indeterminate  blocked (from the file; Jira's category proposes work)\n");
-        await Assert.That(Output(pipeline)).Contains("  600003  Fake Committed  new  work (from the file; Jira's category proposes not started)\n");
+        await Assert.That(Output(pipeline)).Contains("  600007  Fake Blocked  indeterminate  work (from the file; discover proposes blocked)\n");
+        await Assert.That(Output(pipeline)).Contains("  600003  Fake Committed  new  work (from the file; discover proposes not started)\n");
         await Assert.That(Output(pipeline)).Contains("  600008  Fake Done  done  done (from the file)\n");
     }
 
@@ -237,80 +244,220 @@ public class DiscoverTests
     }
 
     [Test]
-    public async Task A_rerun_adds_a_status_new_in_jira_and_keeps_the_role_of_one_jira_no_longer_lists()
+    public async Task Only_the_boards_statuses_are_written_in_the_order_of_the_boards_columns()
+    {
+        // Owner decision D29. QE is in the site's status list but mapped to no column of this board, and the done column comes first.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.BoardColumns.Clear();
+        pipeline.Jira.BoardColumns.AddRange(
+        [
+            new FakeColumn("Fake Done", [Workflow.Shipped.Id, Workflow.Done.Id]),
+            new FakeColumn("Fake Doing", [Workflow.Review.Id, Workflow.Development.Id]),
+            new FakeColumn("Fake Empty", []),
+            new FakeColumn("Fake To Do", [Workflow.New.Id]),
+        ]);
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(0);
+        var roles = (await ReadWrittenConfigAsync(pipeline))["statusRoles"]!.AsObject();
+        await Assert.That(string.Join(" ", roles.Select(role => $"{role.Key}={role.Value}"))).IsEqualTo("600009=done 600008=done 600005=work 600004=work 600001=not started");
+        await Assert.That(Output(pipeline)).Contains(
+            "Statuses (ID, name, Jira category, role):\n"
+            + "  600009  Fake Shipped  done  done (proposed)\n"
+            + "  600008  Fake Done  done  done (proposed)\n"
+            + "  600005  Fake Review  indeterminate  work (proposed)\n"
+            + "  600004  Fake Development  indeterminate  work (proposed)\n"
+            + "  600001  Fake New  new  not started (proposed)\n"
+            + "Resolutions");
+    }
+
+    [Test]
+    public async Task A_rerun_never_adds_a_board_status_the_file_leaves_out_and_says_the_board_has_it()
+    {
+        // Owner decision D29: the owner may have removed it. Review was removed by the owner; QE came onto the board later.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.BoardColumns[1].StatusIds.Remove(Workflow.QE.Id);
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        await EditWrittenConfigAsync(pipeline, config => config["statusRoles"]!.AsObject().Remove(Workflow.Review.Id));
+        pipeline.Jira.BoardColumns[1].StatusIds.Add(Workflow.QE.Id);
+        pipeline.Out.GetStringBuilder().Clear();
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover", "--time-zone", "Europe/London");
+
+        await Assert.That(exit).IsEqualTo(0);
+        var roles = (await ReadWrittenConfigAsync(pipeline))["statusRoles"]!.AsObject();
+        await Assert.That(roles.Select(role => role.Key)).IsEquivalentTo(["600001", "600002", "600003", "600004", "600007", "600008", "600009"]);
+        await Assert.That(Output(pipeline)).Contains("  600005  Fake Review  indeterminate  left out of the file (the board has this status; give it a role in the file if issues use it)\n");
+        await Assert.That(Output(pipeline)).Contains("  600006  Fake QE  indeterminate  left out of the file (the board has this status; give it a role in the file if issues use it)\n");
+    }
+
+    [Test]
+    public async Task A_rerun_keeps_the_role_of_a_status_that_is_not_on_the_board_and_says_so()
     {
         await using var pipeline = new PipelineHarness();
         await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
         await EditWrittenConfigAsync(pipeline, config => config["statusRoles"]!["600077"] = "blocked");
-        pipeline.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/status", _ => true, StubHttpHandler.Json(
-            """
-            [
-              { "id": "600008", "name": "Fake Done", "statusCategory": { "id": 3, "key": "done", "name": "Done" } },
-              { "id": "600010", "name": "Fake Verified", "statusCategory": { "id": 3, "key": "done", "name": "Done" } }
-            ]
-            """));
+        pipeline.Jira.BoardColumns[1].StatusIds.Remove(Workflow.QE.Id);
+        pipeline.Out.GetStringBuilder().Clear();
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover", "--time-zone", "Europe/London");
+
+        await Assert.That(exit).IsEqualTo(0);
+        var roles = (await ReadWrittenConfigAsync(pipeline))["statusRoles"]!;
+        await Assert.That(roles["600077"]!.GetValue<string>()).IsEqualTo("blocked");
+        await Assert.That(roles[Workflow.QE.Id]!.GetValue<string>()).IsEqualTo("work");
+        await Assert.That(Output(pipeline)).Contains("  600006  Fake QE  indeterminate  work (from the file; not on the board)\n");
+        await Assert.That(Output(pipeline)).Contains("  600077  (not in Jira's status list)  -  blocked (from the file; not on the board)\n");
+    }
+
+    [Test]
+    [Arguments("Fake BLOCKED by QE", "indeterminate")]
+    [Arguments("Fake Unblocking", "done")]
+    public async Task A_status_whose_name_contains_block_in_any_case_is_proposed_as_blocked_whatever_its_category(string name, string category)
+    {
+        // Owner decision D30.
+        await using var pipeline = new PipelineHarness();
+        var status = category == "done" ? Workflow.Shipped : Workflow.Review;
+        pipeline.Jira.RenameStatus(status, name);
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That((await ReadWrittenConfigAsync(pipeline))["statusRoles"]![status.Id]!.GetValue<string>()).IsEqualTo("blocked");
+        await Assert.That(Output(pipeline)).Contains($"  {status.Id}  {name}  {category}  blocked (proposed)\n");
+    }
+
+    [Test]
+    [Arguments("""{ "id": 400001, "name": "Fake Board" }""", "KeyNotFoundException")]
+    [Arguments("""{ "columnConfig": { "columns": { "name": "Fake To Do" } } }""", "InvalidOperationException")]
+    [Arguments("""{ "columnConfig": { "columns": [ { "name": "Fake To Do", "statuses": [ { "self": "https://example.invalid/rest/api/3/status/600001" } ] } ] } }""", "KeyNotFoundException")]
+    [Arguments("""{ "columnConfig": { "columns": [ { "name": "Fake To Do", "statuses": [ { "id": 600001 } ] } ] } }""", "InvalidOperationException")]
+    public async Task A_board_configuration_in_an_unknown_shape_stops_discover_plainly_and_writes_nothing(string answer, string kind)
+    {
+        // The endpoint's shape is known from the documentation only.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.Handler.Override(HttpMethod.Get, pipeline.Jira.BoardConfigurationPath, _ => true, StubHttpHandler.Json(answer));
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"Jira's board configuration answered in a shape this tool does not understand ({kind}). Nothing was written.\n");
+        await Assert.That(File.Exists(pipeline.ConfigPath)).IsFalse();
+    }
+
+    [Test]
+    public async Task A_file_with_a_setting_run_would_refuse_is_refused_by_a_rerun_and_neither_rewritten_nor_copied()
+    {
+        // The file has no place for a secret. One pasted into it must not be written again or copied into a backup.
+        await using var pipeline = new PipelineHarness();
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        await EditWrittenConfigAsync(pipeline, config =>
+        {
+            config["jira"]!["apiToken"] = "synthetic-pasted-token";
+            config["timeZone"] = "Europe/London";
+        });
+        var edited = await File.ReadAllTextAsync(pipeline.ConfigPath);
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("run would refuse it").And.Contains("apiToken");
+        await Assert.That(pipeline.Error.ToString() + pipeline.Out).DoesNotContain("synthetic-pasted-token");
+        await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(edited);
+        await Assert.That((await pipeline.ReadAllFilesAsync()).Keys).IsEquivalentTo(["telltale.json"]);
+    }
+
+    [Test]
+    public async Task A_rerun_that_changes_the_file_keeps_the_previous_one_under_a_dated_name_and_says_its_comments_are_there()
+    {
+        // The harness clock reads 3 February 2026, noon in Chicago: 18:00 UTC.
+        await using var pipeline = new PipelineHarness();
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        var edited = (await File.ReadAllTextAsync(pipeline.ConfigPath)).Replace("{", "{ // the owner's note", StringComparison.Ordinal);
+        await File.WriteAllTextAsync(pipeline.ConfigPath, edited);
+        var backup = pipeline.ConfigPath + ".20260203T180000Z.bak";
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover", "--time-zone", "Europe/London");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(await File.ReadAllTextAsync(backup)).IsEqualTo(edited);
+        await Assert.That(Output(pipeline)).Contains($"The previous file is kept as {backup}.\n");
+        await Assert.That(Output(pipeline)).Contains($"The previous file had comments, and the new one has none: they are only in {backup}.\n");
+    }
+
+    [Test]
+    public async Task A_second_rerun_does_not_overwrite_the_backup_of_the_first()
+    {
+        await using var pipeline = new PipelineHarness();
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        var first = await File.ReadAllTextAsync(pipeline.ConfigPath);
+        await pipeline.RunWithFilesAsTheyAreAsync("discover", "--time-zone", "Europe/London");
+        var second = await File.ReadAllTextAsync(pipeline.ConfigPath);
+
+        // The clock has not moved, so the second backup would take the first one's name.
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover", "--time-zone", "Europe/Paris");
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath + ".20260203T180000Z.bak")).IsEqualTo(first);
+        await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath + ".20260203T180000Z-2.bak")).IsEqualTo(second);
+        await Assert.That(Output(pipeline)).DoesNotContain("had comments");
+    }
+
+    [Test]
+    public async Task A_rerun_keeps_the_project_keys_of_the_file_and_says_what_jira_lists()
+    {
+        await using var pipeline = new PipelineHarness();
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        pipeline.Jira.BoardProjectKeys.Add("FAKE2");
         pipeline.Out.GetStringBuilder().Clear();
 
         var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover");
 
         await Assert.That(exit).IsEqualTo(0);
-        var roles = (await ReadWrittenConfigAsync(pipeline))["statusRoles"]!;
-        await Assert.That(roles["600010"]!.GetValue<string>()).IsEqualTo("done");
-        await Assert.That(roles["600077"]!.GetValue<string>()).IsEqualTo("blocked");
-        await Assert.That(roles[Workflow.Development.Id]!.GetValue<string>()).IsEqualTo("work");
-        await Assert.That(Output(pipeline)).Contains("  600010  Fake Verified  done  done (proposed)\n");
-        await Assert.That(Output(pipeline)).Contains("  600077  (not in Jira's status list)  blocked (from the file)\n");
-    }
-
-    [Test]
-    public async Task A_rerun_keeps_settings_discover_does_not_write()
-    {
-        // Settings the owner adds by hand (the abandoned resolutions, holidays, the baseline) are not discover's to drop.
-        await using var pipeline = new PipelineHarness();
-        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
-        await EditWrittenConfigAsync(pipeline, config =>
-        {
-            config["fakeOwnerList"] = new JsonArray("300002");
-            config["jira"]!["fakeOwnerSetting"] = "kept";
-        });
-
-        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover");
-
-        await Assert.That(exit).IsEqualTo(0);
         var written = await ReadWrittenConfigAsync(pipeline);
-        await Assert.That(written["fakeOwnerList"]!.ToJsonString()).IsEqualTo("""["300002"]""");
-        await Assert.That(written["jira"]!["fakeOwnerSetting"]!.GetValue<string>()).IsEqualTo("kept");
+        await Assert.That(written["jira"]!["projectKeys"]!.ToJsonString()).IsEqualTo("""["FAKE"]""");
+        await Assert.That(Output(pipeline)).Contains("Project keys: FAKE (from the file; Jira lists FAKE, FAKE2)\n");
     }
 
     [Test]
-    public async Task A_rerun_saves_the_previous_file_beside_the_new_one_and_says_so()
+    public async Task A_rerun_says_which_setting_an_option_changed_and_never_shows_an_old_site_address()
     {
         await using var pipeline = new PipelineHarness();
         await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
-        var edited = (await File.ReadAllTextAsync(pipeline.ConfigPath)).Replace("{", "{ // the owner's note", StringComparison.Ordinal);
-        await File.WriteAllTextAsync(pipeline.ConfigPath, edited);
+        await EditWrittenConfigAsync(pipeline, config => config["jira"]!["siteUrl"] = "https://old.example.invalid/");
+        pipeline.Out.GetStringBuilder().Clear();
 
-        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover");
-
-        await Assert.That(pipeline.Error.ToString()).IsEmpty();
-        await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath + ".bak")).IsEqualTo(edited);
-        await Assert.That(Output(pipeline)).Contains($"The previous file is kept as {pipeline.ConfigPath}.bak");
-    }
-
-    [Test]
-    public async Task A_rerun_says_which_discovered_setting_changed()
-    {
-        await using var pipeline = new PipelineHarness();
-        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
-        pipeline.Jira.BoardProjectKeys.Add("FAKE2");
-
-        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover");
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover", "--site-url", FakeJira.SiteUrl, "--time-zone", "Europe/London");
 
         await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(Output(pipeline)).Contains("""Changed jira.projectKeys: was ["FAKE"], now ["FAKE","FAKE2"]""" + "\n");
-        await Assert.That(Output(pipeline)).DoesNotContain("Changed jira.siteUrl");
+        await Assert.That(Output(pipeline)).Contains("""Changed timeZone: was "America/Chicago", now "Europe/London".""" + "\n");
+        await Assert.That(Output(pipeline)).Contains("Changed jira.siteUrl (the old address is not shown).\n");
+        await Assert.That(Output(pipeline)).DoesNotContain("old.example.invalid");
         await Assert.That(Output(pipeline)).DoesNotContain("Changed jira.boardId");
+    }
+
+    [Test]
+    public async Task A_file_whose_site_address_carries_a_password_is_refused_even_when_a_new_address_is_given()
+    {
+        // Otherwise the password would be copied into the backup.
+        await using var pipeline = new PipelineHarness();
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        await EditWrittenConfigAsync(pipeline, config => config["jira"]!["siteUrl"] = "https://fake.user:synthetic-password@example.invalid/");
+        var edited = await File.ReadAllTextAsync(pipeline.ConfigPath);
+        var requestsBefore = pipeline.Jira.Handler.Requests.Count;
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover", "--site-url", FakeJira.SiteUrl);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"jira.siteUrl in {pipeline.ConfigPath} must not carry a user name or password. Take them out of the file, then run discover again.\n");
+        await Assert.That(pipeline.Out.ToString()).DoesNotContain("synthetic-password");
+        await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(requestsBefore);
+        await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(edited);
+        await Assert.That((await pipeline.ReadAllFilesAsync()).Keys).IsEquivalentTo(["telltale.json"]);
     }
 
     [Test]
@@ -404,6 +551,7 @@ public class DiscoverTests
         await using var pipeline = new PipelineHarness();
         await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
         await EditWrittenConfigAsync(pipeline, config => config["jira"]!["storyPointFieldId"] = "customfield_10026");
+        pipeline.Jira.Fields.Add(new FakeField("customfield_10026", "Fake Points", "number", FakeJira.NumberFieldType));
         pipeline.Out.GetStringBuilder().Clear();
 
         var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover");
@@ -429,23 +577,74 @@ public class DiscoverTests
     }
 
     [Test]
-    public async Task A_field_list_without_a_sprint_field_stops_discover()
+    public async Task A_field_list_without_a_sprint_field_is_said_and_does_not_stop_discover()
     {
+        // Nothing reads the Sprint field yet; the setting arrives with a later ticket.
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.Fields.RemoveAll(field => field.Id == FakeJira.SprintFieldId);
 
         var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
 
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(Output(pipeline)).Contains("Sprint field: none found in Jira's field list. Give its ID with --sprint-field.\n");
+    }
+
+    [Test]
+    public async Task The_sprint_field_the_owner_names_is_listed()
+    {
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.Fields.Add(new FakeField("customfield_10099", "Fake Iteration", "array", null));
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync([.. FirstDiscover, "--sprint-field", "customfield_10099"]);
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(Output(pipeline)).Contains("Sprint field: customfield_10099 (given with --sprint-field)\n");
+        await Assert.That(Output(pipeline)).DoesNotContain($"Sprint field: {FakeJira.SprintFieldId}");
+    }
+
+    [Test]
+    [Arguments("--sprint-field", "customfield_10404", "--sprint-field: Jira's field list has no field 'customfield_10404'. Nothing was written.")]
+    [Arguments("--story-point-field", "customfield_10404", "--story-point-field: Jira's field list has no field 'customfield_10404'. Nothing was written.")]
+    [Arguments("--story-point-field", "customfield_10020", "--story-point-field: the field 'customfield_10020' does not hold a number, so it cannot hold story points. Nothing was written.")]
+    public async Task A_field_the_owner_names_is_checked_against_jiras_field_list(string option, string fieldId, string message)
+    {
+        await using var pipeline = new PipelineHarness();
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync([.. FirstDiscover, option, fieldId]);
+
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            "Jira's field list has no Sprint field. Check that the site has Jira Software and that this account may see the field. Nothing was written.\n");
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(message + "\n");
         await Assert.That(File.Exists(pipeline.ConfigPath)).IsFalse();
     }
 
     [Test]
-    public async Task A_status_in_a_category_with_no_matching_role_is_listed_and_left_out_of_the_file()
+    public async Task A_story_point_field_in_the_file_that_jira_does_not_list_stops_a_rerun_and_leaves_the_file()
     {
         await using var pipeline = new PipelineHarness();
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        await EditWrittenConfigAsync(pipeline, config =>
+        {
+            config["jira"]!["storyPointFieldId"] = "customfield_10404";
+            config["timeZone"] = "Europe/London";
+        });
+        var edited = await File.ReadAllTextAsync(pipeline.ConfigPath);
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"jira.storyPointFieldId in {pipeline.ConfigPath}: Jira's field list has no field 'customfield_10404'. Nothing was written.\n");
+        await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(edited);
+    }
+
+    [Test]
+    public async Task A_board_status_with_no_proposal_is_listed_and_left_out_of_the_file()
+    {
+        // One status is in a category that matches no role; another is on the board but not in the site's status list.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.BoardColumns.Clear();
+        pipeline.Jira.BoardColumns.Add(new FakeColumn("Fake Only", ["600008", "600011", "600099"]));
         pipeline.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/status", _ => true, StubHttpHandler.Json(
             """
             [
@@ -457,7 +656,8 @@ public class DiscoverTests
         var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
 
         await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(Output(pipeline)).Contains("  600011  Fake Limbo  undefined  no role (Jira's category proposes none; give it one in the file if issues use this status)\n");
+        await Assert.That(Output(pipeline)).Contains("  600011  Fake Limbo  undefined  no role (discover proposes none; give it one in the file if issues use this status)\n");
+        await Assert.That(Output(pipeline)).Contains("  600099  (not in Jira's status list)  -  no role (discover proposes none; give it one in the file if issues use this status)\n");
         var roles = (await ReadWrittenConfigAsync(pipeline))["statusRoles"]!.AsObject();
         await Assert.That(roles.Select(role => role.Key)).IsEquivalentTo(["600008"]);
     }
@@ -585,6 +785,161 @@ public class DiscoverTests
 
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Jira.Handler.Requests.Select(request => request.Path)).IsEquivalentTo(["/tenant/rest/api/3/status"]);
+    }
+
+    [Test]
+    public async Task A_first_discover_whose_file_run_would_refuse_writes_nothing_and_says_why()
+    {
+        // No status is in Jira's done category, so no role "done" is proposed, and run refuses a file without one.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/status", _ => true, StubHttpHandler.Json(
+            """[ { "id": "600004", "name": "Fake Development", "statusCategory": { "id": 4, "key": "indeterminate", "name": "In Progress" } } ]"""));
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"discover did not write {pipeline.ConfigPath}, because run would refuse it: "
+            + $"The configuration file {pipeline.ConfigPath} is not valid: statusRoles: no status has the role 'done', so nothing could ever be delivered.\n");
+        await Assert.That(File.Exists(pipeline.ConfigPath)).IsFalse();
+    }
+
+    [Test]
+    [Arguments("\"finished\"", "'finished' is not a status role")]
+    [Arguments("null", "statusRoles")]
+    public async Task A_role_in_the_file_that_run_would_refuse_stops_a_rerun_and_is_neither_replaced_nor_copied(string role, string named)
+    {
+        // A role the owner wrote is the owner's, even a wrong one: discover says so and does not put its proposal in its place.
+        await using var pipeline = new PipelineHarness();
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        var edited = (await File.ReadAllTextAsync(pipeline.ConfigPath)).Replace("\"600004\": \"work\"", $"\"600004\": {role}", StringComparison.Ordinal);
+        await File.WriteAllTextAsync(pipeline.ConfigPath, edited);
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover", "--time-zone", "Europe/London");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("run would refuse it").And.Contains(named);
+        await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(edited).And.Contains($"\"600004\": {role}");
+        await Assert.That((await pipeline.ReadAllFilesAsync()).Keys).IsEquivalentTo(["telltale.json"]);
+    }
+
+    [Test]
+    public async Task A_file_that_differs_only_in_layout_and_comments_is_not_rewritten()
+    {
+        await using var pipeline = new PipelineHarness();
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        var compact = "// the owner's note\n" + (await ReadWrittenConfigAsync(pipeline)).ToJsonString();
+        await File.WriteAllTextAsync(pipeline.ConfigPath, compact);
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover");
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(compact);
+        await Assert.That((await pipeline.ReadAllFilesAsync()).Keys).IsEquivalentTo(["telltale.json"]);
+    }
+
+    [Test]
+    public async Task A_temporary_file_left_by_a_killed_discover_is_replaced_and_none_is_left_behind()
+    {
+        await using var pipeline = new PipelineHarness();
+        await File.WriteAllTextAsync(pipeline.ConfigPath + ".tmp", "half a fi");
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That((await pipeline.ReadAllFilesAsync()).Keys).IsEquivalentTo(["telltale.json"]);
+        await Assert.That((await ReadWrittenConfigAsync(pipeline))["timeZone"]!.GetValue<string>()).IsEqualTo(ZoneId);
+    }
+
+    [Test]
+    [Arguments("refused")]
+    [Arguments("timeout")]
+    [Arguments("web page")]
+    public async Task Any_failure_of_the_first_call_names_the_proxy_and_the_root_certificate_as_the_likely_cause(string how)
+    {
+        // A proxy can refuse with its own 403, swallow the request, or serve a block page. None of these looks like TLS.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/status", _ => true, how switch
+        {
+            "refused" => StubHttpHandler.Json("""{ "message": "synthetic proxy refusal" }""", HttpStatusCode.Forbidden),
+            "timeout" => _ => throw new TaskCanceledException("synthetic timeout", new TimeoutException()),
+            _ => _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("<html>synthetic block page</html>") },
+        });
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(FirstCallFailed + how switch
+        {
+            "refused" => "Jira answered 403 (Forbidden) to GET rest/api/3/status.\n",
+            "timeout" => "Jira did not answer GET rest/api/3/status in time.\n",
+            _ => "The answer to GET rest/api/3/status was not JSON. A proxy or sign-in page may have been served in place of Jira's answer.\n",
+        });
+        await Assert.That(File.Exists(pipeline.ConfigPath)).IsFalse();
+    }
+
+    [Test]
+    public async Task A_failure_after_the_first_call_is_not_blamed_on_the_proxy()
+    {
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/field", _ => true,
+            StubHttpHandler.Json("""{ "message": "synthetic refusal" }""", HttpStatusCode.Forbidden));
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo("Jira answered 403 (Forbidden) to GET rest/api/3/field.\n");
+    }
+
+    [Test]
+    [Arguments("jira", "siteUrl", "\"http://example.invalid/\"", "jira.siteUrl in {0} must be an absolute https:// address.")]
+    [Arguments("jira", "siteUrl", "5", "jira.siteUrl in {0} must be text.")]
+    [Arguments("jira", "boardId", "\"four\"", "jira.boardId in {0} must be a whole number.")]
+    [Arguments("jira", "boardId", "-1", "jira.boardId in {0} must be a positive number.")]
+    [Arguments("jira", "backfillStart", "\"last year\"", "jira.backfillStart in {0} must be a date written as yyyy-MM-dd.")]
+    [Arguments("", "timeZone", "\"Fake/Nowhere\"", "timeZone in {0}: 'Fake/Nowhere' is not a known IANA time zone ID.")]
+    [Arguments("", "timeZone", "[]", "timeZone in {0} must be text.")]
+    public async Task A_bad_value_in_the_file_is_reported_as_the_files_and_not_as_an_option(string section, string setting, string json, string message)
+    {
+        await using var pipeline = new PipelineHarness();
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        var requestsBefore = pipeline.Jira.Handler.Requests.Count;
+        await EditWrittenConfigAsync(pipeline, config => (section.Length == 0 ? config : config[section]!)[setting] = JsonNode.Parse(json));
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(string.Format(CultureInfo.InvariantCulture, message, pipeline.ConfigPath) + "\n");
+        await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(requestsBefore);
+    }
+
+    [Test]
+    public async Task A_paged_list_that_ignores_the_offset_ends_when_a_page_brings_nothing_new()
+    {
+        // Jira answers every request with the same page and never says it is the last. After three answers the stub fails the test.
+        await using var pipeline = new PipelineHarness();
+        var samePage = StubHttpHandler.Json("""{ "values": [ { "id": "300001", "name": "Fake Done" }, { "id": "300002", "name": "Fake Won't Do" } ] }""");
+        pipeline.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/resolution/search", _ => true,
+            samePage, samePage, samePage, _ => throw new InvalidOperationException("synthetic: discover keeps asking for the same page"));
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(Output(pipeline)).Contains("Resolutions (ID, name):\n  300001  Fake Done\n  300002  Fake Won't Do\nSprint field");
+    }
+
+    [Test]
+    public async Task A_paged_list_that_gives_its_total_is_not_asked_for_a_page_past_it()
+    {
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/resolution/search", _ => true,
+            StubHttpHandler.Json("""{ "startAt": 0, "total": 2, "values": [ { "id": "300001", "name": "Fake Done" }, { "id": "300002", "name": "Fake Won't Do" } ] }"""),
+            _ => throw new InvalidOperationException("synthetic: discover asked for a page past the total"));
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(pipeline.Jira.Handler.Requests.Count(request => request.Path == "/rest/api/3/resolution/search")).IsEqualTo(1);
     }
 
     private static string Output(PipelineHarness pipeline) => pipeline.Out.ToString().ReplaceLineEndings("\n");

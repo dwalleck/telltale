@@ -93,7 +93,7 @@ internal sealed class PipelineSteps
         await _services.Out.WriteLineAsync($"Wrote {path}");
     }
 
-    private static StatusRoles ReadStatusRoles(TelltaleConfig config, string path)
+    internal static StatusRoles ReadStatusRoles(TelltaleConfig config, string path)
     {
         try
         {
@@ -111,7 +111,7 @@ internal sealed class PipelineSteps
         }
     }
 
-    private static TimeZoneInfo ReadTimeZone(TelltaleConfig config, string path)
+    internal static TimeZoneInfo ReadTimeZone(TelltaleConfig config, string path)
     {
         try
         {

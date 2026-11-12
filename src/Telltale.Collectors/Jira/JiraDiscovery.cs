@@ -11,18 +11,22 @@ public sealed record DiscoveredStatus(string Id, string Name, string CategoryKey
 /// <summary>A resolution as Jira lists it.</summary>
 public sealed record DiscoveredResolution(string Id, string Name);
 
-/// <summary>A field as Jira lists it.</summary>
-public sealed record DiscoveredField(string Id, string Name);
+/// <summary>A field as Jira lists it. <see cref="ValueType"/> is the type of its value (number, array, ...), null where Jira gives none.</summary>
+public sealed record DiscoveredField(string Id, string Name, string? ValueType);
 
 /// <summary>What <c>discover</c> learns from a Jira site: the IDs the owner would otherwise look up by hand.</summary>
-/// <param name="Statuses">Every status of the site's active workflows, in Jira's order.</param>
+/// <param name="Statuses">Every status of the site's active workflows: the source of names and categories.</param>
+/// <param name="BoardStatusIds">The IDs of the statuses mapped to the board's columns, in column order.</param>
 /// <param name="Resolutions">Every resolution of the site.</param>
+/// <param name="Fields">Every field the account may see.</param>
 /// <param name="SprintFields">The fields of the Sprint type. A site has one.</param>
 /// <param name="StoryPointFields">The fields that can hold story points. A site often has two; the board uses one.</param>
 /// <param name="ProjectKeys">The keys of the board's projects.</param>
 public sealed record JiraSiteFacts(
     IReadOnlyList<DiscoveredStatus> Statuses,
+    IReadOnlyList<string> BoardStatusIds,
     IReadOnlyList<DiscoveredResolution> Resolutions,
+    IReadOnlyList<DiscoveredField> Fields,
     IReadOnlyList<DiscoveredField> SprintFields,
     IReadOnlyList<DiscoveredField> StoryPointFields,
     IReadOnlyList<string> ProjectKeys);
@@ -67,80 +71,124 @@ public sealed class JiraDiscovery
         using var jira = new JiraClient(_handler, _siteUrl, _secrets.Require(SecretName.JiraEmail), _secrets.Require(SecretName.JiraApiToken));
 
         var statuses = await ReadStatusesAsync(jira, cancellationToken);
+        var boardStatusIds = await ReadBoardStatusIdsAsync(jira, cancellationToken);
         var resolutions = await ReadResolutionsAsync(jira, cancellationToken);
-        var (sprintFields, storyPointFields) = await ReadFieldsAsync(jira, cancellationToken);
+        var (fields, sprintFields, storyPointFields) = await ReadFieldsAsync(jira, cancellationToken);
         var projectKeys = await ReadProjectKeysAsync(jira, cancellationToken);
 
-        return new JiraSiteFacts(statuses, resolutions, sprintFields, storyPointFields, projectKeys);
+        return new JiraSiteFacts(statuses, boardStatusIds, resolutions, fields, sprintFields, storyPointFields, projectKeys);
     }
 
     private static async Task<List<DiscoveredStatus>> ReadStatusesAsync(JiraClient jira, CancellationToken cancellationToken)
     {
-        using var document = await jira.GetAsync("rest/api/3/status", cancellationToken);
+        using var document = await FirstCallAsync(jira, "rest/api/3/status", cancellationToken);
         return Read<List<DiscoveredStatus>>("status list", () => [.. document.RootElement.EnumerateArray().Select(status => new DiscoveredStatus(
             Text(status, "id"),
             Text(status, "name"),
             Text(status.GetProperty("statusCategory"), "key")))]);
     }
 
+    /// <summary>
+    /// The connection check. A proxy can refuse with a status of its own, swallow the request or serve a page
+    /// of its own, and none of that looks like a TLS failure. So whatever goes wrong on this call, the
+    /// message says that the proxy or the trust in the corporate root certificate is the likely cause.
+    /// </summary>
+    private static async Task<JsonDocument> FirstCallAsync(JiraClient jira, string path, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await jira.GetAsync(path, cancellationToken);
+        }
+        catch (UserFacingException exception)
+        {
+            throw new UserFacingException(
+                "discover's first call to Jira failed. When this call fails, the likely cause is the system proxy or trust in the corporate root certificate. "
+                + $"The failure was: {exception.Message}",
+                exception);
+        }
+    }
+
+    /// <summary>
+    /// The statuses mapped to the board's columns, in column order (owner decision D29). A status the board
+    /// maps to no column is not on the board. The shape is from Atlassian's documentation and has not been
+    /// seen from a real site, so anything else stops the command.
+    /// </summary>
+    private async Task<List<string>> ReadBoardStatusIdsAsync(JiraClient jira, CancellationToken cancellationToken)
+    {
+        using var document = await jira.GetAsync($"rest/agile/1.0/board/{_boardId.ToString(CultureInfo.InvariantCulture)}/configuration", cancellationToken);
+        return Read<List<string>>("board configuration", () => [.. document.RootElement.GetProperty("columnConfig").GetProperty("columns").EnumerateArray()
+            .SelectMany(column => column.GetProperty("statuses").EnumerateArray())
+            .Select(status => Text(status, "id"))
+            .Distinct(StringComparer.Ordinal)]);
+    }
+
     private static Task<List<DiscoveredResolution>> ReadResolutionsAsync(JiraClient jira, CancellationToken cancellationToken) =>
         ReadAllPagesAsync(jira, "rest/api/3/resolution/search", "resolution list",
-            resolution => new DiscoveredResolution(Text(resolution, "id"), Text(resolution, "name")), cancellationToken);
+            resolution => new DiscoveredResolution(Text(resolution, "id"), Text(resolution, "name")), resolution => resolution.Id, cancellationToken);
 
-    private static async Task<(List<DiscoveredField> Sprint, List<DiscoveredField> StoryPoints)> ReadFieldsAsync(JiraClient jira, CancellationToken cancellationToken)
+    private static async Task<(List<DiscoveredField> All, List<DiscoveredField> Sprint, List<DiscoveredField> StoryPoints)> ReadFieldsAsync(JiraClient jira, CancellationToken cancellationToken)
     {
         using var document = await jira.GetAsync("rest/api/3/field", cancellationToken);
         return Read("field list", () =>
         {
+            var all = new List<DiscoveredField>();
             var sprint = new List<DiscoveredField>();
             var storyPoints = new List<DiscoveredField>();
 
             foreach (var field in document.RootElement.EnumerateArray())
             {
-                // System fields have no custom type, and some fields have no schema at all.
-                if (Optional(field, "schema") is not { } schema || Optional(schema, "custom")?.GetString() is not { } type)
-                {
-                    continue;
-                }
+                // Some fields have no schema at all, and system fields have no custom type.
+                var schema = Optional(field, "schema");
+                var found = new DiscoveredField(Text(field, "id"), Text(field, "name"), schema is { } typed ? Optional(typed, "type")?.GetString() : null);
+                all.Add(found);
 
-                var found = new DiscoveredField(Text(field, "id"), Text(field, "name"));
+                var type = schema is { } custom ? Optional(custom, "custom")?.GetString() : null;
                 if (type == SprintFieldType)
                 {
                     sprint.Add(found);
                 }
                 else if (type == StoryPointEstimateFieldType
-                    || (Optional(schema, "type")?.GetString() == "number" && string.Equals(found.Name, StoryPointsFieldName, StringComparison.OrdinalIgnoreCase)))
+                    || (type is not null && found.ValueType == "number" && string.Equals(found.Name, StoryPointsFieldName, StringComparison.OrdinalIgnoreCase)))
                 {
                     storyPoints.Add(found);
                 }
             }
 
-            return (sprint, storyPoints);
+            return (all, sprint, storyPoints);
         });
     }
 
     private Task<List<string>> ReadProjectKeysAsync(JiraClient jira, CancellationToken cancellationToken) =>
         ReadAllPagesAsync(jira, $"rest/agile/1.0/board/{_boardId.ToString(CultureInfo.InvariantCulture)}/project", "list of the board's projects",
-            project => Text(project, "key"), cancellationToken);
+            project => Text(project, "key"), key => key, cancellationToken);
 
     /// <summary>
-    /// Reads every page of a list paged by offset. Jira marks the last page with <c>isLast</c>; where it
-    /// leaves that out, the list ends at the first empty page.
+    /// Reads every page of a list paged by offset. The list ends where Jira says so (<c>isLast</c>, or the
+    /// offset reaching <c>total</c>), and in any case at the first page that brings nothing new: an empty
+    /// page, or the same page again from a server that ignores the offset. So the loop always ends.
     /// </summary>
-    private static async Task<List<T>> ReadAllPagesAsync<T>(JiraClient jira, string path, string what, Func<JsonElement, T> parse, CancellationToken cancellationToken)
+    private static async Task<List<T>> ReadAllPagesAsync<T>(
+        JiraClient jira, string path, string what, Func<JsonElement, T> parse, Func<T, string> keyOf, CancellationToken cancellationToken)
     {
         var all = new List<T>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var received = 0;
         while (true)
         {
-            using var document = await jira.GetAsync($"{path}?startAt={all.Count.ToString(CultureInfo.InvariantCulture)}&maxResults={PageSize.ToString(CultureInfo.InvariantCulture)}", cancellationToken);
-            var (values, isLast) = Read(what, () =>
+            using var document = await jira.GetAsync($"{path}?startAt={received.ToString(CultureInfo.InvariantCulture)}&maxResults={PageSize.ToString(CultureInfo.InvariantCulture)}", cancellationToken);
+            var (values, isLast, total) = Read(what, () =>
             {
                 var page = document.RootElement;
-                return (page.GetProperty("values").EnumerateArray().Select(parse).ToList(), Optional(page, "isLast")?.ValueKind == JsonValueKind.True);
+                return (
+                    page.GetProperty("values").EnumerateArray().Select(parse).ToList(),
+                    Optional(page, "isLast")?.ValueKind == JsonValueKind.True,
+                    Optional(page, "total")?.GetInt64());
             });
 
-            all.AddRange(values);
-            if (isLast || values.Count == 0)
+            received += values.Count;
+            var fresh = values.Where(value => seen.Add(keyOf(value))).ToList();
+            all.AddRange(fresh);
+            if (isLast || fresh.Count == 0 || received >= total)
             {
                 return all;
             }

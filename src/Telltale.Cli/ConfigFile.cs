@@ -32,9 +32,18 @@ public static class ConfigFile
             throw new UserFacingException($"The configuration file {path} does not exist.");
         }
 
+        await using var stream = File.OpenRead(path);
+        return await ReadAsync(stream, path, cancellationToken);
+    }
+
+    /// <summary>
+    /// Reads and checks the content of the file at <paramref name="path"/>, or content about to be written
+    /// there: <c>discover</c> passes what it is about to write, so it never writes a file the run would refuse.
+    /// </summary>
+    public static async Task<TelltaleConfig> ReadAsync(Stream stream, string path, CancellationToken cancellationToken = default)
+    {
         try
         {
-            await using var stream = File.OpenRead(path);
             var config = await JsonSerializer.DeserializeAsync<TelltaleConfig>(stream, Options, cancellationToken)
                 ?? throw new UserFacingException($"The configuration file {path} is empty.");
 
@@ -42,6 +51,12 @@ public static class ConfigFile
             if (config.Jira.SiteUrl is not { IsAbsoluteUri: true } siteUrl || siteUrl.Scheme != Uri.UriSchemeHttps)
             {
                 throw new UserFacingException($"The configuration file {path} is not valid: jira.siteUrl must be an absolute https:// address.");
+            }
+
+            // The file holds no secrets, and the address is printed in messages. The message does not repeat it.
+            if (siteUrl.UserInfo.Length > 0)
+            {
+                throw new UserFacingException($"The configuration file {path} is not valid: jira.siteUrl must not carry a user name or password.");
             }
 
             if (config.Jira.BoardId <= 0)
