@@ -228,7 +228,7 @@ public sealed class SqliteStore : ITelltaleStore
             ["@issueId", "@cycleStart", "@cycleEnd", "@calendarDays", "@businessDays", "@pointBucket", "@delivered", "@deliverySprintId", "@reopenCount"],
             derived.IssueCycles.Select(cycle => new object?[]
             {
-                cycle.IssueId, StoredTime.ToStored(cycle.CycleStart), StoredTime.ToStored(cycle.CycleEnd), cycle.CalendarDays, cycle.BusinessDays,
+                cycle.IssueId, StoredTime.ToStored(cycle.Cycle?.Start), StoredTime.ToStored(cycle.CycleEnd), cycle.Cycle?.CalendarDays, cycle.Cycle?.BusinessDays,
                 cycle.PointBucket, cycle.Delivered ? 1L : 0L, cycle.DeliverySprintId, (long)cycle.ReopenCount,
             }),
             cancellationToken);

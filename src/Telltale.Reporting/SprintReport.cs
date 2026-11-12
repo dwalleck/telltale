@@ -83,7 +83,7 @@ public static class SprintReport
 
         foreach (var bucket in buckets)
         {
-            report.Append("| ").Append(bucket.PointBucket?.ToString("0.##", CultureInfo.InvariantCulture) ?? "unestimated")
+            report.Append("| ").Append(BucketLabel(bucket.PointBucket))
                 .Append(" | ").Append(bucket.IssueCount.ToString(CultureInfo.InvariantCulture))
                 .Append(" | ").Append(Days(bucket.MedianBusinessDays))
                 .Append(" | ").Append(Days(bucket.P85BusinessDays))
@@ -92,6 +92,13 @@ public static class SprintReport
                 .Append(" |\n");
         }
     }
+
+    /// <summary>
+    /// A point bucket's label: the estimate in full (3, 0.5, 2.001), so two buckets the view keeps apart
+    /// never print alike. The round-trip format gives the shortest text that identifies the number.
+    /// </summary>
+    private static string BucketLabel(double? pointBucket) =>
+        pointBucket?.ToString("R", CultureInfo.InvariantCulture) ?? "unestimated";
 
     /// <summary>A duration in days to one decimal place, e.g. 2.5.</summary>
     private static string Days(double days) => days.ToString("F1", CultureInfo.InvariantCulture);

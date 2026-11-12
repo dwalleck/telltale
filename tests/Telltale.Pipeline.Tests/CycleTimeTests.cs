@@ -302,6 +302,52 @@ public class CycleTimeTests
     }
 
     [Test]
+    public async Task Statuses_entered_and_left_at_the_same_instant_still_start_a_cycle_and_count_as_a_reopen()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+
+        // A bulk move: Development and Done in one instant.
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done);
+
+        // Reopened and closed again in one instant, a day after it was done.
+        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 5, 9)).Estimated(8)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 7, 9), Workflow.Done)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Review)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 3 | 1 | 0.0 | 0.0 | 0.0 | 0.0 |\n");
+        var reopens = await pipeline.QueryAsync<(string IssueKey, long ReopenCount)>(
+            "SELECT i.issue_key, c.reopen_count FROM issue_cycle c JOIN issue i ON i.issue_id = c.issue_id ORDER BY i.issue_key;");
+        await Assert.That(reopens).IsEquivalentTo(new[] { ("FAKE-1", 0L), ("FAKE-2", 1L) }, CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task Two_estimates_that_differ_only_in_the_third_decimal_are_two_rows_with_different_labels()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(2.001)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 7, 9), Workflow.Done);
+        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 5, 9)).Estimated(2.004)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith(
+            TableHeader
+            + "| 2.001 | 1 | 1.0 | 1.0 | 1.0 | 1.0 |\n"
+            + "| 2.004 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n");
+    }
+
+    [Test]
     public async Task An_issue_delivered_between_sprints_is_in_no_cycle_time_row()
     {
         await using var pipeline = new PipelineHarness();

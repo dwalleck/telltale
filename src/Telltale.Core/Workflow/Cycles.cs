@@ -4,41 +4,43 @@ using Telltale.Core.Intervals;
 namespace Telltale.Core.Workflow;
 
 /// <summary>
-/// A delivered issue's cycle: from its first entry into a work-role status to its delivery moment,
-/// measured in calendar days (elapsed time divided by 24 hours) and in business days.
+/// A delivered issue's cycle time: it starts at the issue's first entry into a work-role status and ends at
+/// the delivery moment. Measured in calendar days (elapsed time divided by 24 hours) and in business days.
 /// </summary>
-public sealed record Cycle(DateTimeOffset Start, DateTimeOffset End, double CalendarDays, double BusinessDays);
+public sealed record Cycle(DateTimeOffset Start, double CalendarDays, double BusinessDays);
 
 public static class Cycles
 {
     /// <summary>
-    /// Measures the cycle of an issue delivered at <paramref name="deliveredAt"/> from its status intervals
-    /// (in time order). The cycle starts at the first entry into a work-role status, whichever one it is; time
-    /// before that does not count, in a blocked status or any other, and everything after it does. An issue
-    /// that never entered a work-role status has no cycle: the result is null.
+    /// Measures the cycle of an issue delivered at <paramref name="deliveredAt"/> from the statuses it entered
+    /// (<see cref="StatusTimeline.Entries"/>). The cycle starts at the first entry into a work-role status,
+    /// whichever one it is; time before that does not count, in a blocked status or any other, and everything
+    /// after it does. A work-role status entered at the delivery moment itself gives a cycle of zero days.
+    /// An issue that did not enter a work-role status by then has no cycle: the result is null.
     /// </summary>
-    public static Cycle? Measure(IReadOnlyList<StatusInterval> intervals, StatusRoles roles, DateTimeOffset deliveredAt, BusinessCalendar calendar)
+    public static Cycle? Measure(IReadOnlyList<StatusEntry> entries, StatusRoles roles, DateTimeOffset deliveredAt, BusinessCalendar calendar)
     {
-        var started = intervals.FirstOrDefault(interval => roles.IsWork(interval.StatusId));
+        var started = entries.FirstOrDefault(entry => roles.IsWork(entry.StatusId) && entry.At <= deliveredAt);
         if (started is null)
         {
             return null;
         }
 
-        var span = new Interval(started.Start, deliveredAt);
-        return new Cycle(span.Start, span.End, span.Duration / TimeSpan.FromDays(1), calendar.BusinessDays(span));
+        var span = new Interval(started.At, deliveredAt);
+        return new Cycle(span.Start, span.Duration / TimeSpan.FromDays(1), calendar.BusinessDays(span));
     }
 
     /// <summary>
-    /// How many times the issue was reopened: its moves out of a done-role status into one that is not done,
-    /// read from its status intervals (in time order). A move between two done-role statuses is not a reopen.
+    /// How many times the issue was reopened: its transitions out of a done-role status into one that is not
+    /// done, read from the statuses it entered (<see cref="StatusTimeline.Entries"/>). A move between two
+    /// done-role statuses is not a reopen.
     /// </summary>
-    public static int ReopenCount(IReadOnlyList<StatusInterval> intervals, StatusRoles roles)
+    public static int ReopenCount(IReadOnlyList<StatusEntry> entries, StatusRoles roles)
     {
         var reopens = 0;
-        for (var index = 1; index < intervals.Count; index++)
+        for (var index = 1; index < entries.Count; index++)
         {
-            if (roles.IsDone(intervals[index - 1].StatusId) && !roles.IsDone(intervals[index].StatusId))
+            if (roles.IsDone(entries[index - 1].StatusId) && !roles.IsDone(entries[index].StatusId))
             {
                 reopens++;
             }

@@ -39,7 +39,6 @@ public class CyclesTests
 
         await Assert.That(cycle).IsNotNull();
         await Assert.That(cycle!.Start).IsEqualTo(Local(2026, 11, 3, 9));
-        await Assert.That(cycle.End).IsEqualTo(Local(2026, 11, 5, 15));
         await Assert.That(cycle.CalendarDays).IsEqualTo(2.25).Within(0.000001);
         await Assert.That(cycle.BusinessDays).IsEqualTo(2.25).Within(0.000001);
     }
@@ -104,7 +103,6 @@ public class CyclesTests
             new StatusChange("5", Local(2026, 11, 13, 9), Done, Shipped));
 
         await Assert.That(cycle!.Start).IsEqualTo(Local(2026, 11, 3, 9));
-        await Assert.That(cycle.End).IsEqualTo(Local(2026, 11, 6, 9));
         await Assert.That(cycle.CalendarDays).IsEqualTo(3.0).Within(0.000001);
     }
 
@@ -128,12 +126,52 @@ public class CyclesTests
             new StatusChange("1", Local(2026, 11, 6, 12), New, Development),
             new StatusChange("2", Local(2026, 11, 11, 12), Development, Done),
         };
-        var intervals = StatusTimeline.Build(Created, Done, changes).Intervals;
+        var entries = StatusTimeline.Build(Created, Done, changes).Entries;
 
-        var cycle = Cycles.Measure(intervals, Roles, Local(2026, 11, 11, 12), TeamCalendar(new DateOnly(2026, 11, 10)));
+        var cycle = Cycles.Measure(entries, Roles, Local(2026, 11, 11, 12), TeamCalendar(new DateOnly(2026, 11, 10)));
 
         await Assert.That(cycle!.CalendarDays).IsEqualTo(5.0).Within(0.000001);
         await Assert.That(cycle.BusinessDays).IsEqualTo(2.0).Within(0.000001);
+    }
+
+    [Test]
+    public async Task A_work_status_entered_at_the_delivery_moment_gives_a_cycle_of_zero_days()
+    {
+        // Moved to Development and on to Done in the same instant: the visit took no time, but it happened.
+        var cycle = CycleOf(Done,
+            new StatusChange("1", Local(2026, 11, 3, 9), New, Development),
+            new StatusChange("2", Local(2026, 11, 3, 9), Development, Done));
+
+        await Assert.That(cycle).IsNotNull();
+        await Assert.That(cycle!.Start).IsEqualTo(Local(2026, 11, 3, 9));
+        await Assert.That(cycle.CalendarDays).IsEqualTo(0.0);
+        await Assert.That(cycle.BusinessDays).IsEqualTo(0.0);
+    }
+
+    [Test]
+    public async Task A_work_status_first_entered_after_the_delivery_moment_starts_no_cycle()
+    {
+        // Straight to Done, then reopened into Development and closed again in one instant. Delivery dates the
+        // issue at its first move into Done (the visit to Development has no interval), so the only work
+        // status it entered lies after its delivery moment.
+        var cycle = CycleOf(Done,
+            new StatusChange("1", Local(2026, 11, 3, 9), New, Done),
+            new StatusChange("2", Local(2026, 11, 5, 9), Done, Development),
+            new StatusChange("3", Local(2026, 11, 5, 9), Development, Done));
+
+        await Assert.That(cycle).IsNull();
+    }
+
+    [Test]
+    public async Task A_reopen_that_is_closed_again_at_the_same_instant_is_still_a_reopen()
+    {
+        var reopens = ReopensOf(Done,
+            new StatusChange("1", Local(2026, 11, 3, 9), New, Development),
+            new StatusChange("2", Local(2026, 11, 4, 9), Development, Done),
+            new StatusChange("3", Local(2026, 11, 5, 9), Done, Development),
+            new StatusChange("4", Local(2026, 11, 5, 9), Development, Done));
+
+        await Assert.That(reopens).IsEqualTo(1);
     }
 
     [Test]
@@ -166,11 +204,11 @@ public class CyclesTests
     /// <summary>The cycle of an issue now in <paramref name="currentStatusId"/>, delivered when <see cref="Delivery"/> says.</summary>
     private static Cycle? CycleOf(string currentStatusId, params StatusChange[] changes)
     {
-        var intervals = StatusTimeline.Build(Created, currentStatusId, changes).Intervals;
-        var delivered = (Delivered)Delivery.Of(currentStatusId, intervals, Roles).Value!;
-        return Cycles.Measure(intervals, Roles, delivered.At, TeamCalendar());
+        var timeline = StatusTimeline.Build(Created, currentStatusId, changes);
+        var delivered = (Delivered)Delivery.Of(currentStatusId, timeline.Intervals, Roles).Value!;
+        return Cycles.Measure(timeline.Entries, Roles, delivered.At, TeamCalendar());
     }
 
     private static int ReopensOf(string currentStatusId, params StatusChange[] changes) =>
-        Cycles.ReopenCount(StatusTimeline.Build(Created, currentStatusId, changes).Intervals, Roles);
+        Cycles.ReopenCount(StatusTimeline.Build(Created, currentStatusId, changes).Entries, Roles);
 }

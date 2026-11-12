@@ -38,15 +38,18 @@ public static class Derivation
             var timeline = StatusTimeline.Build(issue.Created, issue.StatusId, statusChanges[issue.IssueId]);
             intervals.AddRange(timeline.Intervals.Select(interval => new IssueStatusInterval(issue.IssueId, interval.StatusId, interval.Start, interval.End)));
 
-            var cycle = Delivery.Of(issue.StatusId, timeline.Intervals, roles) switch
+            var reopens = Cycles.ReopenCount(timeline.Entries, roles);
+            cycles.Add(Delivery.Of(issue.StatusId, timeline.Intervals, roles) switch
             {
-                Delivered delivered => WithCycleTime(
-                    new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At)),
-                    Cycles.Measure(timeline.Intervals, roles, delivered.At, calendar),
-                    issue.StoryPoints),
-                NotDelivered => new IssueCycle(issue.IssueId, CycleEnd: null, Delivered: false, DeliverySprintId: null),
-            };
-            cycles.Add(cycle with { ReopenCount = Cycles.ReopenCount(timeline.Intervals, roles) });
+                Delivered delivered => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At), reopens)
+                {
+                    Cycle = Cycles.Measure(timeline.Entries, roles, delivered.At, calendar),
+
+                    // The point bucket is the issue's current estimate.
+                    PointBucket = issue.StoryPoints,
+                },
+                NotDelivered => new IssueCycle(issue.IssueId, CycleEnd: null, Delivered: false, DeliverySprintId: null, reopens),
+            });
         }
 
         // Every status has exactly one role. Guessing one for a status the configuration does not mention
@@ -64,18 +67,6 @@ public static class Derivation
             intervals,
             cycles);
     }
-
-    /// <summary>
-    /// Adds the cycle's measurements and the point bucket to a delivered issue's row. The bucket is the issue's
-    /// current estimate.
-    /// </summary>
-    private static IssueCycle WithCycleTime(IssueCycle delivered, Cycle? cycle, double? storyPoints) => delivered with
-    {
-        CycleStart = cycle?.Start,
-        CalendarDays = cycle?.CalendarDays,
-        BusinessDays = cycle?.BusinessDays,
-        PointBucket = storyPoints,
-    };
 
     /// <summary>
     /// When a sprint's window ends: at its completion; for a closed sprint Jira gives no completion time,
