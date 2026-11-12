@@ -63,8 +63,10 @@ public class SaltChangeTests
     }
 
     [Test]
-    public async Task A_backfill_under_a_new_salt_stops_and_stores_nothing_when_a_stored_person_cannot_be_hashed_again()
+    public async Task A_backfill_under_a_new_salt_clears_a_stored_person_that_jira_no_longer_returns()
     {
+        // Ticket 14: a backfill replaces every stored issue, so one that Jira no longer returns leaves the store
+        // with its hash under the old salt. Before that, such a backfill was refused and nothing was stored.
         await using var pipeline = new PipelineHarness();
         AddScenario(pipeline.Jira);
         await pipeline.RunAllAsync(["backfill"]);
@@ -76,17 +78,15 @@ public class SaltChangeTests
 
         var exit = await pipeline.RunAsync("backfill");
 
-        await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            "1 issue in the database is no longer in Jira's answer, so its assignee cannot be hashed again with the new salt. Nothing was stored. "
-            + "Restore the original salt, or delete the database file and run backfill.\n");
-        await Assert.That(await pipeline.ReadStoreContentAsync()).IsEqualTo(storeBefore);
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(storeBefore).Contains(PersonOneHashedWithSaltOne).And.Contains(PersonTwoHashedWithSaltOne);
+        var store = await pipeline.ReadStoreContentAsync();
+        await Assert.That(store).Contains(PersonOneHashedWithSaltTwo);
+        await Assert.That(store).DoesNotContain(PersonOneHashedWithSaltOne).And.DoesNotContain(PersonTwoHashedWithSaltOne);
 
-        // The store still says which salt its people were hashed with.
-        pipeline.Config["jira"]!["backfillStart"] = "2025-01-01";
-        pipeline.Error.GetStringBuilder().Clear();
-        await Assert.That(await pipeline.RunAsync("sync")).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(Refusal);
+        // The store says which salt its people are hashed with now: a sync under it goes through.
+        await pipeline.RunAllAsync(["sync"]);
     }
 
     [Test]

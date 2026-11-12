@@ -24,7 +24,7 @@ public class MethodNoteAndFooterTests
         - A figure is shown only where it cannot show one person's work. The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in it. When the team is smaller than five, the delivered count and both tables read "suppressed", with no rows. With a team of five or more, a row with fewer than three distinct assignees behind it keeps its issue count and reads "suppressed" for its figures. The footer's two counts read "suppressed" when the issues in the whole store have fewer than five distinct assignees.
         - An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. An unassigned issue counts toward nobody.
         - An interval that is still open (an issue still in a status, a sprint not yet completed) ends at the as-of time below.
-        - Work that has since been removed from Jira stays in the figures.
+        - Work that has since been removed from Jira stays in the figures until the next backfill.
 
         """;
 

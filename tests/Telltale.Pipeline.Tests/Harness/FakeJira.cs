@@ -276,6 +276,7 @@ public sealed partial class FakeJira
     private readonly List<IReadOnlyList<string>> _searchAnswers = [];
     private readonly Dictionary<string, (List<FakeIssue> Found, int Answer, int Offset)> _searchPages = [];
     private readonly Dictionary<string, string> _statusNames = Workflow.BoardOrder.ToDictionary(status => status.Id, status => status.DefaultName);
+    private readonly HashSet<string> _deletedStatusIds = [];
     private List<FakePerson>? _servedOncePer;
     private int _nextIssueId = 900001;
     private readonly Dictionary<string, (List<(FakeIssue Issue, FakeHistory History)> Found, int Offset)> _changelogPages = [];
@@ -448,6 +449,24 @@ public sealed partial class FakeJira
         }
     }
 
+    /// <summary>Deletes an issue from the site: no search finds it again, and nothing says it is gone.</summary>
+    public void Delete(FakeIssue issue)
+    {
+        lock (_gate)
+        {
+            _issues.Remove(issue);
+        }
+    }
+
+    /// <summary>Takes a sprint off the board's sprint list, as when it is deleted: nothing says it is gone.</summary>
+    public void RemoveSprint(FakeSprint sprint)
+    {
+        lock (_gate)
+        {
+            _sprints.Remove(sprint);
+        }
+    }
+
     /// <summary>
     /// Gives the sprints a team of five without delivering anything: one issue per person of
     /// <see cref="People.Team"/>, listed in the sprints since 2 January 2026 and left in New. A delivered count is
@@ -475,6 +494,15 @@ public sealed partial class FakeJira
         lock (_gate)
         {
             _statusNames[status.Id] = name;
+        }
+    }
+
+    /// <summary>Takes a status off the site's status list. History that names it by ID stays as it is. Use one no issue is in now.</summary>
+    public void DeleteStatus(FakeStatus status)
+    {
+        lock (_gate)
+        {
+            _deletedStatusIds.Add(status.Id);
         }
     }
 
@@ -558,7 +586,13 @@ public sealed partial class FakeJira
         return page;
     }
 
-    private JsonArray Statuses() => new(Workflow.BoardOrder.Select(status => (JsonNode)StatusDetails(status)).ToArray());
+    private JsonArray Statuses()
+    {
+        lock (_gate)
+        {
+            return new(Workflow.BoardOrder.Where(status => !_deletedStatusIds.Contains(status.Id)).Select(status => (JsonNode)StatusDetails(status)).ToArray());
+        }
+    }
 
     private JsonObject Search(StubRequest request)
     {
