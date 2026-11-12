@@ -64,7 +64,7 @@ One markdown file per sprint, whole-team: delivered issue count; median and P85 
 
 ## Already built: Telltale.Core
 
-Interval math (`Interval`), business-day calendar (`BusinessCalendar`), status timelines (`StatusTimeline`), sprint membership (`SprintMembership`), and per-sprint time in status (`TimeInStatus`), with 24 xUnit tests. The tests were verified with a stand-in runner, not real xUnit; the first `dotnet test` on the laptop is the real run.
+Interval math (`Interval`), business-day calendar (`BusinessCalendar`), status timelines (`StatusTimeline`), sprint membership (`SprintMembership`), and per-sprint time in status (`TimeInStatus`), with 24 TUnit tests on .NET 11.
 
 Behaviors to preserve:
 

@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using Telltale.Core.Intervals;
 using static Telltale.Core.Tests.TestTime;
 
@@ -12,18 +13,19 @@ public class StatusTimelineTests
 
     private static readonly DateTimeOffset Created = Local(2026, 11, 2, 9);
 
-    [Fact]
-    public void An_issue_with_no_transitions_has_been_in_its_current_status_since_creation()
+    [Test]
+    public async Task An_issue_with_no_transitions_has_been_in_its_current_status_since_creation()
     {
         var timeline = StatusTimeline.Build(Created, ToDo, []);
 
-        var only = Assert.Single(timeline.Intervals);
-        Assert.Equal(new StatusInterval(ToDo, Created, null), only);
-        Assert.Empty(timeline.Anomalies);
+        await Assert.That(timeline.Intervals).HasSingleItem();
+        var only = timeline.Intervals.Single();
+        await Assert.That(only).IsEqualTo(new StatusInterval(ToDo, Created, null));
+        await Assert.That(timeline.Anomalies).IsEmpty();
     }
 
-    [Fact]
-    public void Transitions_become_back_to_back_intervals()
+    [Test]
+    public async Task Transitions_become_back_to_back_intervals()
     {
         var timeline = StatusTimeline.Build(Created, Done,
         [
@@ -39,24 +41,24 @@ public class StatusTimelineTests
             new StatusInterval(Review, Local(2026, 11, 4, 9), Local(2026, 11, 5, 9)),
             new StatusInterval(Done, Local(2026, 11, 5, 9), null),
         };
-        Assert.Equal(expected, timeline.Intervals);
-        Assert.Empty(timeline.Anomalies);
+        await Assert.That(timeline.Intervals).IsEquivalentTo(expected, CollectionOrdering.Matching);
+        await Assert.That(timeline.Anomalies).IsEmpty();
     }
 
-    [Fact]
-    public void Duplicate_history_entries_are_ignored()
+    [Test]
+    public async Task Duplicate_history_entries_are_ignored()
     {
         // The bulk changelog endpoint can return the same entry twice depending on page size.
         var move = new StatusChange("1", Local(2026, 11, 3, 9), ToDo, InProgress);
 
         var timeline = StatusTimeline.Build(Created, InProgress, [move, move]);
 
-        Assert.Equal(2, timeline.Intervals.Count);
-        Assert.Empty(timeline.Anomalies);
+        await Assert.That(timeline.Intervals.Count).IsEqualTo(2);
+        await Assert.That(timeline.Anomalies).IsEmpty();
     }
 
-    [Fact]
-    public void Changes_are_sorted_by_time_regardless_of_input_order()
+    [Test]
+    public async Task Changes_are_sorted_by_time_regardless_of_input_order()
     {
         var timeline = StatusTimeline.Build(Created, Review,
         [
@@ -64,12 +66,12 @@ public class StatusTimelineTests
             new StatusChange("1", Local(2026, 11, 3, 9), ToDo, InProgress),
         ]);
 
-        Assert.Equal(new[] { ToDo, InProgress, Review }, timeline.Intervals.Select(i => i.StatusId));
-        Assert.Empty(timeline.Anomalies);
+        await Assert.That(timeline.Intervals.Select(i => i.StatusId)).IsEquivalentTo(new[] { ToDo, InProgress, Review }, CollectionOrdering.Matching);
+        await Assert.That(timeline.Anomalies).IsEmpty();
     }
 
-    [Fact]
-    public void Changes_at_the_same_instant_are_ordered_by_numeric_history_id()
+    [Test]
+    public async Task Changes_at_the_same_instant_are_ordered_by_numeric_history_id()
     {
         var sameMoment = Local(2026, 11, 3, 9);
 
@@ -80,12 +82,12 @@ public class StatusTimelineTests
         ]);
 
         // "9" comes before "10", so In Progress lasts zero time and is dropped.
-        Assert.Equal(new[] { ToDo, Review }, timeline.Intervals.Select(i => i.StatusId));
-        Assert.Empty(timeline.Anomalies);
+        await Assert.That(timeline.Intervals.Select(i => i.StatusId)).IsEquivalentTo(new[] { ToDo, Review }, CollectionOrdering.Matching);
+        await Assert.That(timeline.Anomalies).IsEmpty();
     }
 
-    [Fact]
-    public void Returning_to_a_status_gives_it_a_second_interval()
+    [Test]
+    public async Task Returning_to_a_status_gives_it_a_second_interval()
     {
         var timeline = StatusTimeline.Build(Created, Review,
         [
@@ -94,11 +96,11 @@ public class StatusTimelineTests
             new StatusChange("3", Local(2026, 11, 5, 9), InProgress, Review),
         ]);
 
-        Assert.Equal(2, timeline.Intervals.Count(i => i.StatusId == Review));
+        await Assert.That(timeline.Intervals.Count(i => i.StatusId == Review)).IsEqualTo(2);
     }
 
-    [Fact]
-    public void A_change_that_does_not_match_the_timeline_is_reported_but_followed()
+    [Test]
+    public async Task A_change_that_does_not_match_the_timeline_is_reported_but_followed()
     {
         var timeline = StatusTimeline.Build(Created, Done,
         [
@@ -106,20 +108,22 @@ public class StatusTimelineTests
             new StatusChange("2", Local(2026, 11, 4, 9), Review, Done),
         ]);
 
-        Assert.Equal(Done, timeline.Intervals[^1].StatusId);
-        var anomaly = Assert.Single(timeline.Anomalies);
-        Assert.Contains("History 2", anomaly);
+        await Assert.That(timeline.Intervals[^1].StatusId).IsEqualTo(Done);
+        await Assert.That(timeline.Anomalies).HasSingleItem();
+        var anomaly = timeline.Anomalies.Single();
+        await Assert.That(anomaly).Contains("History 2");
     }
 
-    [Fact]
-    public void Ending_in_a_different_status_than_the_issue_is_reported()
+    [Test]
+    public async Task Ending_in_a_different_status_than_the_issue_is_reported()
     {
         var timeline = StatusTimeline.Build(Created, Done,
         [
             new StatusChange("1", Local(2026, 11, 3, 9), ToDo, InProgress),
         ]);
 
-        var anomaly = Assert.Single(timeline.Anomalies);
-        Assert.Contains("current status", anomaly);
+        await Assert.That(timeline.Anomalies).HasSingleItem();
+        var anomaly = timeline.Anomalies.Single();
+        await Assert.That(anomaly).Contains("current status");
     }
 }

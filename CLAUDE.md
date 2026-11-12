@@ -9,7 +9,8 @@ Start with `docs/context/handoff.md`: it explains where this project came from, 
 - **Runs on one developer laptop** (Windows, corporate managed) for the first 3–4 sprints. AWS comes later, only after buy-in. Keep the host thin so moving is a new host, not a rewrite.
 - **Corporate network**: outbound HTTPS goes through an intercepting proxy. HTTP clients must use the system proxy and trust the corporate root certificate.
 - **Secrets** (Jira, GitHub, Confluence tokens, hashing salt) live in Windows Credential Manager or DPAPI-protected storage. Never in config files or the repo.
-- **.NET 10**, C#, nullable enabled, warnings as errors.
+- **.NET 11**, C# 15, nullable enabled, warnings as errors. Use union types and other C# 15 / .NET 11 features where they make the code clearer.
+- **Tests use TUnit**, not xUnit.
 - **Company data stays on company systems.** Never move Jira, GitHub or session data to personal accounts or services.
 
 ## Non-negotiables

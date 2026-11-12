@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using Telltale.Core.Intervals;
 using static Telltale.Core.Tests.TestTime;
 
@@ -21,8 +22,8 @@ public class TimeInStatusTests
         new(Done, Local(2026, 11, 10, 15), null),
     ];
 
-    [Fact]
-    public void Status_time_is_clipped_to_when_the_issue_was_in_the_sprint()
+    [Test]
+    public async Task Status_time_is_clipped_to_when_the_issue_was_in_the_sprint()
     {
         // Added to the sprint on Wednesday Nov 4 at 09:00, two days after it started.
         MembershipInterval[] membership = [new("41", Local(2026, 11, 4, 9), null)];
@@ -30,32 +31,32 @@ public class TimeInStatusTests
         var result = TimeInStatus.ForSprint(Sprint41, Statuses, membership, TeamCalendar(), AsOf);
 
         // In Progress, Wed 09:00 to Mon 09:00: 15h Wed + 24h Thu + 24h Fri + weekend + 9h Mon.
-        Assert.Equal(TimeSpan.FromDays(5), result[InProgress].CalendarTime);
-        Assert.Equal(TimeSpan.FromHours(72), result[InProgress].BusinessTime);
-        Assert.Equal(3.0, result[InProgress].BusinessDays, 6);
+        await Assert.That(result[InProgress].CalendarTime).IsEqualTo(TimeSpan.FromDays(5));
+        await Assert.That(result[InProgress].BusinessTime).IsEqualTo(TimeSpan.FromHours(72));
+        await Assert.That(result[InProgress].BusinessDays).IsEqualTo(3.0).Within(0.000001);
 
         // Review, Mon 09:00 to Tue 15:00.
-        Assert.Equal(TimeSpan.FromHours(30), result[Review].BusinessTime);
-        Assert.Equal(1.25, result[Review].BusinessDays, 6);
+        await Assert.That(result[Review].BusinessTime).IsEqualTo(TimeSpan.FromHours(30));
+        await Assert.That(result[Review].BusinessDays).IsEqualTo(1.25).Within(0.000001);
 
         // Done, Tue 15:00 until the sprint completed Fri 17:00: 9h + 24h + 24h + 17h.
-        Assert.Equal(TimeSpan.FromHours(74), result[Done].BusinessTime);
-        Assert.Equal(74 / 24.0, result[Done].BusinessDays, 6);
+        await Assert.That(result[Done].BusinessTime).IsEqualTo(TimeSpan.FromHours(74));
+        await Assert.That(result[Done].BusinessDays).IsEqualTo(74 / 24.0).Within(0.000001);
     }
 
-    [Fact]
-    public void An_issue_removed_mid_sprint_only_counts_while_it_was_a_member()
+    [Test]
+    public async Task An_issue_removed_mid_sprint_only_counts_while_it_was_a_member()
     {
         MembershipInterval[] membership = [new("41", Local(2026, 11, 2, 9), Local(2026, 11, 3, 9))];
 
         var result = TimeInStatus.ForSprint(Sprint41, Statuses, membership, TeamCalendar(), AsOf);
 
-        Assert.Equal(new[] { InProgress }, result.Keys);
-        Assert.Equal(1.0, result[InProgress].BusinessDays, 6);
+        await Assert.That(result.Keys).IsEquivalentTo(new[] { InProgress }, CollectionOrdering.Matching);
+        await Assert.That(result[InProgress].BusinessDays).IsEqualTo(1.0).Within(0.000001);
     }
 
-    [Fact]
-    public void An_active_sprint_runs_until_as_of()
+    [Test]
+    public async Task An_active_sprint_runs_until_as_of()
     {
         var active = Sprint41 with { Completed = null };
         var asOfTuesday = Local(2026, 11, 10, 12);
@@ -63,17 +64,17 @@ public class TimeInStatusTests
 
         var result = TimeInStatus.ForSprint(active, Statuses, membership, TeamCalendar(), asOfTuesday);
 
-        Assert.Equal(TimeSpan.FromHours(27), result[Review].BusinessTime);
-        Assert.False(result.ContainsKey(Done));
+        await Assert.That(result[Review].BusinessTime).IsEqualTo(TimeSpan.FromHours(27));
+        await Assert.That(result.ContainsKey(Done)).IsFalse();
     }
 
-    [Fact]
-    public void Membership_in_another_sprint_is_ignored()
+    [Test]
+    public async Task Membership_in_another_sprint_is_ignored()
     {
         MembershipInterval[] membership = [new("42", Local(2026, 11, 2, 9), null)];
 
         var result = TimeInStatus.ForSprint(Sprint41, Statuses, membership, TeamCalendar(), AsOf);
 
-        Assert.Empty(result);
+        await Assert.That(result).IsEmpty();
     }
 }
