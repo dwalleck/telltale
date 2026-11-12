@@ -200,7 +200,7 @@ public static class SprintReport
             .Append("- Cycle time runs from an issue's first entry into a work status to its last entry into a done status, for delivered issues only. It belongs to the sprint in which the issue was delivered.\n")
             .Append("- Figures are medians and P85s. The median is the middle value, or the mean of the two middle values. The P85 is the smallest value with at least 85% of the values at or below it.\n")
             .Append("- Time in status covers the statuses before done. An issue counts toward a status only if it spent more than zero business days there.\n")
-            .Append("- A figure is shown only where it cannot show one person's work. The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in it. When the team is smaller than five, the delivered count and both tables read \"suppressed\", with no rows. With a team of five or more, a row with fewer than three distinct assignees behind it keeps its issue count and reads \"suppressed\" for its figures, and the delivered count reads \"suppressed\" when fewer than three distinct assignees are among the delivered issues. The footer's two counts read \"suppressed\" when the issues in the whole store have fewer than five distinct assignees.\n")
+            .Append("- A figure is shown only where it cannot show one person's work. The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in it. When the team is smaller than five, the delivered count and both tables read \"suppressed\", with no rows. With a team of five or more, a row with fewer than three distinct assignees behind it keeps its issue count and reads \"suppressed\" for its figures, and the delivered count reads \"suppressed\" when fewer than three distinct assignees are among the delivered issues. The footer's two counts read \"suppressed\" when the issues in the whole store have fewer than five distinct assignees, or fewer than three are among the issues counted.\n")
             .Append("- An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. An unassigned issue counts toward nobody.\n");
 
         // Said only when there is a baseline: without one the report has no baseline column to explain.
@@ -217,7 +217,8 @@ public static class SprintReport
     /// <summary>
     /// The data-quality footer. Its two counts cover the whole store, not the sprint: an issue delivered
     /// between sprints belongs to no sprint. They are counts only: no issue is named. The view withholds
-    /// them when the whole store has fewer than five distinct assignees.
+    /// them when the whole store has fewer than five distinct assignees, or fewer than three are among the
+    /// issues a count covers.
     /// </summary>
     private static void AppendFooter(StringBuilder report, DataQualityRow quality)
     {

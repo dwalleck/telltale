@@ -14,8 +14,8 @@ SELECT w.sprint_id,
        w.started,
        w.ended,
        s.planned_end,
-       CASE WHEN t.suppressed = 0 AND COUNT(DISTINCT i.assignee_hash) >= 3 THEN COUNT(c.issue_id) END AS delivered_count,
-       CASE WHEN t.suppressed = 0 AND COUNT(DISTINCT i.assignee_hash) >= 3 THEN 0 ELSE 1 END          AS suppressed,
+       CASE WHEN t.suppressed = 0 AND COUNT(DISTINCT i.assignee_hash) >= (SELECT assignees_behind_a_figure FROM minimum_group_size) THEN COUNT(c.issue_id) END AS delivered_count,
+       CASE WHEN t.suppressed = 0 AND COUNT(DISTINCT i.assignee_hash) >= (SELECT assignees_behind_a_figure FROM minimum_group_size) THEN 0 ELSE 1 END          AS suppressed,
        t.suppressed  AS team_suppressed
 FROM sprint_window w
 JOIN sprint s ON s.sprint_id = w.sprint_id

@@ -44,11 +44,11 @@ bucket AS (
 SELECT b.sprint_id,
        b.point_bucket,
        b.issue_count,
-       CASE WHEN b.assignees >= 3 THEN b.median_business_days END AS median_business_days,
-       CASE WHEN b.assignees >= 3 THEN b.p85_business_days END    AS p85_business_days,
-       CASE WHEN b.assignees >= 3 THEN b.median_calendar_days END AS median_calendar_days,
-       CASE WHEN b.assignees >= 3 THEN b.p85_calendar_days END    AS p85_calendar_days,
-       CASE WHEN b.assignees >= 3 THEN 0 ELSE 1 END               AS suppressed
+       CASE WHEN b.assignees >= (SELECT assignees_behind_a_figure FROM minimum_group_size) THEN b.median_business_days END AS median_business_days,
+       CASE WHEN b.assignees >= (SELECT assignees_behind_a_figure FROM minimum_group_size) THEN b.p85_business_days END    AS p85_business_days,
+       CASE WHEN b.assignees >= (SELECT assignees_behind_a_figure FROM minimum_group_size) THEN b.median_calendar_days END AS median_calendar_days,
+       CASE WHEN b.assignees >= (SELECT assignees_behind_a_figure FROM minimum_group_size) THEN b.p85_calendar_days END    AS p85_calendar_days,
+       CASE WHEN b.assignees >= (SELECT assignees_behind_a_figure FROM minimum_group_size) THEN 0 ELSE 1 END               AS suppressed
 FROM bucket b
 -- An inner join: an issue delivered between sprints has no sprint, so it is in no row.
 JOIN sprint_team t ON t.sprint_id = b.sprint_id

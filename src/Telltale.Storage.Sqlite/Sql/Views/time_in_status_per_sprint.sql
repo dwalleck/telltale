@@ -37,8 +37,8 @@ SELECT st.sprint_id,
        COALESCE(s.name, st.status_id) AS status_name,
        b.position                     AS board_position,
        st.issue_count,
-       CASE WHEN st.assignees >= 3 THEN st.median_business_days END AS median_business_days,
-       CASE WHEN st.assignees >= 3 THEN 0 ELSE 1 END                AS suppressed
+       CASE WHEN st.assignees >= (SELECT assignees_behind_a_figure FROM minimum_group_size) THEN st.median_business_days END AS median_business_days,
+       CASE WHEN st.assignees >= (SELECT assignees_behind_a_figure FROM minimum_group_size) THEN 0 ELSE 1 END                AS suppressed
 FROM status_time st
 JOIN sprint_team t ON t.sprint_id = st.sprint_id
 JOIN board_status b ON b.status_id = st.status_id
