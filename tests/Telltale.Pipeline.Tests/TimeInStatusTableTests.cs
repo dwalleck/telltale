@@ -211,6 +211,29 @@ public class TimeInStatusTableTests
     }
 
     [Test]
+    public async Task A_median_that_is_not_a_round_number_is_shown_to_one_decimal_place()
+    {
+        // B14 of the final review: every other median in these tests is exact to one decimal.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+
+        // Five people's issues, in Development from the sprint's start (Monday 5 January 09:00): to Tuesday
+        // 09:00 twice (1 day), to Tuesday 18:00 (1.375 days) and to Wednesday 09:00 twice (2 days).
+        var left = new[] { Local(2026, 1, 6, 9), Local(2026, 1, 6, 9), Local(2026, 1, 6, 18), Local(2026, 1, 7, 9), Local(2026, 1, 7, 9) };
+        foreach (var (person, index) in People.Team.Select((person, index) => (person, index)))
+        {
+            pipeline.Jira.AddIssue($"FAKE-{index + 1}", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41).AssignedTo(person)
+                .Moved(left[index], Workflow.Done);
+        }
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(new[] { "| Fake Development | 5 | 1.4 |" }, CollectionOrdering.Matching);
+        var median = await pipeline.QueryAsync<double>("SELECT median_business_days FROM time_in_status_per_sprint WHERE sprint_id = '41';");
+        await Assert.That(median).IsEquivalentTo(new[] { 1.375 });
+    }
+
+    [Test]
     public async Task Time_in_shipped_is_stored_in_status_intervals_and_done_statuses_are_not_in_the_table()
     {
         await using var pipeline = new PipelineHarness();

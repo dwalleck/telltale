@@ -221,6 +221,20 @@ public class StoreTests
     }
 
     [Test]
+    public async Task A_query_over_the_views_opens_the_file_read_only_so_it_never_creates_one()
+    {
+        // B14 of the final review: the guard refuses a write before the connection would, so a write no
+        // longer shows that the connection is read-only. What still does: a connection that could write
+        // creates a missing database file when it opens, and a read-only one cannot open it.
+        await using var pipeline = new PipelineHarness();
+        var store = new SqliteStore(pipeline.DatabasePath);
+
+        await Assert.That(async () => await store.QueryViewsAsync<long>("SELECT COUNT(*) FROM delivered_per_sprint;")).Throws<SqliteException>();
+
+        await Assert.That(File.Exists(pipeline.DatabasePath)).IsFalse();
+    }
+
+    [Test]
     public async Task The_store_itself_refuses_a_batch_added_under_another_salt_than_its_people_were_hashed_with()
     {
         // B10 of the final review: the collector checks the salt before it fetches, but the store is where
