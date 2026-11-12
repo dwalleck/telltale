@@ -15,3 +15,4 @@ replace: |-
 Claim: migrations are applied by name, each one that is not recorded, so a script numbered below one a store already applied still runs when it arrives (0004 of ticket 06 after 0005 of the cross-ticket fixes), and a gap in the numbers is accepted.
 The test `A_migration_numbered_below_one_already_applied_is_still_applied_and_a_gap_in_the_numbers_is_accepted` passed when it was written: it records what the runner already did.
 - Verified 2026-11-12 at 3b6c271: red, 1 failed of 7 (Pipeline, filter /*/*/StoreTests/*); restored.
+- Verified 2026-11-12 at 4af92da: red, 1 failed of 22 (Pipeline, filter /*/*/StoreTests/*); restored.
