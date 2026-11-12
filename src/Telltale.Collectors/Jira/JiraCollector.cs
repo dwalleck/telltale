@@ -43,6 +43,10 @@ public sealed class JiraCollector
     // is reported to cap a page near 100 (undocumented), so more is not asked for.
     // Bulk changelog: the documented maximum.
     private const int SearchPageSize = 100;
+
+    // The most pages read from one token-paged list: 200,000 issues at the search's page size, far more than
+    // a team's board holds. Whether a real site can need more is confirmed on the work laptop (ticket 13).
+    private const int MaxPagesPerList = 2000;
     private const int ChangelogPageSize = 10000;
 
     // The status field's ID, which is also the name old history gives it, and the Sprint field's name there.
@@ -507,13 +511,22 @@ public sealed class JiraCollector
     private static async Task ForEachPageAsync(JiraClient jira, string relativeUrl, JsonObject body, string what, Func<JsonElement, int> read, CancellationToken cancellationToken)
     {
         var tokens = new HashSet<string>(StringComparer.Ordinal);
-        while (true)
+        for (var page = 1; ; page++)
         {
             using var document = await jira.PostAsync(relativeUrl, body, cancellationToken);
             var (entries, next) = Read(what, () => (read(document.RootElement), NextPageToken(document.RootElement, what)));
             if (next is null)
             {
                 return;
+            }
+
+            // A site that gives a new token and a page that is not empty every time passes the two checks
+            // below for ever.
+            if (page == MaxPagesPerList)
+            {
+                throw new UserFacingException(
+                    $"Jira's {what} gave {MaxPagesPerList.ToString(CultureInfo.InvariantCulture)} pages and says more follow. "
+                    + "This tool reads no more than that from one list, so that a list without an end cannot keep it running. Nothing was stored.");
             }
 
             // A site that keeps giving new tokens and nothing else would otherwise be asked forever.

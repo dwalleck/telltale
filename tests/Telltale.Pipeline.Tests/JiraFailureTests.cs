@@ -147,6 +147,32 @@ public class JiraFailureTests
     }
 
     [Test]
+    public async Task An_issue_search_that_gives_a_new_token_and_a_full_page_without_end_stops_at_a_page_limit()
+    {
+        // B15 of the final review: a new token and a page that is not empty every time passes the other two
+        // checks for ever.
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        // It refuses after 2100 pages, so a tool that kept asking fails the test with the refusal instead of hanging it.
+        var page = 0;
+        pipeline.Jira.Handler.Override(HttpMethod.Post, "/rest/api/3/search/jql", _ => true, request =>
+        {
+            var number = Interlocked.Increment(ref page);
+            var answer = """{"issues":[{"id":"900009","fields":{"issuetype":{"id":"800003","hierarchyLevel":1}}}],"nextPageToken":"FAKE_TOKEN_PAGE_NUMBER","isLast":false}"""
+                .Replace("NUMBER", number.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
+            return number <= 2100 ? StubHttpHandler.Json(answer)(request) : StubHttpHandler.Json("{}", HttpStatusCode.InternalServerError)(request);
+        });
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira's issue search gave 2000 pages and says more follow. This tool reads no more than that from one list, so that a list without an end cannot keep it running. Nothing was stored.\n");
+        await Assert.That(pipeline.Jira.Handler.Requests.Count(request => request.Path == "/rest/api/3/search/jql")).IsEqualTo(2000);
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM issue;")).IsEquivalentTo(new[] { 0L });
+    }
+
+    [Test]
     [Arguments(
         """{"issueChangeLogs":[],"nextPageToken":"FAKE_CHANGELOG_TOKEN_2"}""",
         "Jira's bulk changelog gave an empty page and says more follow, so entries could be missing. Nothing was stored.\n")]
