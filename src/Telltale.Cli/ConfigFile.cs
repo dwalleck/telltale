@@ -41,6 +41,20 @@ public static class ConfigFile
                 throw new UserFacingException($"The configuration file {path} is not valid: jira.siteUrl must be an absolute https:// address.");
             }
 
+            if (config.Jira.ProjectKeys is not { Count: > 0 })
+            {
+                throw new UserFacingException($"The configuration file {path} is not valid: jira.projectKeys must list at least one project key.");
+            }
+
+            try
+            {
+                JiraProjectKey.RequireValid(config.Jira.ProjectKeys);
+            }
+            catch (FormatException exception)
+            {
+                throw new UserFacingException($"The configuration file {path} is not valid: jira.projectKeys: {exception.Message}", exception);
+            }
+
             return config;
         }
         catch (JsonException exception)

@@ -53,6 +53,7 @@ public sealed class PipelineHarness : IAsyncDisposable
         {
             ["siteUrl"] = FakeJira.SiteUrl,
             ["boardId"] = FakeJira.BoardId,
+            ["projectKeys"] = new JsonArray(FakeJira.ProjectKey),
             ["storyPointFieldId"] = FakeJira.StoryPointFieldId,
             ["backfillStart"] = "2025-01-01",
         },

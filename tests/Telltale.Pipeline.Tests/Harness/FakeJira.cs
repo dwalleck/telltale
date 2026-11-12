@@ -130,7 +130,6 @@ public sealed class FakeJira
     public const string SprintFieldId = "customfield_10020";
     public const string StoryPointFieldId = "customfield_10016";
     public const string IssueTypeStoryId = "800001";
-    public const string ProjectName = "Fake Project Name that must never be stored";
     public const string ResolutionDescription = "Synthetic resolution description that must never be stored";
     public const string StatusDescription = "Synthetic status description that must never be stored";
 
@@ -144,7 +143,6 @@ public sealed class FakeJira
     public FakeJira()
     {
         Handler = new StubHttpHandler()
-            .On(HttpMethod.Get, $"/rest/agile/1.0/board/{BoardId}/project", _ => Respond(BoardProjects()))
             .On(HttpMethod.Get, $"/rest/agile/1.0/board/{BoardId}/sprint", _ => Respond(Sprints()))
             .On(HttpMethod.Get, "/rest/api/3/status", _ => Respond(Statuses()))
             .On(HttpMethod.Post, "/rest/api/3/search/jql", _ => Respond(Search()))
@@ -173,7 +171,7 @@ public sealed class FakeJira
     /// <summary>
     /// Every piece of personal or free text the site can serve: account IDs, display names and emails
     /// (assignees and changelog authors alike), issue summaries and descriptions, sprint goals, and the
-    /// project name and the resolution and status descriptions. None of it may appear in the database,
+    /// resolution and status descriptions. None of it may appear in the database,
     /// a report or the console output.
     /// </summary>
     public IReadOnlyList<string> ForbiddenText =>
@@ -181,7 +179,6 @@ public sealed class FakeJira
         .. People.All.SelectMany(person => new[] { person.AccountId, person.DisplayName, person.Email }),
         .. Issues.SelectMany(issue => new[] { issue.Summary, issue.Description }),
         .. SprintList().Select(sprint => sprint.Goal),
-        ProjectName,
         ResolutionDescription,
         StatusDescription,
     ];
@@ -256,23 +253,6 @@ public sealed class FakeJira
         BeforeResponse?.Invoke();
         return new(HttpStatusCode.OK) { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
     }
-
-    private static JsonObject BoardProjects() => new()
-    {
-        ["maxResults"] = 50,
-        ["startAt"] = 0,
-        ["total"] = 1,
-        ["isLast"] = true,
-        ["values"] = new JsonArray(new JsonObject
-        {
-            ["self"] = $"{SiteUrl}rest/api/3/project/{ProjectKey}",
-            ["id"] = "100001",
-            ["key"] = ProjectKey,
-            ["name"] = ProjectName,
-            ["projectTypeKey"] = "software",
-            ["simplified"] = false,
-        }),
-    };
 
     private JsonObject Sprints()
     {

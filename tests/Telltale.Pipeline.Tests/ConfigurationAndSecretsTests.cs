@@ -74,6 +74,78 @@ public class ConfigurationAndSecretsTests
     }
 
     [Test]
+    [Arguments("missing")]
+    [Arguments("null")]
+    [Arguments("empty")]
+    public async Task A_configuration_without_project_keys_is_refused_and_names_the_setting(string how)
+    {
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        var jira = pipeline.Config["jira"]!.AsObject();
+        switch (how)
+        {
+            case "missing":
+                jira.Remove("projectKeys");
+                break;
+            case "null":
+                jira["projectKeys"] = null;
+                break;
+            default:
+                jira["projectKeys"] = new System.Text.Json.Nodes.JsonArray();
+                break;
+        }
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid").And.Contains("projectKeys");
+        await Assert.That(pipeline.Error.ToString()).DoesNotContain("   at ");
+        await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
+    }
+
+    [Test]
+    [Arguments("FAKE\") OR project = \"SECRET")]
+    [Arguments("FAKE\"")]
+    [Arguments("FAKE, SECRET")]
+    [Arguments("fake")]
+    [Arguments(" FAKE")]
+    [Arguments("1FAKE")]
+    [Arguments("")]
+    public async Task A_project_key_that_is_not_in_jiras_key_form_is_refused_before_any_search(string key)
+    {
+        // The keys are written into the JQL, so only text that can be nothing but a key is accepted.
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config["jira"]!["projectKeys"] = new System.Text.Json.Nodes.JsonArray("FAKE", key);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains(
+            $"telltale.json is not valid: jira.projectKeys: '{key}' is not a Jira project key (an upper-case letter followed by upper-case letters, digits or underscores).");
+        await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
+    }
+
+    [Test]
+    [Arguments("FAKE")]
+    [Arguments("F2")]
+    [Arguments("FAKE_TEAM9")]
+    public async Task A_project_key_in_jiras_key_form_is_accepted(string key)
+    {
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config["jira"]!["projectKeys"] = new System.Text.Json.Nodes.JsonArray(key);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        var search = pipeline.Jira.Handler.Requests.Single(request => request.Path == "/rest/api/3/search/jql");
+        using var body = System.Text.Json.JsonDocument.Parse(search.Body);
+        await Assert.That(body.RootElement.GetProperty("jql").GetString()).StartsWith($"project in (\"{key}\") AND ");
+    }
+
+    [Test]
     public async Task A_status_role_map_with_no_done_status_is_refused()
     {
         await using var pipeline = new PipelineHarness();

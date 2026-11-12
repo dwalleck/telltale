@@ -26,6 +26,9 @@ public sealed record JiraConfig
     /// <summary>The team's Scrum board.</summary>
     public required long BoardId { get; init; }
 
+    /// <summary>The keys of the board's projects, e.g. <c>PAY</c>. Issues are searched in these projects only.</summary>
+    public required IReadOnlyList<string> ProjectKeys { get; init; }
+
     /// <summary>The story point custom field, e.g. <c>customfield_10016</c>.</summary>
     public required string StoryPointFieldId { get; init; }
 

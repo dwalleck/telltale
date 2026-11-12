@@ -115,7 +115,7 @@ public class JiraFailureTests
     [Test]
     public async Task The_production_http_handler_offers_the_signed_in_users_credentials_to_the_system_proxy()
     {
-        var handler = Telltale.Cli.AppServices.ForProduction().HttpHandler;
+        using var handler = Telltale.Cli.AppServices.ForProduction().HttpHandler;
 
         await Assert.That(handler).IsTypeOf<SocketsHttpHandler>();
         var sockets = (SocketsHttpHandler)handler;
@@ -168,17 +168,21 @@ public class JiraFailureTests
     }
 
     [Test]
-    public async Task The_issue_search_is_bounded_to_the_boards_project_and_asks_for_no_free_text()
+    public async Task The_issue_search_is_bounded_to_the_configured_projects_and_asks_for_no_free_text()
     {
         await using var pipeline = new PipelineHarness();
         AddSprintAndIssue(pipeline.Jira);
+        pipeline.Config["jira"]!["projectKeys"] = new System.Text.Json.Nodes.JsonArray("FAKE", "OTHER2");
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
         var search = pipeline.Jira.Handler.Requests.Single(request => request.Path == "/rest/api/3/search/jql");
         using var body = System.Text.Json.JsonDocument.Parse(search.Body);
         await Assert.That(body.RootElement.GetProperty("jql").GetString())
-            .IsEqualTo("project in (\"FAKE\") AND updated >= \"2025-01-01\" ORDER BY updated ASC");
+            .IsEqualTo("project in (\"FAKE\", \"OTHER2\") AND updated >= \"2025-01-01\" ORDER BY updated ASC");
+
+        // The project keys are configuration (owner decision D2): Jira is not asked for the board's projects.
+        await Assert.That(pipeline.Jira.Handler.Requests.Select(request => request.Path)).DoesNotContain($"/rest/agile/1.0/board/{FakeJira.BoardId}/project");
         var fields = body.RootElement.GetProperty("fields").EnumerateArray().Select(field => field.GetString()!).ToList();
         await Assert.That(body.RootElement.GetProperty("maxResults").GetInt32()).IsEqualTo(5000);
         await Assert.That(fields).IsEquivalentTo(new[] { "issuetype", "status", "resolution", "assignee", "created", "updated", FakeJira.StoryPointFieldId });

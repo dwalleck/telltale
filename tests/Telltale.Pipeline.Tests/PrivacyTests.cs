@@ -77,11 +77,10 @@ public class PrivacyTests
         await Assert.That(forbidden).Contains(pipeline.Jira.Issues[0].Description);
 
         // Free text and people the fake serves beyond the assignee: the changelog authors, the sprint goal,
-        // the project name and the resolution and status descriptions.
+        // and the resolution and status descriptions.
         await Assert.That(forbidden).Contains(People.Three.DisplayName);
         await Assert.That(forbidden).Contains(People.BoardAdmin.AccountId);
         await Assert.That(forbidden).Contains("Synthetic goal of sprint 41 that must never be stored");
-        await Assert.That(forbidden).Contains(FakeJira.ProjectName);
         await Assert.That(forbidden).Contains(FakeJira.ResolutionDescription);
         await Assert.That(forbidden).Contains(FakeJira.StatusDescription);
 

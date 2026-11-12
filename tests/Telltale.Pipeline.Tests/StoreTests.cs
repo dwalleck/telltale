@@ -32,7 +32,7 @@ public class StoreTests
         await pipeline.RunAsync("run", "--sprint", "41");
         var store = new SqliteStore(pipeline.DatabasePath);
 
-        await Assert.That(async () => await store.QueryViewsAsync<long>("DELETE FROM issue_cycle RETURNING 1;")).Throws<SqliteException>();
+        await Assert.That(async () => await store.QueryViewsAsync<long>("DELETE FROM issue_cycle RETURNING 1;")).Throws<SqliteException>().WithMessageContaining("readonly");
 
         var rows = await pipeline.QueryAsync<(string SprintId, long DeliveredCount)>("SELECT sprint_id, delivered_count FROM delivered_per_sprint;");
         await Assert.That(rows).IsEquivalentTo(new[] { ("41", 1L) });

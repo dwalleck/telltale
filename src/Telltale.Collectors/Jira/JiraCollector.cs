@@ -11,7 +11,7 @@ namespace Telltale.Collectors.Jira;
 
 /// <summary>
 /// Brings the store up to date with the configured Jira board: its sprints and statuses, the issues
-/// of the board's projects, and each issue's status history from the bulk changelog endpoint
+/// of the configured projects, and each issue's status history from the bulk changelog endpoint
 /// (ADR-0004). Only selected fields are kept (ADR-0002), and the assignee's account ID is hashed
 /// before anything leaves this class (ADR-0003).
 /// </summary>
@@ -43,8 +43,7 @@ public sealed class JiraCollector
 
         var statuses = await FetchStatusesAsync(jira, cancellationToken);
         var sprints = await FetchSprintsAsync(jira, cancellationToken);
-        var projectKeys = await FetchBoardProjectKeysAsync(jira, cancellationToken);
-        var issues = await FetchIssuesAsync(jira, projectKeys, salt, cancellationToken);
+        var issues = await FetchIssuesAsync(jira, salt, cancellationToken);
         var changes = await FetchChangesAsync(jira, issues, cancellationToken);
 
         await store.WriteRawAsync(new RawData(issues, changes, sprints, statuses), cancellationToken);
@@ -83,24 +82,13 @@ public sealed class JiraCollector
             OptionalTime(sprint, "completeDate")))];
     }
 
-    private async Task<List<string>> FetchBoardProjectKeysAsync(JiraClient jira, CancellationToken cancellationToken)
-    {
-        using var document = await jira.GetAsync($"rest/agile/1.0/board/{_config.BoardId}/project", cancellationToken);
-        RequireSinglePage(document.RootElement, "list of the board's projects");
-
-        var keys = Read<List<string>>("list of the board's projects", () => [.. document.RootElement.GetProperty("values").EnumerateArray().Select(project => project.GetProperty("key").GetString()!)]);
-        if (keys.Count == 0)
-        {
-            throw new UserFacingException($"Jira lists no projects for board {_config.BoardId}. Check the board ID and that the account can see the board.");
-        }
-
-        return keys;
-    }
-
-    private async Task<List<RawIssue>> FetchIssuesAsync(JiraClient jira, List<string> projectKeys, string salt, CancellationToken cancellationToken)
+    private async Task<List<RawIssue>> FetchIssuesAsync(JiraClient jira, string salt, CancellationToken cancellationToken)
     {
         // A JQL date is read in the calling user's time zone, so the bound is a whole day, not an instant.
-        var projects = string.Join(", ", projectKeys.Select(key => $"\"{key}\""));
+        // The project keys come from the configuration, not from Jira (owner decision D2). They are checked
+        // again here, where they enter the JQL, so no caller can pass text that is more than a key.
+        JiraProjectKey.RequireValid(_config.ProjectKeys);
+        var projects = string.Join(", ", _config.ProjectKeys.Select(key => $"\"{key}\""));
         var body = new JsonObject
         {
             ["jql"] = $"project in ({projects}) AND updated >= \"{_config.BackfillStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}\" ORDER BY updated ASC",

@@ -9,14 +9,14 @@ public class SkippingClockTests
     private static readonly DateTimeOffset Start = Local(2026, 2, 3, 12);
 
     [Test]
-    public async Task A_delay_completes_without_real_waiting_is_recorded_and_moves_now_by_exactly_the_delay()
+    public async Task A_delay_is_complete_at_once_is_recorded_and_moves_now_by_exactly_the_delay()
     {
         var clock = new SkippingClock(Start);
 
         var delay = Task.Delay(TimeSpan.FromSeconds(30), clock);
-        var finishedFirst = await Task.WhenAny(delay, Task.Delay(TimeSpan.FromSeconds(10)));
 
-        await Assert.That(finishedFirst).IsSameReferenceAs(delay);
+        // Already complete when Task.Delay returns: no real time is involved, so nothing here can be slow or flaky.
+        await Assert.That(delay.IsCompletedSuccessfully).IsTrue();
         await Assert.That(clock.Waits).IsEquivalentTo(new[] { TimeSpan.FromSeconds(30) });
         await Assert.That(clock.GetUtcNow()).IsEqualTo(Start.AddSeconds(30));
     }
