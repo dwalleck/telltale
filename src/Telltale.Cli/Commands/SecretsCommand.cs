@@ -86,11 +86,16 @@ internal static class SecretsCommand
     }
 
     /// <summary>
-    /// A different salt gives every person a different hash. So without <c>--replace</c>, a stored salt is
-    /// kept, and a new one is not generated while the database holds people hashed with a salt that has since
-    /// gone missing. Typing a salt in that case is allowed: it is how the original is restored.
-    /// A stored salt that cannot be read is no reason to stop: the message about it says to set it again.
-    /// Only when the database holds hashed people does it count as a stored salt, which <c>--replace</c> replaces.
+    /// A different salt gives every person a different hash. So without <c>--replace</c>:
+    /// <list type="bullet">
+    /// <item>a stored salt is kept;</item>
+    /// <item>with no salt stored and hashed people in the database (the salt went missing), a new one is not
+    /// generated, and typing one is allowed: it is how the original is restored;</item>
+    /// <item>a stored salt that was read and is not usable text is overwritten when the database holds no
+    /// hashed people, since the message about it says to set it again; when it does, the command stops and
+    /// says how to restore the original and what any other salt costs.</item>
+    /// </list>
+    /// A read that failed is none of these: it is reported as it is, because the salt may be there and good.
     /// </summary>
     private static async Task RefuseToSplitPeopleAsync(AppServices services, IWritableSecretStore store, SecretInfo salt, bool generate, CancellationToken cancellationToken)
     {
@@ -99,13 +104,14 @@ internal static class SecretsCommand
         {
             stored = store.Get(salt.Name);
         }
-        catch (UserFacingException)
+        catch (StoredSecretUnusableException)
         {
             if (await SqliteStore.HoldsHashedPeopleAsync(services.DatabasePath, cancellationToken))
             {
                 throw new UserFacingException(
-                    "The stored hashing salt cannot be read, and the database already holds people hashed with a salt. A different salt would give every person a second hash, "
-                    + "so each would count as two. To store a salt over the one that cannot be read, add --replace.");
+                    "The stored hashing salt is not text this tool stored, so it cannot be used, and the database already holds people hashed with a salt. "
+                    + $"Only that salt keeps each of them one person: to restore it, run 'telltale secrets set {salt.Argument} --replace' and type the original salt. "
+                    + "A new or generated salt stored with --replace makes every person count twice until a backfill.");
             }
 
             return;

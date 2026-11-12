@@ -200,8 +200,9 @@ public class CredentialManagerSecretStoreTests
     }
 
     private const string UnreadableSaltOverHashedPeople =
-        "The stored hashing salt cannot be read, and the database already holds people hashed with a salt. A different salt would give every person a second hash, "
-        + "so each would count as two. To store a salt over the one that cannot be read, add --replace.\n";
+        "The stored hashing salt is not text this tool stored, so it cannot be used, and the database already holds people hashed with a salt. "
+        + "Only that salt keeps each of them one person: to restore it, run 'telltale secrets set hashing-salt --replace' and type the original salt. "
+        + "A new or generated salt stored with --replace makes every person count twice until a backfill.\n";
 
     [Test]
     public async Task A_typed_salt_replaces_a_stored_one_that_cannot_be_read_over_hashed_people_only_with_the_replace_option()
@@ -257,17 +258,19 @@ public class CredentialManagerSecretStoreTests
     }
 
     [Test]
-    public async Task A_failure_to_read_the_stored_salt_does_not_stop_a_new_one_being_set()
+    public async Task A_failure_to_read_the_stored_salt_is_reported_as_that_and_nothing_is_stored()
     {
+        // A read that failed says nothing about what is stored: the salt may be there and good.
         await using var pipeline = new PipelineHarness();
-        var vault = UseVault(pipeline);
+        var vault = UseVault(pipeline, withAllSecrets: true);
         vault.ReadError = 5;
         pipeline.Console.TypeLine("synthetic-salt-three");
 
         var exit = await pipeline.RunAsync("secrets", "set", "hashing-salt");
 
-        await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(System.Text.Encoding.Unicode.GetString(vault.Entries[SaltEntry])).IsEqualTo("synthetic-salt-three");
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("Windows Credential Manager could not read the secret 'hashing salt'").And.Contains("(error 5)");
+        await Assert.That(System.Text.Encoding.Unicode.GetString(vault.Entries[SaltEntry])).IsEqualTo(PipelineHarness.HashingSalt);
     }
 
     /// <summary>Gives the commands the Credential Manager store over a stand-in vault, empty or holding the harness's three secrets.</summary>
