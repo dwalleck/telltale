@@ -2,14 +2,38 @@
 
 **What to build:** The collector handles what a real Jira Cloud site does at scale (ADR-0004): issue search and the bulk changelog endpoint are paged until their tokens run out; the board's sprint list is paged until its last page (owner decision, 2026-11-12); duplicate history entries are removed by history ID; a rate-limited response is retried after the server's stated delay, with a bounded number of retries; changelog timestamps with `+0000` offsets and missing field IDs on old history are parsed; and a backfill interrupted partway resumes without duplicating data.
 
+Owner decision (2026-11-12): a fetch is one batch. A run that fails midway stores nothing and leaves the watermark unchanged; "resumes" means running it again gives the same store as an uninterrupted run (D38).
+
 **Blocked by:** 09
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Issues and changelogs spread over several pages are all collected
-- [ ] A board whose sprints span several pages has all of them collected
-- [ ] The same history entry returned on two pages is stored once and changes no figure
-- [ ] A 429 response followed by success completes the sync, waiting the server's retry-after value (through the fixed clock, not real time)
-- [ ] Repeated 429s beyond the retry limit fail the run with a clear message and leave the watermark unchanged
-- [ ] A backfill that fails midway and is rerun ends with the same store as an uninterrupted one
-- [ ] Old-style history items with no field ID, and null from/to values, are handled
+- [x] Issues and changelogs spread over several pages are all collected
+- [x] A board whose sprints span several pages has all of them collected
+- [x] The same history entry returned on two pages is stored once and changes no figure
+- [x] A 429 response followed by success completes the sync, waiting the server's retry-after value (through the fixed clock, not real time)
+- [x] Repeated 429s beyond the retry limit fail the run with a clear message and leave the watermark unchanged
+- [x] A backfill that fails midway and is rerun ends with the same store as an uninterrupted one
+- [x] Old-style history items with no field ID, and null from/to values, are handled
+
+## Comments
+
+Resolved 2026-11-12. Merged into `spec/jira-flow-report` as bb3e6e7 (source `ticket/10-collection-survives-real-jira` at dfa8db5).
+
+- Checks: the merged tree equals the source tree, so the implementer's full check on dfa8db5 stands (record `ticket10-r1-record.json`, base 09e025b): Core 80 and Pipeline 451 passed, 0 failed, 0 skipped, 0 warnings, format and line endings pass. Line endings were checked again at merge.
+- Mutations: 22 records (10-m1 to 10-m22), all active and red: 10-m3, 10-m9, 10-m11 and 10-m12 at 568c883 (after the merge of ticket 04), the others at d2a2e16. None rerun at merge, because the merge changed no file relative to the source. Records of other tickets re-pointed to lines this ticket changed or moved, each with the same mutation, and rerun red: 01-m11 (the token is read in `NextPageToken`), 01-m27 (the total check, now in `OffsetPages`; its filter is `RealJiraCollectionTests`), 05-m3 (the `fieldIds` line names `StatusFieldId`; it still drops the Sprint field), 05-m18, 11-m2, 11-m23 and 11-m24 (discover's pager moved to `OffsetPages`), 11-m7 and 11-m8 (the client takes the clock and the notice writer). Ticket 04's 04-m4 to 04-m11 needed no change and ran red at 568c883. 01-m16 is stale: the "more than one page" stop of the sprint list no longer exists. All 193 records validate on the merged tree (189 edits checked, 4 records stale).
+- Review: 13 findings. Fixed here: 1 and 3 to 13. Deferred to ticket 13: 2 (whether a real site's `fieldIds` filter returns old items that have no field ID).
+- D11: this ticket pages the board's sprint list. It is read by `?startAt=N` until its last page: `isLast`; without it, the position reaching `total`; with neither, the first empty page. A page that starts elsewhere than asked, `isLast` and `total` disagreeing, an empty page while more follow, a page of only sprints already given, or a list that ends with another number of sprints than `total` stops the run and stores nothing. Ticket 01's stop for a list that says neither `isLast` nor `total` is gone: such a list is now read to its first empty page.
+- D38: a fetch is one batch. Everything is read first and written in one transaction with the watermark, so a run that fails midway (an error from Jira, a rate limit it gives up on, a paging stop, a cancel) stores nothing and leaves the watermark where it was. "Resumes" means running the command again gives the same store as an uninterrupted run; there is no partial progress to pick up.
+- Paging: the issue search and the bulk changelog are read until a page gives no `nextPageToken` (absent or null). The search's `isLast` must agree with the token; a token given twice or an empty page with a token stops the run. The search asks for 100 issues a page and is ordered `updated ASC, id ASC`. An issue met again on a later page is kept once, as last seen. A history entry returned twice is stored once.
+- Rate limits: a 429 is retried after the `Retry-After` wait (seconds or an HTTP date), through the injected clock and the command's cancellation token. Without the header the waits are 5, 10, 20, 40 and 80 seconds. Five retries per request; a wait is at least 1 second; a wait over 5 minutes, or a `Retry-After` that cannot be read, ends the run; the waits of one command total at most 15 minutes (accepted by root). Each wait prints one line on standard error with the seconds and the request; no message quotes a header or a response body. `discover` waits the same way, and a rate limit on its first call is no longer reported as a proxy problem.
+- Old history: a changelog item without `fieldId` is read by name only as the system field "status" (`fieldtype` "jira") or the custom field "Sprint" (`fieldtype` "custom"). A status change must hold status IDs (digits) or nothing, and a Sprint change lists of sprint IDs, or the run stops. A `points` change is read by field ID only, so nothing read by name becomes one, and an old item of the story point field is not read.
+- Shared files changed: `JiraClient.cs` (takes a `TimeProvider` and a notice writer; `LastRefusal` is set for a 429), `JiraDiscovery.cs` and `DiscoverCommand.cs` (pass the clock and standard error; the pager moved out, with the same ending rules), new `OffsetPages.cs` (one offset pager: `EndsWhenNothingNew` for discover, `StopsWhenInDoubt` for the sprint list) and `JiraJson.cs` (`Text`, `Optional`), `PipelineSteps.cs`. In `JiraFailureTests.cs` the three "further page stops the run" tests and the two sprint-list stop tests of ticket 01 became the contradiction and repetition tests, which compare the whole message; the search page size asserted is 100. Harness: `FakeJira.SearchPageSize`, `ChangelogPageSize`, `SprintPageSize`, `SprintListSays`, `RepeatsHistoryOnNextPage`, `RepeatsIssueOnNextPage`; `FakeIssue.MovedInOldHistory`, `SprintsChangedInOldHistory`; `StubHttpHandler.RateLimited`, `RateLimitedUntil`, `AnswerNext`; `SkippingClock.DuringWait`.
+- Not built: a 503 with `Retry-After` is not retried (the ticket names 429 only). The per-issue changelog fallback of ADR-0004 is not built; the bulk endpoint is the only source of history. No jitter on retries. No unfiltered changelog request as a fallback for old items (finding 2).
+- Ticket 14 picks up: `backfill` is still upsert-only (D4), and it is the same one batch as `sync`. Ticket 14 makes it rebuild the raw tables; that rebuild belongs in the same transaction as the write and the watermark, so a backfill that fails midway still leaves the store as it was (D38). The collector already hands over everything a run fetched at once (`RawData`), with every page of every list read.
+- Ticket 13 must confirm on a real site, because nothing here ran against one:
+  - The page cap: that a search with named fields returns at most about 100 issues a page, and that `ORDER BY updated ASC, id ASC` is accepted and stable.
+  - The `fieldIds` filter and old items: whether the bulk changelog, filtered by `fieldIds`, returns old items that have no field ID. If it does not, the name-based reading never runs and old status and Sprint history is missing without a sign. Fetch an issue old enough to have such items with and without `fieldIds`.
+  - The "Sprint" name: an old Sprint item is recognised only as a custom field named exactly "Sprint". A renamed Sprint field loses those items silently; a second custom field of that name stops the run, or is stored as sprint changes if its values are digits.
+  - Old story point items: an old item of the story point field (no field ID) is not read, so estimate changes from that history are missing without a sign if a real site has them.
+  - A 429 without `Retry-After`: whether a real site sends one, and whether the 5 to 80 second waits fit it. Also whether a real site ever sends an empty page with a token, which now stops the run.

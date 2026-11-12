@@ -123,78 +123,90 @@ public class JiraFailureTests
         await Assert.That(sockets.DefaultProxyCredentials).IsSameReferenceAs(CredentialCache.DefaultCredentials);
     }
 
-    // Paging belongs to a later ticket. Until then a further page must stop the run, never be dropped silently.
+    // A list whose pages contradict themselves, bring nothing or never end stops the run: nothing then says
+    // for certain that everything was fetched. Each stub gives its answer three times and then refuses, so a
+    // tool that kept asking would fail the test with the refusal's message instead of hanging it.
 
     [Test]
-    public async Task An_issue_search_with_a_further_page_stops_the_run()
+    [Arguments("""{"issues":[],"isLast":false}""", "Jira's issue search says a further page follows but gives no token for it. Nothing was stored.\n")]
+    [Arguments("""{"issues":[],"nextPageToken":"FAKE_TOKEN_PAGE_2","isLast":true}""", "Jira's issue search says a page is the last one and also gives a token for a further page. Nothing was stored.\n")]
+    [Arguments("""{"issues":[],"nextPageToken":"FAKE_TOKEN_PAGE_2","isLast":false}""", "Jira's issue search gave an empty page and says more follow, so entries could be missing. Nothing was stored.\n")]
+    [Arguments(
+        """{"issues":[{"id":"900009","fields":{"issuetype":{"id":"800003","hierarchyLevel":1}}}],"nextPageToken":"FAKE_TOKEN_PAGE_2","isLast":false}""",
+        "Jira's issue search gave the same page token twice, so its pages would never end. Nothing was stored.\n")]
+    public async Task An_issue_search_whose_pages_cannot_be_followed_to_an_end_stops_the_run(string searchAnswer, string message)
     {
         await using var pipeline = new PipelineHarness();
         AddSprintAndIssue(pipeline.Jira);
-        pipeline.Jira.Handler.Override(HttpMethod.Post, "/rest/api/3/search/jql", _ => true,
-            StubHttpHandler.Json("""{"issues":[],"nextPageToken":"FAKE_TOKEN_PAGE_2","isLast":false}"""));
+        pipeline.Jira.Handler.Override(HttpMethod.Post, "/rest/api/3/search/jql", _ => true, ThreeTimesThenRefused(searchAnswer));
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString()).Contains("Jira's issue search has more than one page");
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(message);
     }
 
     [Test]
-    public async Task A_changelog_with_a_further_page_stops_the_run()
+    [Arguments(
+        """{"issueChangeLogs":[],"nextPageToken":"FAKE_CHANGELOG_TOKEN_2"}""",
+        "Jira's bulk changelog gave an empty page and says more follow, so entries could be missing. Nothing was stored.\n")]
+    [Arguments(
+        """{"issueChangeLogs":[{"issueId":"900001","changeHistories":[]}],"nextPageToken":"FAKE_CHANGELOG_TOKEN_2"}""",
+        "Jira's bulk changelog gave the same page token twice, so its pages would never end. Nothing was stored.\n")]
+    public async Task A_changelog_whose_pages_cannot_be_followed_to_an_end_stops_the_run(string changelogAnswer, string message)
     {
         await using var pipeline = new PipelineHarness();
         AddSprintAndIssue(pipeline.Jira);
-        pipeline.Jira.Handler.Override(HttpMethod.Post, "/rest/api/3/changelog/bulkfetch", _ => true,
-            StubHttpHandler.Json("""{"issueChangeLogs":[],"nextPageToken":"FAKE_CHANGELOG_TOKEN_2"}"""));
+        pipeline.Jira.Handler.Override(HttpMethod.Post, "/rest/api/3/changelog/bulkfetch", _ => true, ThreeTimesThenRefused(changelogAnswer));
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString()).Contains("Jira's bulk changelog has more than one page");
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(message);
     }
 
+    private const string Sprint41 = """{"id":41,"state":"closed","name":"Fake Sprint 41","startDate":"2026-01-05T15:00:00.000Z","completeDate":"2026-01-19T16:00:00.000Z"}""";
+
     [Test]
-    public async Task A_sprint_list_with_a_further_page_stops_the_run()
+    [Arguments(
+        """{"maxResults":50,"startAt":0,"isLast":false,"values":[]}""",
+        "Jira's sprint list gave an empty page and says more follow, so entries could be missing. Nothing was stored.\n")]
+    [Arguments(
+        """{"maxResults":1,"startAt":0,"total":2,"values":[""" + Sprint41 + """]}""",
+        "Jira's sprint list gave a page that does not start where it was asked to, so entries could be missing. Nothing was stored.\n")]
+    [Arguments(
+        """{"isLast":false,"values":[""" + Sprint41 + """]}""",
+        "Jira's sprint list gave a page holding only entries it had already given, so its pages would never end. Nothing was stored.\n")]
+    [Arguments(
+        """{"values":[""" + Sprint41 + """]}""",
+        "Jira's sprint list gave a page holding only entries it had already given, so its pages would never end. Nothing was stored.\n")]
+    [Arguments(
+        """{"total":2,"isLast":true,"values":[""" + Sprint41 + """]}""",
+        "Jira's sprint list gave a page whose isLast and total disagree on whether more follow, so entries could be missing. Nothing was stored.\n")]
+    [Arguments(
+        """{"total":1,"isLast":false,"values":[""" + Sprint41 + """]}""",
+        "Jira's sprint list gave a page whose isLast and total disagree on whether more follow, so entries could be missing. Nothing was stored.\n")]
+    [Arguments(
+        """{"total":2,"values":[""" + Sprint41 + """]}""",
+        "Jira's sprint list changed while it was being read, so entries could be missing. Nothing was stored. Run the command again.\n")]
+    [Arguments(
+        """{"isLast":"yes","values":[""" + Sprint41 + """]}""",
+        "Jira's sprint list answered in a shape this tool does not understand (FormatException). Nothing was stored.\n")]
+    public async Task A_sprint_list_whose_pages_cannot_be_followed_to_an_end_stops_the_run(string sprintListAnswer, string message)
     {
         await using var pipeline = new PipelineHarness();
         AddSprintAndIssue(pipeline.Jira);
-        pipeline.Jira.Handler.Override(HttpMethod.Get, $"/rest/agile/1.0/board/{FakeJira.BoardId}/sprint", _ => true,
-            StubHttpHandler.Json("""{"maxResults":50,"startAt":0,"isLast":false,"values":[]}"""));
+        pipeline.Jira.Handler.Override(HttpMethod.Get, $"/rest/agile/1.0/board/{FakeJira.BoardId}/sprint", _ => true, ThreeTimesThenRefused(sprintListAnswer));
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString()).Contains("Jira's sprint list has more than one page");
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(message);
     }
 
-    [Test]
-    public async Task A_sprint_list_that_does_not_say_it_is_the_last_page_and_holds_fewer_sprints_than_the_total_stops_the_run()
-    {
-        await using var pipeline = new PipelineHarness();
-        AddSprintAndIssue(pipeline.Jira);
-        pipeline.Jira.Handler.Override(HttpMethod.Get, $"/rest/agile/1.0/board/{FakeJira.BoardId}/sprint", _ => true,
-            StubHttpHandler.Json("""{"maxResults":1,"startAt":0,"total":2,"values":[{"id":41,"state":"closed","name":"Fake Sprint 41","startDate":"2026-01-05T15:00:00.000Z","completeDate":"2026-01-19T16:00:00.000Z"}]}"""));
-
-        var exit = await pipeline.RunAsync("run", "--sprint", "41");
-
-        await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString()).Contains("Jira's sprint list has more than one page");
-    }
-
-    [Test]
-    public async Task A_sprint_list_that_says_neither_that_it_is_the_last_page_nor_how_many_sprints_there_are_stops_the_run()
-    {
-        await using var pipeline = new PipelineHarness();
-        AddSprintAndIssue(pipeline.Jira);
-        pipeline.Jira.Handler.Override(HttpMethod.Get, $"/rest/agile/1.0/board/{FakeJira.BoardId}/sprint", _ => true,
-            StubHttpHandler.Json("""{"values":[{"id":41,"state":"closed","name":"Fake Sprint 41","startDate":"2026-01-05T15:00:00.000Z","completeDate":"2026-01-19T16:00:00.000Z"}]}"""));
-
-        var exit = await pipeline.RunAsync("run", "--sprint", "41");
-
-        await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            "Jira's sprint list does not say whether it is complete, so sprints could be missing. Paging is not supported yet.\n");
-    }
+    /// <summary>The same answer for the first three requests; every request after them is refused with a 500.</summary>
+    private static Func<StubRequest, HttpResponseMessage>[] ThreeTimesThenRefused(string answer) =>
+        [StubHttpHandler.Json(answer), StubHttpHandler.Json(answer), StubHttpHandler.Json(answer), StubHttpHandler.Json("{}", HttpStatusCode.InternalServerError)];
 
     [Test]
     public async Task A_sprint_list_without_the_last_page_flag_is_accepted_when_its_total_shows_it_is_complete()
@@ -273,12 +285,12 @@ public class JiraFailureTests
         var search = pipeline.Jira.Handler.Requests.Single(request => request.Path == "/rest/api/3/search/jql");
         using var body = System.Text.Json.JsonDocument.Parse(search.Body);
         await Assert.That(body.RootElement.GetProperty("jql").GetString())
-            .IsEqualTo("project in (\"FAKE\", \"OTHER2\") AND updated >= \"2025-01-01\" ORDER BY updated ASC");
+            .IsEqualTo("project in (\"FAKE\", \"OTHER2\") AND updated >= \"2025-01-01\" ORDER BY updated ASC, id ASC");
 
         // The project keys are configuration (owner decision D2): Jira is not asked for the board's projects.
         await Assert.That(pipeline.Jira.Handler.Requests.Select(request => request.Path)).DoesNotContain($"/rest/agile/1.0/board/{FakeJira.BoardId}/project");
         var fields = body.RootElement.GetProperty("fields").EnumerateArray().Select(field => field.GetString()!).ToList();
-        await Assert.That(body.RootElement.GetProperty("maxResults").GetInt32()).IsEqualTo(5000);
+        await Assert.That(body.RootElement.GetProperty("maxResults").GetInt32()).IsEqualTo(100);
         await Assert.That(fields).IsEquivalentTo(new[] { "issuetype", "status", "resolution", "assignee", "created", "updated", FakeJira.SprintFieldId, FakeJira.StoryPointFieldId });
         await Assert.That(pipeline.Jira.Handler.Requests.Where(request => request.Query.ContainsKey("expand") || request.Body.Contains("\"expand\"", StringComparison.Ordinal))).IsEmpty();
     }
@@ -286,7 +298,7 @@ public class JiraFailureTests
     [Test]
     public async Task The_changelog_request_asks_for_the_largest_page_jira_documents()
     {
-        // Without it Jira's default page applies and a board of ordinary size needs paging, which is not built yet.
+        // Without it Jira's default page of 1000 entries applies, and a backfill takes ten times the requests.
         await using var pipeline = new PipelineHarness();
         AddSprintAndIssue(pipeline.Jira);
 
