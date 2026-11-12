@@ -76,6 +76,13 @@ public sealed record IssueAnomaly(string IssueId, ChangelogAnomalyKind Kind)
     };
 }
 
+/// <summary>
+/// What a rebuild of the derived data was built from, besides its as-of time: a digest that identifies the raw
+/// data it read, and the settings its business days were counted with. <see cref="Holidays"/> is the holiday
+/// list as ISO dates in order, separated by commas. When any of the three no longer matches, the derived data is stale.
+/// </summary>
+public sealed record DerivedSource(string RawDigest, string TimeZone, string Holidays);
+
 /// <summary>Everything derive computes. It replaces the previous derived data as a whole (ADR-0002).</summary>
 public sealed record DerivedData(
     IReadOnlyList<DerivedSprintWindow> SprintWindows,
@@ -89,5 +96,5 @@ public sealed record DerivedData(
     public required DateTimeOffset AsOf { get; init; }
 
     /// <summary>The changelog anomalies found, at most one per issue and kind.</summary>
-    public IReadOnlyList<IssueAnomaly> Anomalies { get; init; } = [];
+    public required IReadOnlyList<IssueAnomaly> Anomalies { get; init; }
 }

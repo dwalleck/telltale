@@ -25,15 +25,21 @@ public interface ITelltaleStore
 
     /// <summary>
     /// Drops the derived tables and the metric views, and rebuilds them around <paramref name="derived"/>.
-    /// <paramref name="rawDigest"/> identifies the raw data it was derived from (see <see cref="ReadDerivedSourceAsync"/>).
+    /// <paramref name="source"/> says what it was derived from (see <see cref="ReadDerivedSourceAsync"/>).
     /// </summary>
-    Task ReplaceDerivedAsync(DerivedData derived, string rawDigest, CancellationToken cancellationToken = default);
+    Task ReplaceDerivedAsync(DerivedData derived, DerivedSource source, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// The digest the last <see cref="ReplaceDerivedAsync"/> was given, or null when the derived tables and
+    /// What the last <see cref="ReplaceDerivedAsync"/> was given, or null when the derived tables and
     /// metric views have never been built.
     /// </summary>
-    Task<string?> ReadDerivedSourceAsync(CancellationToken cancellationToken = default);
+    Task<DerivedSource?> ReadDerivedSourceAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The changelog anomalies the last <see cref="ReplaceDerivedAsync"/> stored, as issue ID and message.
+    /// Empty when the derived tables have never held any.
+    /// </summary>
+    Task<IReadOnlySet<(string IssueId, string Message)>> ReadAnomaliesAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Runs a query over metric views. <typeparamref name="T"/> is a class with <c>init</c> properties

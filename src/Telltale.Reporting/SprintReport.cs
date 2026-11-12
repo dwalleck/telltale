@@ -56,11 +56,9 @@ public static class SprintReport
             new { sprintId },
             cancellationToken));
         AppendTimeInStatus(report, await ReadTimeInStatusAsync(store, sprintId, cancellationToken));
-        AppendMethodNote(report, teamTimeZone);
-        AppendFooter(
-            report,
-            (await store.QueryViewsAsync<DataQualityRow>("SELECT as_of, anomaly_issue_count, delivered_between_sprints_count FROM data_quality;", cancellationToken: cancellationToken)).Single(),
-            teamTimeZone);
+        var quality = await ReadDataQualityAsync(store, cancellationToken);
+        AppendMethodNote(report, quality);
+        AppendFooter(report, quality);
         return report.ToString();
     }
 
@@ -71,6 +69,21 @@ public static class SprintReport
             "SELECT status_name, issue_count, median_business_days FROM time_in_status_per_sprint WHERE sprint_id = @sprintId ORDER BY board_position;",
             new { sprintId },
             cancellationToken);
+
+    private static async Task<DataQualityRow> ReadDataQualityAsync(ITelltaleStore store, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return (await store.QueryViewsAsync<DataQualityRow>("SELECT as_of, time_zone, anomaly_issue_count, delivered_between_sprints_count FROM data_quality;", cancellationToken: cancellationToken)).Single();
+        }
+        catch (DbException exception)
+        {
+            // The sprint was found a moment ago, so the store is readable: what is missing is this view.
+            throw new UserFacingException(
+                "The store's derived data has no data-quality figures: it was built by an earlier version of this tool. Run derive first.",
+                exception);
+        }
+    }
 
     /// <summary>Renders the report and writes it into <paramref name="directory"/>. Returns the file's path.</summary>
     public static async Task<string> WriteAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, string directory, CancellationToken cancellationToken = default)
@@ -145,27 +158,28 @@ public static class SprintReport
 
     /// <summary>
     /// What the figures mean, with each rule as the glossary and the owner's decisions state it. The suppression
-    /// rule is ADR-0003's for results grouped by issue attributes.
+    /// rule is ADR-0003's for results grouped by issue attributes. The time zone is the one derive stored.
     /// </summary>
-    private static void AppendMethodNote(StringBuilder report, TimeZoneInfo teamTimeZone) =>
+    private static void AppendMethodNote(StringBuilder report, DataQualityRow quality) =>
         report.Append("\n## Method\n\n")
-            .Append("- Durations are in business days: days that are neither a weekend nor a company holiday, each counted in full (24 hours) in the team's time zone (").Append(teamTimeZone.Id).Append("). Calendar days are shown alongside: elapsed time divided by 24 hours.\n")
+            .Append("- Durations are in business days: days that are neither a weekend nor a company holiday, each counted in full (24 hours) in the team's time zone (").Append(quality.TimeZone).Append("). Calendar days are shown alongside: elapsed time divided by 24 hours.\n")
             .Append("- Cycle time runs from an issue's first entry into a work status to its last entry into a done status, for delivered issues only. It belongs to the sprint in which the issue was delivered.\n")
             .Append("- Figures are medians and P85s. The median is the middle value, or the mean of the two middle values. The P85 is the smallest value with at least 85% of the values at or below it.\n")
             .Append("- Time in status covers the statuses before done. An issue counts toward a status only if it spent more than zero business days there.\n")
             .Append("- A figure is suppressed when the issues in the sprint have fewer than five distinct assignees, or when the figure itself has fewer than three distinct assignees behind it, so that it cannot show one person's work. The delivered count is subject to the first check only. A suppressed row still shows its issue count.\n")
             .Append("- An interval that is still open (an issue still in a status, a sprint not yet completed) ends at the as-of time below.\n")
-            .Append("- Figures can include work since removed from Jira until the next backfill.\n");
+            .Append("- Work that has since been removed from Jira stays in the figures.\n");
 
     /// <summary>
     /// The data-quality footer. Its two counts cover the whole store, not the sprint: an issue delivered
     /// between sprints belongs to no sprint. They are counts only: no issue is named.
     /// </summary>
-    private static void AppendFooter(StringBuilder report, DataQualityRow quality, TimeZoneInfo teamTimeZone)
+    private static void AppendFooter(StringBuilder report, DataQualityRow quality)
     {
-        var asOf = TimeZoneInfo.ConvertTime(StoredTime.FromStored(quality.AsOf), teamTimeZone);
+        // In the zone derive counted business days in, which is the one the note names.
+        var asOf = TimeZoneInfo.ConvertTime(StoredTime.FromStored(quality.AsOf), TimeZoneInfo.FindSystemTimeZoneById(quality.TimeZone));
         report.Append("\n---\n\n")
-            .Append("- As-of time: ").Append(asOf.ToString("yyyy-MM-dd HH:mm zzz", CultureInfo.InvariantCulture)).Append(" (").Append(teamTimeZone.Id).Append(")\n")
+            .Append("- As-of time: ").Append(asOf.ToString("yyyy-MM-dd HH:mm zzz", CultureInfo.InvariantCulture)).Append(" (").Append(quality.TimeZone).Append(")\n")
             .Append("- Issues with changelog anomalies, in the whole store: ").Append(quality.AnomalyIssueCount.ToString(CultureInfo.InvariantCulture)).Append('\n')
             .Append("- Issues delivered between sprints, in the whole store: ").Append(quality.DeliveredBetweenSprintsCount.ToString(CultureInfo.InvariantCulture)).Append('\n');
     }
@@ -197,6 +211,7 @@ public static class SprintReport
     private sealed class DataQualityRow
     {
         public string AsOf { get; init; } = "";
+        public string TimeZone { get; init; } = "";
         public long AnomalyIssueCount { get; init; }
         public long DeliveredBetweenSprintsCount { get; init; }
     }

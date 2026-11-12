@@ -392,7 +392,7 @@ public class TimeInStatusTableTests
 
         // The store as an earlier version of the tool derived it: no time in status view, and no record of
         // the raw data the derived tables were built from.
-        await pipeline.ExecuteAsync("DROP VIEW time_in_status_per_sprint; DROP TABLE derived_source; DELETE FROM derived_object WHERE name IN ('time_in_status_per_sprint', 'derived_source');");
+        await pipeline.ExecuteAsync("DROP VIEW time_in_status_per_sprint; DROP TABLE run; DELETE FROM derived_object WHERE name IN ('time_in_status_per_sprint', 'run');");
 
         var exit = await pipeline.RunAsync("report", "--sprint", "41");
 

@@ -1,4 +1,6 @@
 using Telltale.Pipeline.Tests.Harness;
+using Telltale.Reporting;
+using Telltale.Storage.Sqlite;
 using TUnit.Assertions.Enums;
 using static Telltale.Pipeline.Tests.Harness.TeamTime;
 
@@ -21,7 +23,7 @@ public class MethodNoteAndFooterTests
         - Time in status covers the statuses before done. An issue counts toward a status only if it spent more than zero business days there.
         - A figure is suppressed when the issues in the sprint have fewer than five distinct assignees, or when the figure itself has fewer than three distinct assignees behind it, so that it cannot show one person's work. The delivered count is subject to the first check only. A suppressed row still shows its issue count.
         - An interval that is still open (an issue still in a status, a sprint not yet completed) ends at the as-of time below.
-        - Figures can include work since removed from Jira until the next backfill.
+        - Work that has since been removed from Jira stays in the figures.
 
         """;
 
@@ -70,7 +72,9 @@ public class MethodNoteAndFooterTests
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo($"Changelog anomaly: issue {odd.Id}: its status history does not line up.\n");
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Changelog anomalies: 1 across 1 issue, 1 new since the previous derive.\n"
+            + $"Changelog anomaly: issue {odd.Id}: its status history does not line up.\n");
 
         // The timeline follows each change's target status, so the issue is still delivered on the 9th, in sprint 41.
         var report = await pipeline.ReadReportAsync(41);
@@ -83,20 +87,113 @@ public class MethodNoteAndFooterTests
     }
 
     [Test]
-    public async Task An_anomaly_is_logged_once_by_the_step_that_finds_it()
+    public async Task Derive_logs_the_total_and_then_only_the_anomalies_the_previous_derive_did_not_have()
     {
-        // Timelines are built by derive, so derive finds and logs the anomaly; collecting and reporting do not log it again.
+        // Timelines are built by derive, so derive finds and logs the anomalies; collecting and reporting log nothing.
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        var odd = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 8, 9), createdIn: Workflow.Done);
+        var first = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 8, 9), createdIn: Workflow.Done);
 
         await pipeline.RunAllAsync(["backfill"]);
         var afterBackfill = pipeline.Error.ToString();
         await pipeline.RunAllAsync(["derive"], ["report", "--sprint", "41"]);
+        var afterFirstDerive = pipeline.Error.ToString().ReplaceLineEndings("\n");
 
+        // A second issue with an anomaly arrives; the first one's is still there and is not logged again.
+        var second = pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 8, 9), createdIn: Workflow.Shipped);
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+        var afterSecondDerive = pipeline.Error.ToString().ReplaceLineEndings("\n");
+
+        // Nothing changed: the total is still said, and no anomaly is repeated.
+        await pipeline.RunAllAsync(["derive"]);
+
+        const string Message = "it is in a done status but its history holds no move into done, so it is not counted as delivered";
+        var firstLines = "Changelog anomalies: 1 across 1 issue, 1 new since the previous derive.\n"
+            + $"Changelog anomaly: issue {first.Id}: {Message}.\n";
+        var secondLines = "Changelog anomalies: 2 across 2 issues, 1 new since the previous derive.\n"
+            + $"Changelog anomaly: issue {second.Id}: {Message}.\n";
         await Assert.That(afterBackfill).IsEmpty();
+        await Assert.That(afterFirstDerive).IsEqualTo(firstLines);
+        await Assert.That(afterSecondDerive).IsEqualTo(firstLines + secondLines);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            $"Changelog anomaly: issue {odd.Id}: it is in a done status but its history holds no move into done, so it is not counted as delivered.\n");
+            firstLines + secondLines + "Changelog anomalies: 2 across 2 issues, 0 new since the previous derive.\n");
+
+        // The store holds the full list, whatever was logged.
+        var stored = await pipeline.QueryAsync<string>("SELECT issue_id FROM anomaly ORDER BY issue_id;");
+        await Assert.That(stored).IsEquivalentTo(new[] { first.Id, second.Id }, CollectionOrdering.Matching);
+    }
+
+    [Test]
+    [Arguments("timeZone")]
+    [Arguments("holidays")]
+    public async Task A_report_is_refused_when_the_time_zone_or_the_holidays_changed_since_derive(string setting)
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done);
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+
+        // The business days in the store were counted with the old setting.
+        pipeline.Config[setting] = setting == "timeZone" ? "Europe/Berlin" : new System.Text.Json.Nodes.JsonArray("2026-01-08");
+        var exit = await pipeline.RunAsync("report", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "The time zone or the holidays in the configuration changed since the derived data was built. Run derive first.\n");
+        await Assert.That(Directory.Exists(pipeline.ReportDirectory)).IsFalse();
+
+        // Derive again and the report is written, with the new setting.
+        await pipeline.RunAllAsync(["derive"], ["report", "--sprint", "41"]);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\n## Method\n");
+    }
+
+    [Test]
+    public async Task The_method_note_and_the_footer_name_the_time_zone_the_figures_were_derived_with()
+    {
+        await using var pipeline = new PipelineHarness(Local(2026, 2, 3, 12));
+        AddTwoSprints(pipeline.Jira);
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+
+        // Rendered with another zone than derive used: the note and the as-of time still speak of derive's.
+        var report = await SprintReport.RenderAsync(new SqliteStore(pipeline.DatabasePath), "41", TimeZoneInfo.FindSystemTimeZoneById("Europe/Berlin"));
+
+        await Assert.That(report).Contains("in the team's time zone (America/Chicago). Calendar days");
+        await Assert.That(report).Contains("\n- As-of time: 2026-02-03 12:00 -06:00 (America/Chicago)\n");
+        await Assert.That(report).DoesNotContain("Berlin");
+    }
+
+    [Test]
+    public async Task A_report_from_derived_data_without_the_data_quality_view_says_to_derive_again()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+        await pipeline.ExecuteAsync("DROP VIEW data_quality; DELETE FROM derived_object WHERE name = 'data_quality';");
+
+        var exit = await pipeline.RunAsync("report", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "The store's derived data has no data-quality figures: it was built by an earlier version of this tool. Run derive first.\n");
+        await Assert.That(Directory.Exists(pipeline.ReportDirectory)).IsFalse();
+    }
+
+    [Test]
+    public async Task An_issue_id_that_is_not_digits_stops_the_run_and_is_not_quoted()
+    {
+        // The issue ID is the one value of Jira's that reaches the anomaly log, so it is checked where it enters.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.Handler.Override(HttpMethod.Post, "/rest/api/3/search/jql", _ => true,
+            StubHttpHandler.Json("""{"isLast":true,"issues":[{"id":"900001 Fake Person One","key":"FAKE-1","fields":{"issuetype":{"id":"800001","subtask":false,"hierarchyLevel":0},"status":{"id":"600001"},"created":"2026-01-06T15:00:00.000+0000","updated":"2026-01-06T15:00:00.000+0000"}}]}"""));
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira's issue search answered in a shape this tool does not understand (FormatException). Nothing was stored.\n");
     }
 
     [Test]
@@ -113,7 +210,9 @@ public class MethodNoteAndFooterTests
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo($"Changelog anomaly: issue {odd.Id}: its Sprint field history does not line up.\n");
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Changelog anomalies: 1 across 1 issue, 1 new since the previous derive.\n"
+            + $"Changelog anomaly: issue {odd.Id}: its Sprint field history does not line up.\n");
         await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\n- Issues with changelog anomalies, in the whole store: 1\n");
     }
 
@@ -134,7 +233,8 @@ public class MethodNoteAndFooterTests
 
         await Assert.That(exit).IsEqualTo(0);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            $"Changelog anomaly: issue {odd.Id}: its status history does not line up.\n"
+            "Changelog anomalies: 2 across 1 issue, 2 new since the previous derive.\n"
+            + $"Changelog anomaly: issue {odd.Id}: its status history does not line up.\n"
             + $"Changelog anomaly: issue {odd.Id}: it is in a done status but its status history ends outside done, so it is not counted as delivered.\n");
 
         var report = await pipeline.ReadReportAsync(41);
@@ -162,7 +262,8 @@ public class MethodNoteAndFooterTests
 
         await Assert.That(exit).IsEqualTo(0);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            $"Changelog anomaly: issue {created.Id}: it is in a done status but its history holds no move into done, so it is not counted as delivered.\n"
+            "Changelog anomalies: 2 across 2 issues, 2 new since the previous derive.\n"
+            + $"Changelog anomaly: issue {created.Id}: it is in a done status but its history holds no move into done, so it is not counted as delivered.\n"
             + $"Changelog anomaly: issue {shipped.Id}: it is in a done status but its history holds no move into done, so it is not counted as delivered.\n");
 
         var report = await pipeline.ReadReportAsync(41);
@@ -241,7 +342,7 @@ public class MethodNoteAndFooterTests
         // The scan is only worth something if the lines it guards were written.
         await Assert.That(report).Contains("\n- Issues with changelog anomalies, in the whole store: 3\n");
         await Assert.That(report).Contains("\n- Issues delivered between sprints, in the whole store: 1\n");
-        await Assert.That(log.ReplaceLineEndings("\n").Split('\n', StringSplitOptions.RemoveEmptyEntries).Length).IsEqualTo(5);
+        await Assert.That(log.ReplaceLineEndings("\n").Split('\n', StringSplitOptions.RemoveEmptyEntries).Length).IsEqualTo(6);
 
         string[] forbidden = [FakeJira.ProjectKey + "-", .. pipeline.Jira.ForbiddenText, .. Workflow.BoardOrder.Select(status => status.Id), "Fake Review", "Fake Done"];
         var leaks = (from place in new[] { (Where: "the report", Text: report), (Where: "the log", Text: log), (Where: "standard output", Text: pipeline.Out.ToString().Replace(pipeline.Directory, "", StringComparison.Ordinal)) }

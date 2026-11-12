@@ -10,10 +10,11 @@ namespace Telltale.Core.Derive;
 /// </summary>
 public static class ChangelogAnomalies
 {
-    private static readonly IReadOnlySet<string> NoResolutions = new HashSet<string>();
-
-    /// <summary>One issue's anomalies, at most one of each kind, given the timeline and membership built from its history.</summary>
-    public static IEnumerable<IssueAnomaly> Of(RawIssue issue, StatusTimeline timeline, SprintMembership membership, StatusRoles roles)
+    /// <summary>
+    /// One issue's anomalies, at most one of each kind, given the timeline and membership built from its history
+    /// and the <paramref name="outcome"/> <see cref="Delivery.Of"/> gave it.
+    /// </summary>
+    public static IEnumerable<IssueAnomaly> Of(RawIssue issue, StatusTimeline timeline, SprintMembership membership, IssueOutcome outcome, StatusRoles roles)
     {
         if (timeline.Anomalies.Count > 0)
         {
@@ -25,9 +26,9 @@ public static class ChangelogAnomalies
             yield return new IssueAnomaly(issue.IssueId, ChangelogAnomalyKind.SprintHistory);
         }
 
-        // An issue that is done now and has no delivery moment (Delivery.Of): its history either ends outside
-        // done, or stays in done from the issue's creation on. The resolution plays no part in that.
-        if (roles.IsDone(issue.StatusId) && Delivery.Of(issue.StatusId, issue.ResolutionId, timeline.Entries, roles, NoResolutions).Value is NotDelivered)
+        // An issue that is done now and has no delivery moment: its history either ends outside done, or
+        // stays in done from the issue's creation on.
+        if (roles.IsDone(issue.StatusId) && outcome.Value is NotDelivered)
         {
             yield return new IssueAnomaly(
                 issue.IssueId,

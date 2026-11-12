@@ -207,7 +207,7 @@ public sealed class SqliteStore : ITelltaleStore
             [.. statuses.Select(row => new RawStatus(row.StatusId, row.Name, row.Category))]);
     }
 
-    public async Task ReplaceDerivedAsync(DerivedData derived, string rawDigest, CancellationToken cancellationToken = default)
+    public async Task ReplaceDerivedAsync(DerivedData derived, DerivedSource source, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -287,9 +287,9 @@ public sealed class SqliteStore : ITelltaleStore
         await InsertRowsAsync(
             connection,
             transaction,
-            "INSERT INTO run (as_of) VALUES (@asOf);",
-            ["@asOf"],
-            [[StoredTime.ToStored(derived.AsOf)]],
+            "INSERT INTO run (as_of, raw_digest, time_zone, holidays) VALUES (@asOf, @rawDigest, @timeZone, @holidays);",
+            ["@asOf", "@rawDigest", "@timeZone", "@holidays"],
+            [[StoredTime.ToStored(derived.AsOf), source.RawDigest, source.TimeZone, source.Holidays]],
             cancellationToken);
 
         await InsertRowsAsync(
@@ -299,8 +299,6 @@ public sealed class SqliteStore : ITelltaleStore
             ["@issueId", "@message"],
             derived.Anomalies.Select(anomaly => new object?[] { anomaly.IssueId, anomaly.Message }),
             cancellationToken);
-
-        await connection.ExecuteAsync(Command(cancellationToken, "INSERT INTO derived_source (raw_digest) VALUES (@rawDigest);", new { rawDigest }, transaction));
 
         foreach (var (_, sql) in Scripts.InFolder("Views"))
         {
@@ -317,15 +315,28 @@ public sealed class SqliteStore : ITelltaleStore
         await transaction.CommitAsync(cancellationToken);
     }
 
-    public async Task<string?> ReadDerivedSourceAsync(CancellationToken cancellationToken = default)
+    public async Task<DerivedSource?> ReadDerivedSourceAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
 
         // The table is itself derived: before the first rebuild it does not exist.
-        var built = await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object WHERE name = 'derived_source');"));
+        var built = await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object WHERE name = 'run');"));
         return built
-            ? await connection.QuerySingleOrDefaultAsync<string?>(Command(cancellationToken, "SELECT raw_digest FROM derived_source;"))
+            ? await connection.QuerySingleOrDefaultAsync<DerivedSource?>(Command(cancellationToken, "SELECT raw_digest, time_zone, holidays FROM run;"))
             : null;
+    }
+
+    public async Task<IReadOnlySet<(string IssueId, string Message)>> ReadAnomaliesAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
+
+        // Before the first rebuild there is no anomaly table, and so no anomaly the store has seen.
+        if (!await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object WHERE name = 'anomaly');")))
+        {
+            return new HashSet<(string, string)>();
+        }
+
+        return (await connection.QueryAsync<(string, string)>(Command(cancellationToken, "SELECT issue_id, message FROM anomaly;"))).ToHashSet();
     }
 
     public async Task<IReadOnlyList<T>> QueryViewsAsync<T>(string sql, object? parameters = null, CancellationToken cancellationToken = default)

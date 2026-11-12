@@ -88,21 +88,37 @@ internal sealed class PipelineSteps : IDisposable
         new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets).BringUpToDateAsync(_store, mode, cancellationToken);
 
     /// <summary>
-    /// Rebuilds every derived table and metric view from the raw tables, and logs each changelog anomaly it
-    /// found to standard error, one line per issue and kind. A line holds the Jira issue ID and the kind's
-    /// fixed message, never the key. Derive is the step that builds the timelines, so it is the one that logs.
+    /// Rebuilds every derived table and metric view from the raw tables, and logs the changelog anomalies it
+    /// found to standard error: one line with the totals, then one line for each anomaly (an issue and a kind)
+    /// the previous rebuild did not have. The store's <c>anomaly</c> table holds the full list. A line holds the
+    /// Jira issue ID and the kind's fixed message, never the key. Derive is the step that builds the timelines,
+    /// so it is the one that logs.
     /// </summary>
     public async Task DeriveAsync(CancellationToken cancellationToken)
     {
         var raw = await _store.ReadRawAsync(cancellationToken);
         var derived = Derivation.Derive(raw, _config.Jira.BoardId, _roles, _abandonedResolutionIds, new BusinessCalendar(_timeZone, _config.Holidays), AsOf(raw));
-        await _store.ReplaceDerivedAsync(derived, DigestOf(raw), cancellationToken);
+        var previous = await _store.ReadAnomaliesAsync(cancellationToken);
+        await _store.ReplaceDerivedAsync(derived, SourceOf(raw), cancellationToken);
 
-        foreach (var anomaly in derived.Anomalies)
+        if (derived.Anomalies.Count == 0)
+        {
+            return;
+        }
+
+        var unseen = derived.Anomalies.Where(anomaly => !previous.Contains((anomaly.IssueId, anomaly.Message))).ToList();
+        var issues = derived.Anomalies.Select(anomaly => anomaly.IssueId).Distinct(StringComparer.Ordinal).Count();
+        await _services.Error.WriteLineAsync(
+            $"Changelog anomalies: {derived.Anomalies.Count} across {issues} {(issues == 1 ? "issue" : "issues")}, {unseen.Count} new since the previous derive.");
+        foreach (var anomaly in unseen)
         {
             await _services.Error.WriteLineAsync($"Changelog anomaly: issue {anomaly.IssueId}: {anomaly.Message}.");
         }
     }
+
+    /// <summary>What a rebuild from <paramref name="raw"/> under the current configuration is built from.</summary>
+    private DerivedSource SourceOf(RawData raw) =>
+        new(DigestOf(raw), _config.TimeZone, string.Join(",", _config.Holidays.Order().Select(day => day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))));
 
     /// <summary>
     /// Identifies the raw data's content: equal raw data gives an equal digest, whenever and however often it
@@ -143,9 +159,16 @@ internal sealed class PipelineSteps : IDisposable
             ?? throw new UserFacingException("The store has no derived data yet. Run derive first.");
 
         // The views would answer from the old derived tables without a sign, so the report checks first.
-        if (derivedFrom != DigestOf(await _store.ReadRawAsync(cancellationToken)))
+        var current = SourceOf(await _store.ReadRawAsync(cancellationToken));
+        if (derivedFrom.RawDigest != current.RawDigest)
         {
             throw new UserFacingException("The raw data changed since the derived data was built. Run derive first.");
+        }
+
+        // The stored business days were counted in the old time zone, around the old holidays.
+        if (derivedFrom.TimeZone != current.TimeZone || derivedFrom.Holidays != current.Holidays)
+        {
+            throw new UserFacingException("The time zone or the holidays in the configuration changed since the derived data was built. Run derive first.");
         }
 
         var sprint = sprintId?.ToString(CultureInfo.InvariantCulture)

@@ -180,12 +180,12 @@ public sealed class JiraCollector
             var issueType = fields.GetProperty("issuetype");
             if (!IsInScope(issueType))
             {
-                outOfScopeIssueIds.Add(Text(issue, "id"));
+                outOfScopeIssueIds.Add(IssueId(issue));
                 continue;
             }
 
             issues.Add(new RawIssue(
-                Text(issue, "id"),
+                IssueId(issue),
                 Text(issue, "key"),
                 Text(issueType, "id"),
                 JiraTime.Parse(fields.GetProperty("created")),
@@ -314,6 +314,16 @@ public sealed class JiraCollector
     /// <summary>A text value Jira must give. Absent, null or not text is an answer in an unknown shape.</summary>
     private static string Text(JsonElement parent, string name) =>
         parent.GetProperty(name).GetString() ?? throw new FormatException($"{name} is null.");
+
+    /// <summary>
+    /// An issue's ID. Jira's issue IDs are digits; anything else is an answer in an unknown shape. The ID is
+    /// stored and written to the anomaly log as it is, so no other text may travel in it.
+    /// </summary>
+    private static string IssueId(JsonElement issue)
+    {
+        var id = Text(issue, "id");
+        return id.Length > 0 && id.All(char.IsAsciiDigit) ? id : throw new FormatException("The issue ID is not digits.");
+    }
 
     /// <summary>A property's value, or null when it is absent or JSON null. Jira uses both for "not set".</summary>
     private static JsonElement? Optional(JsonElement parent, string name) =>
