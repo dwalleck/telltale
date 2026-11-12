@@ -53,7 +53,7 @@ public class MethodNoteAndFooterTests
     }
 
     [Test]
-    public async Task An_issue_with_inconsistent_status_history_still_gets_a_timeline_is_logged_by_the_sync_and_is_counted_in_the_footer()
+    public async Task An_issue_with_inconsistent_status_history_still_gets_a_timeline_is_logged_and_is_counted_in_the_footer()
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
@@ -80,6 +80,23 @@ public class MethodNoteAndFooterTests
         // Anomalies are stored in derived data: the issue's ID and a fixed message.
         var stored = await pipeline.QueryAsync<(string IssueId, string Message)>("SELECT issue_id, message FROM anomaly;");
         await Assert.That(stored).IsEquivalentTo(new[] { (odd.Id, "its status history does not line up") });
+    }
+
+    [Test]
+    public async Task An_anomaly_is_logged_once_by_the_step_that_finds_it()
+    {
+        // Timelines are built by derive, so derive finds and logs the anomaly; collecting and reporting do not log it again.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        var odd = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 8, 9), createdIn: Workflow.Done);
+
+        await pipeline.RunAllAsync(["backfill"]);
+        var afterBackfill = pipeline.Error.ToString();
+        await pipeline.RunAllAsync(["derive"], ["report", "--sprint", "41"]);
+
+        await Assert.That(afterBackfill).IsEmpty();
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"Changelog anomaly: issue {odd.Id}: it is in a done status but its history holds no move into done, so it is not counted as delivered.\n");
     }
 
     [Test]

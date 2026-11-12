@@ -84,25 +84,24 @@ internal sealed class PipelineSteps : IDisposable
     /// <summary>Brings the raw tables up to date with what changed in Jira since the last sync or backfill.</summary>
     public Task SyncAsync(CancellationToken cancellationToken) => CollectAsync(CollectionMode.Incremental, cancellationToken);
 
+    private Task CollectAsync(CollectionMode mode, CancellationToken cancellationToken) =>
+        new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets).BringUpToDateAsync(_store, mode, cancellationToken);
+
     /// <summary>
-    /// Collects from Jira, then logs every changelog anomaly in the store to standard error, one line per
-    /// issue and kind. A line holds the Jira issue ID and the kind's fixed message, never the key.
+    /// Rebuilds every derived table and metric view from the raw tables, and logs each changelog anomaly it
+    /// found to standard error, one line per issue and kind. A line holds the Jira issue ID and the kind's
+    /// fixed message, never the key. Derive is the step that builds the timelines, so it is the one that logs.
     /// </summary>
-    private async Task CollectAsync(CollectionMode mode, CancellationToken cancellationToken)
-    {
-        await new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets).BringUpToDateAsync(_store, mode, cancellationToken);
-
-        foreach (var anomaly in ChangelogAnomalies.Find(await _store.ReadRawAsync(cancellationToken), _roles))
-        {
-            await _services.Error.WriteLineAsync($"Changelog anomaly: issue {anomaly.IssueId}: {anomaly.Message}.");
-        }
-    }
-
-    /// <summary>Rebuilds every derived table and metric view from the raw tables.</summary>
     public async Task DeriveAsync(CancellationToken cancellationToken)
     {
         var raw = await _store.ReadRawAsync(cancellationToken);
-        await _store.ReplaceDerivedAsync(Derivation.Derive(raw, _config.Jira.BoardId, _roles, _abandonedResolutionIds, new BusinessCalendar(_timeZone, _config.Holidays), AsOf(raw)), DigestOf(raw), cancellationToken);
+        var derived = Derivation.Derive(raw, _config.Jira.BoardId, _roles, _abandonedResolutionIds, new BusinessCalendar(_timeZone, _config.Holidays), AsOf(raw));
+        await _store.ReplaceDerivedAsync(derived, DigestOf(raw), cancellationToken);
+
+        foreach (var anomaly in derived.Anomalies)
+        {
+            await _services.Error.WriteLineAsync($"Changelog anomaly: issue {anomaly.IssueId}: {anomaly.Message}.");
+        }
     }
 
     /// <summary>
