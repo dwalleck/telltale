@@ -275,6 +275,46 @@ public class ConfigurationAndSecretsTests
     }
 
     [Test]
+    public async Task A_status_with_no_role_that_an_issue_entered_and_left_at_the_same_instant_stops_the_run_and_is_named()
+    {
+        // The visit took no time, but it is a move: read as "not done", it would be a reopen and a later delivery.
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config["statusRoles"]!.AsObject().Remove(Workflow.Shipped.Id);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done)
+            .Moved(Local(2026, 1, 12, 9), Workflow.Shipped)
+            .Moved(Local(2026, 1, 12, 9), Workflow.Done);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "These statuses have no role in statusRoles in the configuration file: 600009. Give each one a role (not started, work, blocked or done) and run again.\n");
+        await Assert.That(File.Exists(Path.Combine(pipeline.ReportDirectory, "sprint-41.md"))).IsFalse();
+    }
+
+    [Test]
+    public async Task A_status_with_no_role_that_a_change_only_names_as_the_status_moved_from_stops_the_run_and_is_named()
+    {
+        // The changelog says the issue left Review, though no change ever put it there (history Jira lost).
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config["statusRoles"]!.AsObject().Remove(Workflow.Review.Id);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .NowIn(Workflow.Review)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "These statuses have no role in statusRoles in the configuration file: 600005. Give each one a role (not started, work, blocked or done) and run again.\n");
+    }
+
+    [Test]
     public async Task A_status_no_issue_has_been_in_needs_no_role()
     {
         await using var pipeline = new PipelineHarness();

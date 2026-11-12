@@ -10,7 +10,7 @@ namespace Telltale.Core.Derive;
 /// configured board, status roles, abandoned resolutions and business calendar, and the as-of time, so changing a definition means rerunning it (ADR-0002).
 /// </summary>
 /// <remarks>
-/// Throws <see cref="UserFacingException"/> when an issue has been in a status that has no configured role, when
+/// Throws <see cref="UserFacingException"/> when an issue is in, or moved from or to, a status that has no configured role, when
 /// a closed sprint of the board has neither a completion time nor a planned end, or when an issue was stored
 /// before its Sprint field was fetched.
 /// </remarks>
@@ -42,6 +42,24 @@ public static class Derivation
             .Where(sprint => sprint.BoardId == boardId && sprint.State != SprintStates.Future && sprint.Start is not null)
             .Select(sprint => new SprintWindow(sprint.SprintId, sprint.Start!.Value, sprint.PlannedEnd, WindowEnd(sprint)))
             .ToList();
+
+        // Every status has exactly one role. Guessing one for a status the configuration does not mention
+        // (a new status, a mistyped ID) would quietly move issues in or out of the delivered count. Checked
+        // before anything reads a role, over every status an issue is in or moved from or to: a status entered
+        // and left at the same instant has no interval, and is still a move the delivery and reopen rules read.
+        var withoutRole = raw.Issues
+            .SelectMany(issue => statusChanges[issue.IssueId].SelectMany(change => new[] { change.FromStatusId, change.ToStatusId }).Append(issue.StatusId))
+            .OfType<string>()
+            .Distinct(StringComparer.Ordinal)
+            .Where(statusId => roles.RoleOf(statusId) is null)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        if (withoutRole.Count > 0)
+        {
+            throw new UserFacingException(
+                $"These statuses have no role in statusRoles in the configuration file: {string.Join(", ", withoutRole)}. "
+                + "Give each one a role (not started, work, blocked or done) and run again.");
+        }
 
         var deliverySprints = new DeliverySprints(windows, asOf);
         var intervals = new List<IssueStatusInterval>();
@@ -81,16 +99,6 @@ public static class Derivation
                     .OrderBy(pair => pair.Key, StringComparer.Ordinal)
                     .Select(pair => new SprintStatusTime(issue.IssueId, window.SprintId, pair.Key, pair.Value.CalendarTime, pair.Value.BusinessTime, pair.Value.BusinessDays)));
             }
-        }
-
-        // Every status has exactly one role. Guessing one for a status the configuration does not mention
-        // (a new status, a mistyped ID) would quietly move issues in or out of the delivered count.
-        var withoutRole = intervals.Select(interval => interval.StatusId).Concat(raw.Issues.Select(issue => issue.StatusId)).Distinct().Where(statusId => roles.RoleOf(statusId) is null).Order(StringComparer.Ordinal).ToList();
-        if (withoutRole.Count > 0)
-        {
-            throw new UserFacingException(
-                $"These statuses have no role in statusRoles in the configuration file: {string.Join(", ", withoutRole)}. "
-                + "Give each one a role (not started, work, blocked or done) and run again.");
         }
 
         return new DerivedData(
