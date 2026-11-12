@@ -62,6 +62,8 @@ public class ConfigurationAndSecretsTests
     [Arguments("holidays")]
     [Arguments("statusRoles")]
     [Arguments("jira")]
+    [Arguments("abandonedResolutionIds")]
+    [Arguments("baselineSprintIds")]
     public async Task A_required_setting_given_as_null_is_refused_and_named(string setting)
     {
         await using var pipeline = new PipelineHarness();
