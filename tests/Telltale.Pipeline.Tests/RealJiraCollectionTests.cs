@@ -95,7 +95,7 @@ public class RealJiraCollectionTests
             pipeline.Jira.ChangelogPageSize = 2;
             AddSprint41(pipeline.Jira);
             AddDeliveredIssues(pipeline.Jira, count: 3);
-        AddTeamAfterTheOthers(pipeline.Jira);
+            AddTeamAfterTheOthers(pipeline.Jira);
         }
 
         repeating.Jira.RepeatsHistoryOnNextPage = true;
