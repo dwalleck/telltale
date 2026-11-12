@@ -9,6 +9,19 @@ using Telltale.Core.Storage;
 
 namespace Telltale.Collectors.Jira;
 
+/// <summary>How much <see cref="JiraCollector"/> fetches.</summary>
+public enum CollectionMode
+{
+    /// <summary>Every issue updated since the configured backfill start date, whatever the store already holds.</summary>
+    Backfill,
+
+    /// <summary>
+    /// Only issues updated since the watermark, going back two days before it. With no watermark yet
+    /// (nothing was ever fetched) it fetches what a backfill would.
+    /// </summary>
+    Incremental,
+}
+
 /// <summary>
 /// Brings the store up to date with the configured Jira board: its sprints and statuses, the issues
 /// of the configured projects, and each issue's status, Sprint field and story point history from the bulk changelog endpoint
@@ -24,6 +37,15 @@ public sealed class JiraCollector
     private const int SearchPageSize = 5000;
     private const int ChangelogPageSize = 10000;
 
+    /// <summary>The name of this collector's row in the store's watermarks.</summary>
+    public const string WatermarkName = "jira";
+
+    // Owner decision D26. Each incremental fetch starts this far before the watermark, for two reasons.
+    // Jira reads a JQL date in the time zone of the account asking, which the tool does not know: the bound
+    // is written in UTC, and an account can be up to 14 hours ahead of UTC or 12 behind. And Jira's search
+    // is eventually consistent: an issue updated just before the newest one seen can be missing from that answer.
+    private static readonly TimeSpan WatermarkOverlap = TimeSpan.FromHours(48);
+
     private readonly HttpMessageHandler _handler;
     private readonly JiraConfig _config;
     private readonly ISecretStore _secrets;
@@ -35,19 +57,49 @@ public sealed class JiraCollector
         _secrets = secrets;
     }
 
-    public async Task BringUpToDateAsync(ITelltaleStore store, CancellationToken cancellationToken = default)
+    public async Task BringUpToDateAsync(ITelltaleStore store, CollectionMode mode, CancellationToken cancellationToken = default)
     {
+        // What the watermark stands for is checked before anything is asked of Jira. It is only true for the
+        // board, projects and start date it was fetched under; continuing from it under other settings would
+        // pass over every older issue the new settings bring in, without a sign.
+        var covers = Covers();
+        var watermark = await store.ReadWatermarkAsync(WatermarkName, cancellationToken);
+        if (mode == CollectionMode.Incremental && watermark is not null && watermark.Covers != covers)
+        {
+            throw new UserFacingException("boardId, projectKeys or backfillStart in the configuration file changed since the store was last filled, so a sync could miss issues. Run backfill.");
+        }
+
         // All three secrets are checked before the first call, so a missing salt cannot surface after a long fetch.
         var salt = _secrets.Require(SecretName.HashingSalt);
         using var jira = new JiraClient(_handler, _config.SiteUrl, _secrets.Require(SecretName.JiraEmail), _secrets.Require(SecretName.JiraApiToken));
 
         var statuses = await FetchStatusesAsync(jira, cancellationToken);
         var sprints = await FetchSprintsAsync(jira, cancellationToken);
-        var (issues, outOfScopeIssueIds) = await FetchIssuesAsync(jira, salt, cancellationToken);
+        var since = mode == CollectionMode.Incremental ? watermark?.UpdatedThrough : null;
+        var (issues, outOfScopeIssueIds) = await FetchIssuesAsync(jira, salt, UpdatedSince(since), cancellationToken);
         var changes = await FetchChangesAsync(jira, issues, cancellationToken);
 
-        await store.WriteRawAsync(new RawData(issues, changes, sprints, statuses) { OutOfScopeIssueIds = outOfScopeIssueIds }, cancellationToken);
+        // The watermark is Jira's own time, the newest update fetched, and is written with the batch: if anything
+        // above or the write itself fails, it stays where it was and the next sync fetches the same issues again.
+        // A fetch that found nothing reaches no further than the one before it. An out-of-scope issue's update
+        // does not move it: the overlap brings that issue back, and deleting it again changes nothing.
+        var reached = new Watermark(WatermarkName, covers, issues.Count > 0 ? issues.Max(issue => issue.Updated) : since);
+        await store.WriteRawAsync(new RawData(issues, changes, sprints, statuses) { OutOfScopeIssueIds = outOfScopeIssueIds }, reached, cancellationToken);
     }
+
+    /// <summary>What a fetch under the current configuration covers: the settings that decide which issues and sprints are asked for.</summary>
+    private string Covers() =>
+        $"board {_config.BoardId.ToString(CultureInfo.InvariantCulture)}; projects {string.Join(",", _config.ProjectKeys.Order(StringComparer.Ordinal))}; from {_config.BackfillStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}";
+
+    /// <summary>
+    /// The JQL value for the lower bound on <c>updated</c>, a quoted JQL date. From a watermark it is the
+    /// watermark less the overlap, in UTC, to the minute (JQL has no finer form). Without one it is the
+    /// configured start date. Jira reads either in the calling account's time zone, so neither is an exact
+    /// instant: the overlap absorbs that for the first, and the second is a whole day.
+    /// </summary>
+    private string UpdatedSince(DateTimeOffset? watermark) => watermark is { } reached
+        ? $"\"{(reached - WatermarkOverlap).UtcDateTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}\""
+        : $"\"{_config.BackfillStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}\"";
 
     private static async Task<List<RawStatus>> FetchStatusesAsync(JiraClient jira, CancellationToken cancellationToken)
     {
@@ -84,16 +136,15 @@ public sealed class JiraCollector
             OptionalTime(sprint, "completeDate")))];
     }
 
-    private async Task<(List<RawIssue> InScope, List<string> OutOfScopeIssueIds)> FetchIssuesAsync(JiraClient jira, string salt, CancellationToken cancellationToken)
+    private async Task<(List<RawIssue> InScope, List<string> OutOfScopeIssueIds)> FetchIssuesAsync(JiraClient jira, string salt, string updatedSince, CancellationToken cancellationToken)
     {
-        // A JQL date is read in the calling user's time zone, so the bound is a whole day, not an instant.
         // The project keys come from the configuration, not from Jira (owner decision D2). They are checked
         // again here, where they enter the JQL, so no caller can pass text that is more than a key.
         JiraProjectKey.RequireValid(_config.ProjectKeys);
         var projects = string.Join(", ", _config.ProjectKeys.Select(key => $"\"{key}\""));
         var body = new JsonObject
         {
-            ["jql"] = $"project in ({projects}) AND updated >= \"{_config.BackfillStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}\" ORDER BY updated ASC",
+            ["jql"] = $"project in ({projects}) AND updated >= {updatedSince} ORDER BY updated ASC",
 
             // A request, not a promise: Jira's default is 50, and it may return fewer than asked for. The docs
             // say the largest pages come with the ID or key alone; with named fields a real site is expected to
