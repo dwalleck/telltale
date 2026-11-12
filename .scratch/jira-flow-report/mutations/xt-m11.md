@@ -22,3 +22,4 @@ Expected red: `A_status_id_that_is_not_digits_is_refused_and_not_shown` (it also
 - Re-pointed 2026-11-12 by fin (final fix pass): the configuration rules moved to TelltaleSettings.From (A1).
 - Verified 2026-11-12 at 5c4f1d9: red, 1 failed of 53 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
 - Verified 2026-11-12 at 741dd98: red, 1 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
+- Verified 2026-11-12 at 1268959: red, 1 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
