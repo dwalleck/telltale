@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Telltale.Core/Telltale.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Telltale.Core.Tests/Telltale.Core.Tests.csproj" />
+  </Folder>
+</Solution>

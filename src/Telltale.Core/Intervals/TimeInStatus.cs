@@ -1,0 +1,70 @@
+using Telltale.Core.Calendar;
+
+namespace Telltale.Core.Intervals;
+
+/// <summary>
+/// A sprint's time window. A completed sprint ends at its completion date, which can be
+/// earlier or later than the planned end. A sprint not yet completed runs until asOf.
+/// </summary>
+public sealed record SprintWindow(string SprintId, DateTimeOffset Start, DateTimeOffset? PlannedEnd, DateTimeOffset? Completed)
+{
+    public Interval Resolve(DateTimeOffset asOf)
+    {
+        var end = Completed ?? asOf;
+        return new Interval(Start, end > Start ? end : Start);
+    }
+}
+
+/// <summary>Time spent in one status, measured three ways: calendar time (comparable with other teams), business time, and business days.</summary>
+public sealed record StatusDuration(TimeSpan CalendarTime, TimeSpan BusinessTime, double BusinessDays)
+{
+    public static StatusDuration Zero { get; } = new(TimeSpan.Zero, TimeSpan.Zero, 0);
+
+    public StatusDuration Add(Interval slice, BusinessCalendar calendar)
+    {
+        var (time, days) = calendar.Measure(slice);
+        return new StatusDuration(CalendarTime + slice.Duration, BusinessTime + time, BusinessDays + days);
+    }
+}
+
+public static class TimeInStatus
+{
+    /// <summary>
+    /// How long one issue spent in each status during one sprint: its status history
+    /// clipped to the sprint's window and to the periods the issue actually belonged to
+    /// that sprint. Returns only statuses with time in the sprint, keyed by status ID.
+    /// </summary>
+    public static IReadOnlyDictionary<string, StatusDuration> ForSprint(
+        SprintWindow sprint,
+        IEnumerable<StatusInterval> statuses,
+        IEnumerable<MembershipInterval> membership,
+        BusinessCalendar calendar,
+        DateTimeOffset asOf)
+    {
+        var window = sprint.Resolve(asOf);
+
+        var slices = membership
+            .Where(m => m.SprintId == sprint.SprintId)
+            .Select(m => m.Resolve(asOf).Intersect(window))
+            .Where(slice => slice.HasValue)
+            .Select(slice => slice!.Value)
+            .ToList();
+
+        var totals = new Dictionary<string, StatusDuration>(StringComparer.Ordinal);
+
+        foreach (var status in statuses)
+        {
+            var span = status.Resolve(asOf);
+            foreach (var slice in slices)
+            {
+                if (span.Intersect(slice) is { } part)
+                {
+                    var soFar = totals.GetValueOrDefault(status.StatusId) ?? StatusDuration.Zero;
+                    totals[status.StatusId] = soFar.Add(part, calendar);
+                }
+            }
+        }
+
+        return totals;
+    }
+}

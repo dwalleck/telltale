@@ -1,0 +1,55 @@
+# Handoff
+
+Context carried over from a long planning conversation (claude.ai, Nov 11, 2026) so a Claude Code session can continue it. The next step is to sharpen the design and turn it into a spec, tickets and code.
+
+## What this project is
+
+The project owner (a senior .NET engineer) needs to justify AI plan upgrades to leadership who think in spreadsheets and default to "time saved". The approach: measure structured AI use (the mattpocock/skills workflow) against ad hoc AI use on flow, senior review load, seat value and quality, using Jira, GitHub, local git and agent session logs. This repo is the tool that collects and reports that data.
+
+## Read in this order
+
+1. `GLOSSARY.md` — the project's language. Settled.
+2. `docs/adr/` — seven decisions with real trade-offs. Settled unless the owner reopens one.
+3. `docs/context/pilot-plan.md` — the story, the metrics, the pilot. The "why".
+4. `docs/context/system-design.md` — the working technical design and source-system details. The "how", including what is already built.
+5. `docs/context/confluence-page.md` — the report layout.
+6. `src/Telltale.Core` and `tests/Telltale.Core.Tests` — the code that exists.
+
+## What is open
+
+These are the decisions and facts not yet settled. Work this frontier; don't re-ask what the files above already decide.
+
+**Scope**
+- What does the first spec cover? Recommendation: the Jira path end to end as a tracer bullet (collector → raw tables → derived intervals → time in status and cycle time per sprint → a plain report), then later specs for GitHub review metrics, sessions, quality guardrails, Confluence publishing, and the replay benchmark.
+
+**Definitions to confirm**
+- Cycle time start and end (the glossary says in-progress category → done category; confirm against the team's workflow).
+- Which statuses map to which category, and whether "Blocked" is its own category.
+- Review round, when a reviewer leaves several reviews before the author pushes.
+- Rework: lines changed again by anyone, or only outside the original PR's author?
+- Linked bugs: which Jira link type connects a bug to the issue that caused it?
+- Baseline window: how many sprints before the pilot.
+
+**Facts to discover (look up, don't ask)**
+- Where Kiro stores session logs and what they contain; whether skill invocations are detectable. Blocks the exporter.
+- Jira site, boards and projects in scope; Sprint and story point field IDs.
+- GitHub cloud or Enterprise Server; token type allowed (PAT vs. GitHub App).
+- Confluence space and page; API token scope.
+- Company holiday list.
+
+**Implementation choices**
+- CLI parser (System.CommandLine vs. Spectre.Console.Cli).
+- Secrets provider (Credential Manager vs. DPAPI file).
+- Schema for raw and derived tables.
+
+## Suggested skills, in order
+
+1. `/grill-with-docs` — interview on the open frontier above, updating `GLOSSARY.md` and `docs/adr/` as terms and decisions settle.
+2. `/to-spec` — **in the same session** as the grilling, since it synthesizes the current conversation. Publishes to `.scratch/<feature>/spec.md`.
+3. `/to-tickets` — vertical slices with blocking edges, one file per ticket under `.scratch/<feature>/issues/`.
+4. `/implement-spec` — integration branch, one implementer subagent per ticket using `/tdd`, then `/code-review`.
+
+## Other artifacts (outside the repo)
+
+- Planning doc "Measuring AI Value: A Structured-Use Pilot" (claude.ai Docs); its content is in `pilot-plan.md`.
+- Design canvas "AI Pilot Dashboard — Confluence Sketch" (claude.ai); its layout is in `confluence-page.md`.
