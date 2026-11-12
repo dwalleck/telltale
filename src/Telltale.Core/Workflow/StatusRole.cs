@@ -29,19 +29,31 @@ public sealed record BlockedRole : StatusRole;
 /// <summary>Finished from the team's point of view (Done, Shipped).</summary>
 public sealed record DoneRole : StatusRole;
 
-/// <summary>The configured role of every status, by status ID.</summary>
+/// <summary>The configured role of every status, by status ID, and the order the configuration lists the statuses in.</summary>
 public sealed class StatusRoles
 {
     private readonly Dictionary<string, StatusRole> _byStatusId;
 
-    public StatusRoles(IReadOnlyDictionary<string, StatusRole> byStatusId)
+    /// <param name="inBoardOrder">Each status and its role, in board order. A status listed twice is an <see cref="ArgumentException"/>.</param>
+    public StatusRoles(IEnumerable<KeyValuePair<string, StatusRole>> inBoardOrder)
     {
-        _byStatusId = new Dictionary<string, StatusRole>(byStatusId, StringComparer.Ordinal);
+        var pairs = inBoardOrder.ToList();
+        _byStatusId = pairs.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        StatusIds = [.. pairs.Select(pair => pair.Key)];
     }
 
-    /// <summary>Builds the map from configuration labels, e.g. <c>{ "10001": "done" }</c>.</summary>
-    public static StatusRoles Parse(IReadOnlyDictionary<string, string> labelsByStatusId) =>
-        new(labelsByStatusId.ToDictionary(pair => pair.Key, pair => StatusRole.Parse(pair.Value), StringComparer.Ordinal));
+    /// <summary>
+    /// Every status that has a role, in board order: the order they were given in, which is the order the
+    /// configuration lists them. It is how reports order statuses.
+    /// </summary>
+    public IReadOnlyList<string> StatusIds { get; }
+
+    /// <summary>
+    /// Builds the map from configuration labels, e.g. <c>{ "10001": "done" }</c>. The order of
+    /// <paramref name="labelsInBoardOrder"/> is kept as board order, so pass a collection whose order is defined.
+    /// </summary>
+    public static StatusRoles Parse(IEnumerable<KeyValuePair<string, string>> labelsInBoardOrder) =>
+        new(labelsInBoardOrder.Select(pair => KeyValuePair.Create(pair.Key, StatusRole.Parse(pair.Value))));
 
     /// <summary>True when at least one status has the done role. Without one, nothing could ever be delivered.</summary>
     public bool HasDone => _byStatusId.Values.Any(role => role is DoneRole);

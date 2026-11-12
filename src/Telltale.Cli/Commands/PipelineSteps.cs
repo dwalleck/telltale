@@ -1,6 +1,7 @@
 using System.Globalization;
 using Telltale.Collectors.Jira;
 using Telltale.Core;
+using Telltale.Core.Calendar;
 using Telltale.Core.Configuration;
 using Telltale.Core.Derive;
 using Telltale.Core.Secrets;
@@ -61,7 +62,7 @@ internal sealed class PipelineSteps
     public async Task DeriveAsync(CancellationToken cancellationToken)
     {
         var raw = await _store.ReadRawAsync(cancellationToken);
-        await _store.ReplaceDerivedAsync(Derivation.Derive(raw, _config.Jira.BoardId, _roles, AsOf(raw)), cancellationToken);
+        await _store.ReplaceDerivedAsync(Derivation.Derive(raw, _config.Jira.BoardId, _roles, new BusinessCalendar(_timeZone, _config.Holidays), AsOf(raw)), cancellationToken);
     }
 
     /// <summary>

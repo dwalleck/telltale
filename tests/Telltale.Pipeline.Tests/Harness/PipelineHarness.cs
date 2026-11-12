@@ -60,11 +60,13 @@ public sealed class PipelineHarness : IAsyncDisposable
             ["siteUrl"] = FakeJira.SiteUrl,
             ["boardId"] = FakeJira.BoardId,
             ["projectKeys"] = new JsonArray(FakeJira.ProjectKey),
+            ["sprintFieldId"] = FakeJira.SprintFieldId,
             ["storyPointFieldId"] = FakeJira.StoryPointFieldId,
             ["backfillStart"] = "2025-01-01",
         },
         ["statusRoles"] = new JsonObject(Workflow.BoardOrder.Select(status => KeyValuePair.Create(status.Id, (JsonNode?)status.Role))),
         ["timeZone"] = TeamTime.ZoneId,
+        ["holidays"] = new JsonArray(),
     };
 
     /// <summary>When set, this text is written as the configuration file in place of <see cref="Config"/>, for files a JSON object cannot express.</summary>
