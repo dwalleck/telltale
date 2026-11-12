@@ -35,9 +35,14 @@ cell AS (
     LEFT JOIN sprint_team t ON t.sprint_id = p.sprint_id
     GROUP BY p.sprint_id, p.point_bucket
 ),
+-- One row per bucket: 1 when any baseline sprint's own view withholds the bucket.
+withheld AS (
+    SELECT point_bucket, MAX(suppressed) AS suppressed
+    FROM cell
+    GROUP BY point_bucket
+),
 bucket AS (
     SELECT p.point_bucket,
-           (SELECT MAX(c.suppressed) FROM cell c WHERE c.point_bucket IS p.point_bucket) AS suppressed,
            AVG(CASE WHEN p.business_rank IN ((p.n + 1) / 2, (p.n + 2) / 2) THEN p.business_days END) AS median_business_days,
            MAX(CASE WHEN p.business_rank = (85 * p.n + 99) / 100 THEN p.business_days END)           AS p85_business_days,
            AVG(CASE WHEN p.calendar_rank IN ((p.n + 1) / 2, (p.n + 2) / 2) THEN p.calendar_days END) AS median_calendar_days,
@@ -46,9 +51,11 @@ bucket AS (
     GROUP BY p.point_bucket
 )
 SELECT b.point_bucket,
-       CASE WHEN b.suppressed = 0 THEN b.median_business_days END AS median_business_days,
-       CASE WHEN b.suppressed = 0 THEN b.p85_business_days END    AS p85_business_days,
-       CASE WHEN b.suppressed = 0 THEN b.median_calendar_days END AS median_calendar_days,
-       CASE WHEN b.suppressed = 0 THEN b.p85_calendar_days END    AS p85_calendar_days,
-       CASE WHEN b.suppressed = 0 THEN 0 ELSE 1 END               AS suppressed
-FROM bucket b;
+       CASE WHEN w.suppressed = 0 THEN b.median_business_days END AS median_business_days,
+       CASE WHEN w.suppressed = 0 THEN b.p85_business_days END    AS p85_business_days,
+       CASE WHEN w.suppressed = 0 THEN b.median_calendar_days END AS median_calendar_days,
+       CASE WHEN w.suppressed = 0 THEN b.p85_calendar_days END    AS p85_calendar_days,
+       CASE WHEN w.suppressed = 0 THEN 0 ELSE 1 END               AS suppressed
+FROM bucket b
+-- A left join: a row the join lost would be shown nowhere, and one it cannot match reads as withheld.
+LEFT JOIN withheld w ON w.point_bucket IS b.point_bucket;

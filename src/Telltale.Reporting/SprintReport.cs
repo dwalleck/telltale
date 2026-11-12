@@ -45,8 +45,11 @@ public static class SprintReport
     public static Task<IReadOnlyList<string>> BaselineSprintIdsAsync(ITelltaleStore store, CancellationToken cancellationToken = default) =>
         store.QueryViewsAsync<string>("SELECT sprint_id FROM baseline_sprints ORDER BY sprint_id;", cancellationToken: cancellationToken);
 
-    /// <summary>Renders the report. Dates are shown in <paramref name="teamTimeZone"/>.</summary>
-    public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Renders the report. Dates are shown in <paramref name="teamTimeZone"/>. With <paramref name="withBaseline"/>
+    /// both tables get baseline columns: pass whether <see cref="BaselineSprintIdsAsync"/> lists any sprint.
+    /// </summary>
+    public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, bool withBaseline, CancellationToken cancellationToken = default)
     {
         var rows = await store.QueryViewsAsync<DeliveredRow>(
             "SELECT sprint_name, started, ended, planned_end, delivered_count, suppressed FROM delivered_per_sprint WHERE sprint_id = @sprintId;",
@@ -59,9 +62,6 @@ public static class SprintReport
         }
 
         // Each section is one block of the report, in order. A new section is a new method and a line here.
-        // The baseline columns appear once a baseline is configured, and not before.
-        var withBaseline = (await BaselineSprintIdsAsync(store, cancellationToken)).Count > 0;
-
         var report = new StringBuilder();
         AppendTitle(report, sprint, teamTimeZone);
         AppendDeliveredCount(report, sprint);
@@ -94,9 +94,9 @@ public static class SprintReport
             cancellationToken);
 
     /// <summary>Renders the report and writes it into <paramref name="directory"/>. Returns the file's path.</summary>
-    public static async Task<string> WriteAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, string directory, CancellationToken cancellationToken = default)
+    public static async Task<string> WriteAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, bool withBaseline, string directory, CancellationToken cancellationToken = default)
     {
-        var text = await RenderAsync(store, sprintId, teamTimeZone, cancellationToken);
+        var text = await RenderAsync(store, sprintId, teamTimeZone, withBaseline, cancellationToken);
 
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, FileName(sprintId));

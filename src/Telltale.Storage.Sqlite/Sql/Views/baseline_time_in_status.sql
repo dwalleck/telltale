@@ -30,9 +30,14 @@ cell AS (
     LEFT JOIN sprint_team t ON t.sprint_id = p.sprint_id
     GROUP BY p.sprint_id, p.status_id
 ),
+-- One row per status: 1 when any baseline sprint's own view withholds the status.
+withheld AS (
+    SELECT status_id, MAX(suppressed) AS suppressed
+    FROM cell
+    GROUP BY status_id
+),
 status_time AS (
     SELECT p.status_id,
-           (SELECT MAX(c.suppressed) FROM cell c WHERE c.status_id = p.status_id) AS suppressed,
            AVG(CASE WHEN p.rn IN ((p.n + 1) / 2, (p.n + 2) / 2) THEN p.business_days END) AS median_business_days
     FROM pooled p
     GROUP BY p.status_id
@@ -40,9 +45,10 @@ status_time AS (
 SELECT st.status_id,
        COALESCE(s.name, st.status_id) AS status_name,
        b.position                     AS board_position,
-       CASE WHEN st.suppressed = 0 THEN st.median_business_days END AS median_business_days,
-       CASE WHEN st.suppressed = 0 THEN 0 ELSE 1 END                AS suppressed
+       CASE WHEN w.suppressed = 0 THEN st.median_business_days END AS median_business_days,
+       CASE WHEN w.suppressed = 0 THEN 0 ELSE 1 END                AS suppressed
 FROM status_time st
+LEFT JOIN withheld w ON w.status_id = st.status_id
 JOIN board_status b ON b.status_id = st.status_id
 LEFT JOIN status s ON s.status_id = st.status_id
 WHERE b.is_done = 0;

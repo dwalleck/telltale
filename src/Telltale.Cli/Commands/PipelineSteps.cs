@@ -159,10 +159,13 @@ internal sealed class PipelineSteps : IDisposable
         }
 
         // The baseline views were built from the list as it was at the last derive. A report under another
-        // list would print the old baseline as if it were the configured one.
-        Derivation.RequireBaselineSprintsOfBoard(raw.Sprints, _config.Jira.BoardId, _baselineSprintIds);
-        if (!_baselineSprintIds.SetEquals(await SprintReport.BaselineSprintIdsAsync(_store, cancellationToken)))
+        // list would print the old baseline as if it were the configured one. This is the one check: a list
+        // equal to the derived one passed derive's check against this same raw data.
+        var derivedBaseline = await SprintReport.BaselineSprintIdsAsync(_store, cancellationToken);
+        if (!_baselineSprintIds.SetEquals(derivedBaseline))
         {
+            // Deriving again is the remedy only for a list derive would accept; otherwise say what derive would.
+            Derivation.RequireCompletedBaselineSprints(raw.Sprints, _config.Jira.BoardId, _baselineSprintIds);
             throw new UserFacingException("baselineSprintIds in the configuration file changed since the derived data was built. Run derive first.");
         }
 
@@ -179,7 +182,7 @@ internal sealed class PipelineSteps : IDisposable
             return;
         }
 
-        var path = await SprintReport.WriteAsync(_store, sprint, _timeZone, _services.ReportDirectory, cancellationToken);
+        var path = await SprintReport.WriteAsync(_store, sprint, _timeZone, withBaseline: derivedBaseline.Count > 0, _services.ReportDirectory, cancellationToken);
         await _services.Out.WriteLineAsync($"Wrote {path}");
     }
 
@@ -261,8 +264,8 @@ internal sealed class PipelineSteps : IDisposable
 
     /// <summary>
     /// The baseline sprint IDs, trimmed, each once. Jira's sprint IDs are digits, so anything else (a sprint's
-    /// name, an empty entry) is refused. Whether each is a sprint of the board is checked against the store,
-    /// by derive and report.
+    /// name, an empty entry) is refused. Whether each is a completed sprint of the board is checked against the
+    /// store, by derive and report.
     /// </summary>
     internal static HashSet<string> ReadBaselineSprintIds(TelltaleConfig config, string path)
     {

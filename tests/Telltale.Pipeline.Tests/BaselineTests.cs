@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Telltale.Storage.Sqlite;
 using Telltale.Pipeline.Tests.Harness;
 using TUnit.Assertions.Enums;
 using static Telltale.Pipeline.Tests.Harness.TeamTime;
@@ -118,6 +119,71 @@ public class BaselineTests
             + TimeInStatusHeader
             + "| Fake New | 5 | 1.0 | 1.0 |\n"
             + "| Fake Development | 5 | 3.0 | 3.0 |\n");
+    }
+
+    [Test]
+    public async Task A_baseline_sprint_with_no_issue_at_all_changes_no_baseline_figure_and_withholds_none()
+    {
+        // Sprint 42 completed with nothing in it. It has no team, so its own report shows nothing; it has no
+        // issue in any row either, so it suppresses none (owner decision D44).
+        await using var pipeline = new PipelineHarness();
+        AddSprints(pipeline.Jira);
+        pipeline.Config["baselineSprintIds"] = new JsonArray("41", "42");
+        foreach (var (person, days) in People.Team.Select((person, index) => (person, index + 1)))
+        {
+            Delivered(pipeline.Jira, 41, $"FAKE-{days}", points: 3, person, days);
+        }
+
+        await pipeline.RunAllAsync(["run", "--sprint", "41"]);
+
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT suppressed FROM delivered_per_sprint WHERE sprint_id = '42';")).IsEquivalentTo(new[] { 1L });
+        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith(
+            CycleTimeHeader
+            + "| 3 | 5 | 3.0 | 5.0 | 3.0 | 7.0 | 3.0 | 5.0 |\n"
+            + TimeInStatusHeader
+            + "| Fake New | 5 | 1.0 | 1.0 |\n"
+            + "| Fake Development | 5 | 3.0 | 3.0 |\n");
+    }
+
+    [Test]
+    public async Task A_query_over_the_views_reads_the_three_baseline_views()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprints(pipeline.Jira);
+        pipeline.Config["baselineSprintIds"] = new JsonArray("41");
+        foreach (var (person, days) in People.Team.Select((person, index) => (person, index + 1)))
+        {
+            Delivered(pipeline.Jira, 41, $"FAKE-{days}", points: 3, person, days);
+        }
+
+        await pipeline.RunAllAsync(["run", "--sprint", "41"]);
+        var store = new SqliteStore(pipeline.DatabasePath);
+
+        var rows = await store.QueryViewsAsync<(long Sprints, long Buckets, long Statuses)>(
+            """
+            SELECT (SELECT COUNT(*) FROM baseline_sprints),
+                   (SELECT COUNT(*) FROM baseline_cycle_time_per_bucket),
+                   (SELECT COUNT(*) FROM baseline_time_in_status);
+            """);
+
+        await Assert.That(rows).IsEquivalentTo(new[] { (1L, 1L, 2L) });
+    }
+
+    [Test]
+    [Arguments("SELECT sprint_id FROM baseline_sprint;")]
+    [Arguments("SELECT COUNT(*) FROM baseline_sprint;")]
+    [Arguments("SELECT s.sprint_id FROM baseline_sprints s JOIN baseline_sprint t ON t.sprint_id = s.sprint_id;")]
+    public async Task A_query_over_the_views_cannot_read_the_derived_table_of_baseline_sprints(string sql)
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprints(pipeline.Jira);
+        pipeline.Config["baselineSprintIds"] = new JsonArray("41");
+        pipeline.Jira.AddIdleTeam(41);
+        await pipeline.RunAllAsync(["run", "--sprint", "41"]);
+        var store = new SqliteStore(pipeline.DatabasePath);
+
+        await Assert.That(async () => await store.QueryViewsAsync<string>(sql))
+            .Throws<InvalidOperationException>().WithMessageContaining("reads only the metric views");
     }
 
     [Test]
@@ -388,11 +454,16 @@ public class BaselineTests
     [Arguments("99", "99")]
     [Arguments("77", "77")]
     [Arguments("41,99,98", "98, 99")]
-    public async Task A_baseline_sprint_id_that_is_not_a_sprint_of_the_configured_board_stops_derive_naming_the_setting(string listed, string refused)
+    [Arguments("41,43", "43")]
+    [Arguments("44", "44")]
+    public async Task A_baseline_sprint_id_that_is_not_a_completed_sprint_of_the_configured_board_stops_derive_naming_the_setting_and_the_id(string listed, string refused)
     {
         // Sprint 77 was created on another board; Jira lists it on this one, and it is not this board's sprint.
+        // Sprint 43 is running and sprint 44 has not started: a baseline is fixed, so it is drawn from completed sprints.
         await using var pipeline = new PipelineHarness();
         AddSprints(pipeline.Jira);
+        pipeline.Jira.AddSprint(43, "Fake Sprint 43", Local(2026, 2, 2, 9), plannedEnd: Local(2026, 2, 13, 17));
+        pipeline.Jira.AddFutureSprint(44, "Fake Sprint 44");
         pipeline.Jira.AddSprint(77, "Fake Other Team Sprint", Local(2026, 1, 12, 9), plannedEnd: Local(2026, 1, 26, 9), completed: Local(2026, 1, 26, 9), originBoardId: 499999);
         pipeline.Jira.AddIdleTeam(41);
         await pipeline.RunAllAsync(["backfill"]);
@@ -402,26 +473,29 @@ public class BaselineTests
 
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            $"baselineSprintIds in the configuration file lists {refused}, and the store holds no such sprint of board 400001. "
-            + "Correct the list, or run backfill if the sprint is new, and run again.\n");
+            $"baselineSprintIds in the configuration file lists {refused}, and the store holds no completed sprint of board 400001 with such an ID. "
+            + "The baseline is drawn from completed sprints only. Correct the list, or run backfill if the sprint has completed since, and run again.\n");
         await Assert.That(await pipeline.QueryAsync<long>("SELECT count(*) FROM sqlite_master WHERE name = 'baseline_sprints';")).IsEquivalentTo(new[] { 0L });
     }
 
     [Test]
-    public async Task A_baseline_sprint_id_that_is_not_a_sprint_of_the_configured_board_stops_report_too()
+    [Arguments("99")]
+    [Arguments("43")]
+    public async Task A_baseline_sprint_id_that_is_not_a_completed_sprint_of_the_configured_board_stops_report_too(string listed)
     {
         await using var pipeline = new PipelineHarness();
         AddSprints(pipeline.Jira);
+        pipeline.Jira.AddSprint(43, "Fake Sprint 43", Local(2026, 2, 2, 9), plannedEnd: Local(2026, 2, 13, 17));
         pipeline.Jira.AddIdleTeam(41);
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
-        pipeline.Config["baselineSprintIds"] = new JsonArray("99");
+        pipeline.Config["baselineSprintIds"] = new JsonArray(listed);
 
         var exit = await pipeline.RunAsync("report", "--sprint", "41");
 
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            "baselineSprintIds in the configuration file lists 99, and the store holds no such sprint of board 400001. "
-            + "Correct the list, or run backfill if the sprint is new, and run again.\n");
+            $"baselineSprintIds in the configuration file lists {listed}, and the store holds no completed sprint of board 400001 with such an ID. "
+            + "The baseline is drawn from completed sprints only. Correct the list, or run backfill if the sprint has completed since, and run again.\n");
         await Assert.That(File.Exists(Path.Combine(pipeline.ReportDirectory, "sprint-41.md"))).IsFalse();
     }
 
