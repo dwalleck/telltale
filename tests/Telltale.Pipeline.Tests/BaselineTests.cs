@@ -121,6 +121,22 @@ public class BaselineTests
     }
 
     [Test]
+    public async Task Unestimated_issues_have_a_baseline_row_of_their_own()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprints(pipeline.Jira);
+        pipeline.Config["baselineSprintIds"] = new JsonArray("41");
+        foreach (var (person, days) in People.Team.Select((person, index) => (person, index + 1)))
+        {
+            Delivered(pipeline.Jira, 41, $"FAKE-{days}", points: null, person, days);
+        }
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(CycleTimeHeader + "| unestimated | 5 | 3.0 | 5.0 | 3.0 | 7.0 | 3.0 | 5.0 |\n" + TimeInStatusHeader);
+    }
+
+    [Test]
     public async Task A_baseline_figure_with_fewer_than_three_assignees_is_suppressed_in_the_view_and_the_report_and_a_row_the_baseline_lacks_reads_none()
     {
         await using var pipeline = new PipelineHarness();
@@ -460,10 +476,10 @@ public class BaselineTests
     /// <summary>
     /// An issue of sprint 41 or 42, created as the sprint starts (Monday 09:00) and in development from Tuesday
     /// 09:00 for <paramref name="days"/> business days; then, with <paramref name="reviewDays"/>, in Review for
-    /// that many; then done. It spends a day in New, and its cycle time is the two together (at most eight
+    /// that many; then done. Null <paramref name="points"/> leaves it unestimated. It spends a day in New, and its cycle time is the two together (at most eight
     /// business days, so it is done inside the sprint).
     /// </summary>
-    private static FakeIssue Delivered(FakeJira jira, long sprintId, string key, double points, FakePerson? assignee, int days, int reviewDays = 0)
+    private static FakeIssue Delivered(FakeJira jira, long sprintId, string key, double? points, FakePerson? assignee, int days, int reviewDays = 0)
     {
         var monday = sprintId == 41 ? Local(2026, 1, 5, 9) : Local(2026, 1, 19, 9);
         var tuesday = monday.AddDays(1);
@@ -471,7 +487,12 @@ public class BaselineTests
         // Tuesday plus four business days is the next Monday: a weekend lies between.
         DateTimeOffset After(int businessDays) => tuesday.AddDays(businessDays < 4 ? businessDays : businessDays + 2);
 
-        var issue = jira.AddIssue(key, monday).InSprints(sprintId).Estimated(points).Moved(tuesday, Workflow.Development);
+        var issue = jira.AddIssue(key, monday).InSprints(sprintId).Moved(tuesday, Workflow.Development);
+        if (points is { } estimate)
+        {
+            issue.Estimated(estimate);
+        }
+
         if (reviewDays > 0)
         {
             issue.Moved(After(days), Workflow.Review);
