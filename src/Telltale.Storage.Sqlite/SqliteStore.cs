@@ -228,6 +228,9 @@ public sealed class SqliteStore : ITelltaleStore
 
         // What the raw tables hold now, identified. Written with the batch, so the digest is never of anything
         // but the stored rows, and whoever asks whether the raw data changed reads one row.
+        // Every write reads all raw rows back for this, so its cost grows with the store and not with the
+        // batch. That is accepted: the store is one team's board (thousands of rows), a fetch is one batch,
+        // and a digest of the whole raw set is what makes "the raw data changed" reliable.
         var digest = DigestOf(await ReadRawAsync(connection, transaction, cancellationToken));
         await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM raw_state; INSERT INTO raw_state (digest) VALUES (@digest);", new { digest }, transaction));
         await transaction.CommitAsync(cancellationToken);
@@ -507,7 +510,7 @@ public sealed class SqliteStore : ITelltaleStore
         {
             await using var command = connection.CreateCommand();
             command.CommandText = sql;
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            await using var reader = await ExecuteWithoutParametersAsync(command, cancellationToken);
             var columns = Enumerable.Range(0, reader.FieldCount).Select(reader.GetName).ToList();
             var rows = new List<IReadOnlyList<object?>>();
             while (await reader.ReadAsync(cancellationToken))
@@ -534,6 +537,24 @@ public sealed class SqliteStore : ITelltaleStore
         {
             // A fault in the SQL itself. SQLite's message names what it could not read, never a row's data.
             throw new UserFacingException($"The query could not be run: {exception.Message}", exception);
+        }
+    }
+
+    /// <summary>
+    /// Runs the owner's SQL, which is given no parameter values. SQL that holds a parameter (<c>@id</c>,
+    /// <c>$id</c>, <c>:id</c>) is refused by the provider before it runs; that is said plainly here.
+    /// </summary>
+    private static async Task<DbDataReader> ExecuteWithoutParametersAsync(SqliteCommand command, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await command.ExecuteReaderAsync(cancellationToken);
+        }
+        catch (InvalidOperationException exception) when (exception.InnerException is null)
+        {
+            throw new UserFacingException(
+                "The query could not be run: the SQL holds a parameter (a name after @, $ or :), and a query is given no values for one. Write the value into the SQL.",
+                exception);
         }
     }
 
@@ -613,14 +634,15 @@ public sealed class SqliteStore : ITelltaleStore
 
     /// <summary>
     /// SQLite's authorizer for a query over the metric views. It allows a SELECT, the functions it calls and
-    /// reads of the temporary schema, which holds the copies and nothing else. Every other action is denied:
+    /// reads of the temporary schema, which holds the copies and nothing else, also in a recursive query. Every other action is denied:
     /// a read of a raw or derived table or of the schema, a write, a PRAGMA, an ATTACH.
     /// </summary>
     private static int MetricViewsOnly(object userData, int action, string? first, string? second, string? database, string? accessor)
     {
         var allowed = action switch
         {
-            raw.SQLITE_SELECT or raw.SQLITE_FUNCTION => true,
+            // A recursive query grants no read of its own: each table it names is still asked about below.
+            raw.SQLITE_SELECT or raw.SQLITE_FUNCTION or raw.SQLITE_RECURSIVE => true,
 
             // A read that names no column (COUNT(*), EXISTS) comes without a schema name. The table's name
             // decides then: the metric views' names are all it may be.

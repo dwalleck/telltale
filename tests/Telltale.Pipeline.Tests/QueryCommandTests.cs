@@ -71,7 +71,9 @@ public class QueryCommandTests
     [Arguments("SELECT * FROM issue_cycle;")]
     [Arguments("SELECT sql FROM sqlite_master;")]
     [Arguments("SELECT * FROM duration_sample;")]
-    [Arguments("SELECT sprint_id, group_key, median_days FROM duration_figures;")]
+    [Arguments("SELECT sprint_id, bucket, median_days FROM duration_figures;")]
+    [Arguments("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < (SELECT COUNT(*) FROM issue)) SELECT x FROM n;")]
+    [Arguments("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < (SELECT COUNT(*) FROM duration_sample)) SELECT x FROM n;")]
     [Arguments("SELECT d.sprint_id, (SELECT COUNT(DISTINCT assignee_hash) FROM issue) FROM delivered_per_sprint d;")]
     [Arguments("DELETE FROM delivered_per_sprint;")]
     [Arguments("DROP VIEW sprint_team;")]
@@ -94,6 +96,52 @@ public class QueryCommandTests
         await Assert.That(pipeline.Out.ToString()).IsEmpty();
         await Assert.That(await pipeline.ReadStoreContentAsync()).IsEqualTo(storeBefore);
         await Assert.That(File.Exists(Path.Combine(pipeline.Directory, "other.db"))).IsFalse();
+    }
+
+    [Test]
+    public async Task Query_runs_a_recursive_query_over_a_metric_view()
+    {
+        // Review of the final fix pass, finding 3: recursion reads nothing the guard does not already check.
+        await using var pipeline = new PipelineHarness();
+        await FillAndDeriveAsync(pipeline);
+
+        var exit = await pipeline.RunAsync("query", "WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < (SELECT COUNT(*) FROM delivered_per_sprint)) SELECT x AS sprint_number FROM n;");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(pipeline.Out.ToString().ReplaceLineEndings("\n")).IsEqualTo("| sprint_number |\n| --- |\n| 1 |\n| 2 |\n");
+    }
+
+    [Test]
+    [Arguments("SELECT sprint_id FROM delivered_per_sprint WHERE sprint_id = @id;")]
+    [Arguments("SELECT sprint_id FROM delivered_per_sprint WHERE sprint_id = $id;")]
+    [Arguments("SELECT sprint_id FROM delivered_per_sprint WHERE sprint_id = :id;")]
+    public async Task Query_says_plainly_that_sql_with_a_parameter_cannot_be_run(string sql)
+    {
+        await using var pipeline = new PipelineHarness();
+        await FillAndDeriveAsync(pipeline);
+
+        var exit = await pipeline.RunAsync("query", sql);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "The query could not be run: the SQL holds a parameter (a name after @, $ or :), and a query is given no values for one. Write the value into the SQL.\n");
+        await Assert.That(pipeline.Out.ToString()).IsEmpty();
+    }
+
+    [Test]
+    public async Task Query_takes_a_blank_file_name_as_no_file_named()
+    {
+        await using var pipeline = new PipelineHarness();
+        await FillAndDeriveAsync(pipeline);
+
+        var withSql = await pipeline.RunAsync("query", "SELECT COUNT(*) AS sprints FROM delivered_per_sprint;", "--file", " ");
+        var withoutSql = await pipeline.RunAsync("query", "--file", " ");
+
+        await Assert.That(withSql).IsEqualTo(0);
+        await Assert.That(pipeline.Out.ToString().ReplaceLineEndings("\n")).IsEqualTo("| sprints |\n| --- |\n| 2 |\n");
+        await Assert.That(withoutSql).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo("Give the SQL to run, either as the argument or in a file named with --file, and not both.\n");
     }
 
     [Test]

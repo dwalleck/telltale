@@ -25,12 +25,14 @@ internal static class QueryCommand
 
     private static async Task<string> ReadSqlAsync(string? sql, string? file, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(sql) == string.IsNullOrWhiteSpace(file))
+        // One rule says whether each was given: a blank is not.
+        var (sqlGiven, fileGiven) = (!string.IsNullOrWhiteSpace(sql), !string.IsNullOrWhiteSpace(file));
+        if (sqlGiven == fileGiven)
         {
             throw new UserFacingException("Give the SQL to run, either as the argument or in a file named with --file, and not both.");
         }
 
-        if (file is null)
+        if (!fileGiven)
         {
             return sql!;
         }
