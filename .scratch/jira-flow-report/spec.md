@@ -74,7 +74,7 @@ This is the first slice of the whole system: every layer (collector, raw tables,
 
 ### Querying and trust
 
-45. As the project owner, I want to run ad hoc SQL against the metric views, so that I can answer follow-up questions without new code.
+45. As the project owner, I want to run ad hoc SQL against the metric views through a `query` command, so that I can answer follow-up questions without new code and without a path around the suppression rule. (Opening the database file in another program bypasses the rule; owner decision D48, 2026-11-12.)
 46. As a team member, I want the suppression rule enforced inside the metric views, so that ad hoc SQL against them cannot produce a figure the report would have suppressed.
 47. As the project owner, I want the database to be disposable and rebuildable from Jira, so that a corrupt or lost file costs one backfill.
 
@@ -122,7 +122,7 @@ This is the first slice of the whole system: every layer (collector, raw tables,
 
 Raw tables (written only by the collector; selected fields, never original payloads):
 
-- **Issue**: Jira issue ID, key, issue type ID, created time, current status ID, current resolution ID, current story points, current assignee hash, updated time.
+- **Issue**: Jira issue ID (the issue key is not stored: nothing reads it, and beside a person hash it is the easiest way back to a person; owner decision D52, 2026-11-12), issue type ID, created time, current status ID, current resolution ID, current story points, current assignee hash, updated time.
 - **Change**: history ID, issue ID, time, field (status, sprint or points), from value, to value. Status values are status IDs; sprint values are sprint ID lists; point values are numbers.
 - **Sprint**: sprint ID, board ID, state, start, planned end, completed time.
 - **Status**: status ID, name, Jira category.
