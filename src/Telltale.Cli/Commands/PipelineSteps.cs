@@ -122,9 +122,11 @@ internal sealed class PipelineSteps : IDisposable
 
     /// <summary>
     /// Writes one sprint's report and says where. Without <paramref name="sprintId"/> it is the most recently
-    /// completed sprint's.
+    /// completed sprint's. When no sprint has completed, <paramref name="needsSprint"/> decides: a command whose
+    /// only job is the report fails; one that also updated the store says no report was written and succeeds
+    /// (owner decision D28).
     /// </summary>
-    public async Task ReportAsync(long? sprintId, CancellationToken cancellationToken)
+    public async Task ReportAsync(long? sprintId, bool needsSprint, CancellationToken cancellationToken)
     {
         var derivedFrom = await _store.ReadDerivedSourceAsync(cancellationToken)
             ?? throw new UserFacingException("The store has no derived data yet. Run derive first.");
@@ -136,8 +138,17 @@ internal sealed class PipelineSteps : IDisposable
         }
 
         var sprint = sprintId?.ToString(CultureInfo.InvariantCulture)
-            ?? await SprintReport.MostRecentlyCompletedSprintAsync(_store, cancellationToken)
-            ?? throw new UserFacingException("No sprint in the store has completed yet. Name a sprint with --sprint.");
+            ?? await SprintReport.MostRecentlyCompletedSprintAsync(_store, cancellationToken);
+        if (sprint is null)
+        {
+            if (needsSprint)
+            {
+                throw new UserFacingException("No sprint in the store has completed yet. Name a sprint with --sprint.");
+            }
+
+            await _services.Out.WriteLineAsync("The store is up to date. No sprint has completed yet, so no report was written.");
+            return;
+        }
 
         var path = await SprintReport.WriteAsync(_store, sprint, _timeZone, _services.ReportDirectory, cancellationToken);
         await _services.Out.WriteLineAsync($"Wrote {path}");

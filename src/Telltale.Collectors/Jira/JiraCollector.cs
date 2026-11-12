@@ -16,7 +16,7 @@ public enum CollectionMode
     Backfill,
 
     /// <summary>
-    /// Only issues updated since the watermark, going back a few minutes before it. With no watermark yet
+    /// Only issues updated since the watermark, going back two days before it. With no watermark yet
     /// (nothing was ever fetched) it fetches what a backfill would.
     /// </summary>
     Incremental,
@@ -40,9 +40,11 @@ public sealed class JiraCollector
     /// <summary>The name of this collector's row in the store's watermarks.</summary>
     public const string WatermarkName = "jira";
 
-    // Jira's search is eventually consistent: an issue updated just before the newest one seen can be
-    // missing from that answer. Each incremental fetch therefore starts this far before the watermark.
-    private static readonly TimeSpan WatermarkOverlap = TimeSpan.FromMinutes(5);
+    // Owner decision D26. Each incremental fetch starts this far before the watermark, for two reasons.
+    // Jira reads a JQL date in the time zone of the account asking, which the tool does not know: the bound
+    // is written in UTC, and an account can be up to 14 hours ahead of UTC or 12 behind. And Jira's search
+    // is eventually consistent: an issue updated just before the newest one seen can be missing from that answer.
+    private static readonly TimeSpan WatermarkOverlap = TimeSpan.FromHours(48);
 
     private readonly HttpMessageHandler _handler;
     private readonly JiraConfig _config;
@@ -89,13 +91,13 @@ public sealed class JiraCollector
         $"board {_config.BoardId.ToString(CultureInfo.InvariantCulture)}; projects {string.Join(",", _config.ProjectKeys.Order(StringComparer.Ordinal))}; from {_config.BackfillStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}";
 
     /// <summary>
-    /// The JQL value for the lower bound on <c>updated</c>. From a watermark it is an unquoted number, which
-    /// JQL reads as milliseconds since the Unix epoch, so no time zone is involved. Without one it is the
-    /// configured start date: a quoted JQL date is read in the calling user's time zone, so that bound is a
-    /// whole day, not an instant.
+    /// The JQL value for the lower bound on <c>updated</c>, a quoted JQL date. From a watermark it is the
+    /// watermark less the overlap, in UTC, to the minute (JQL has no finer form). Without one it is the
+    /// configured start date. Jira reads either in the calling account's time zone, so neither is an exact
+    /// instant: the overlap absorbs that for the first, and the second is a whole day.
     /// </summary>
     private string UpdatedSince(DateTimeOffset? watermark) => watermark is { } reached
-        ? (reached - WatermarkOverlap).ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture)
+        ? $"\"{(reached - WatermarkOverlap).UtcDateTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}\""
         : $"\"{_config.BackfillStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}\"";
 
     private static async Task<List<RawStatus>> FetchStatusesAsync(JiraClient jira, CancellationToken cancellationToken)

@@ -165,6 +165,12 @@ public sealed class FakeJira
     /// <summary>Runs before each of the site's own answers, for example to move the clock as if the fetch took time.</summary>
     public Action? BeforeResponse { get; set; }
 
+    /// <summary>
+    /// The time zone of the Jira account the tool signs in with: a quoted JQL date is read in it (research
+    /// note 05). The team's zone by default; the tool does not know it.
+    /// </summary>
+    public TimeZoneInfo AccountTimeZone { get; set; } = TimeZoneInfo.FindSystemTimeZoneById(TeamTime.ZoneId);
+
     /// <summary>Which of the two documented response shapes to serve.</summary>
     public JiraShapes Shapes { get; set; } = JiraShapes.AsSchemas;
 
@@ -376,24 +382,19 @@ public sealed class FakeJira
     }
 
     /// <summary>
-    /// The lower bound on <c>updated</c> in the search's JQL, in the forms JQL documents (research note 05): a
-    /// quoted date or date and minute, read in the calling user's time zone (the team's, here), or an unquoted
-    /// number, read as milliseconds since the Unix epoch. A search without one fails the test: Jira refuses unbounded JQL.
+    /// The lower bound on <c>updated</c> in the search's JQL: a quoted date, or date and minute, read in
+    /// <see cref="AccountTimeZone"/> (research note 05; owner decision D26). A search without one fails the
+    /// test: Jira refuses unbounded JQL.
     /// </summary>
-    private static DateTimeOffset UpdatedSince(StubRequest request)
+    private DateTimeOffset UpdatedSince(StubRequest request)
     {
         using var body = JsonDocument.Parse(request.Body);
         var jql = body.RootElement.GetProperty("jql").GetString() ?? "";
-        var bound = System.Text.RegularExpressions.Regex.Match(jql, """\bupdated >= (?:"(?<quoted>[^"]+)"|(?<epoch>\d+))(?= |$)""");
-        if (bound.Groups["epoch"].Success)
-        {
-            return DateTimeOffset.FromUnixTimeMilliseconds(long.Parse(bound.Groups["epoch"].Value, CultureInfo.InvariantCulture));
-        }
-
+        var bound = System.Text.RegularExpressions.Regex.Match(jql, """\bupdated >= "(?<quoted>[^"]+)"(?= |$)""");
         if (bound.Groups["quoted"].Success)
         {
             var wallClock = DateTime.ParseExact(bound.Groups["quoted"].Value, ["yyyy-MM-dd", "yyyy-MM-dd HH:mm", "yyyy/MM/dd", "yyyy/MM/dd HH:mm"], CultureInfo.InvariantCulture, DateTimeStyles.None);
-            return TeamTime.Local(wallClock.Year, wallClock.Month, wallClock.Day, wallClock.Hour, wallClock.Minute);
+            return new DateTimeOffset(wallClock, AccountTimeZone.GetUtcOffset(wallClock));
         }
 
         throw new InvalidOperationException($"FakeJira: the search JQL has no lower bound on updated that the fake understands: {jql}");

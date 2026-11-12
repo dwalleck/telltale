@@ -17,7 +17,7 @@ internal static class RunCommand
             {
                 await pipeline.SyncAsync(cancellationToken);
                 await pipeline.DeriveAsync(cancellationToken);
-                await pipeline.ReportAsync(parse.GetValue(sprint), cancellationToken);
+                await pipeline.ReportAsync(parse.GetValue(sprint), needsSprint: false, cancellationToken);
             },
             sprint);
     }

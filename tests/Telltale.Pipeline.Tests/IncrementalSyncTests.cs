@@ -32,8 +32,8 @@ public class IncrementalSyncTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
-            .Moved(Local(2026, 1, 21, 9), Workflow.Development);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 9, 9))
+            .Moved(Local(2026, 1, 12, 9), Workflow.Development);
         var changing = pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 22, 9), Workflow.Development);
         await pipeline.RunAllAsync(["backfill"]);
@@ -47,16 +47,23 @@ public class IncrementalSyncTests
     }
 
     [Test]
-    public async Task A_sync_goes_back_a_few_minutes_before_the_newest_update_it_has_seen()
+    [Arguments("Etc/GMT+12")]
+    [Arguments("America/Chicago")]
+    [Arguments("Etc/UTC")]
+    [Arguments("Pacific/Kiritimati")]
+    public async Task A_sync_goes_back_far_enough_before_the_newest_update_for_any_jira_account_time_zone(string accountTimeZone)
     {
-        // Jira's search index lags: an issue updated just before the newest one seen may not have been
-        // in the last answer. Three minutes back is inside the overlap; a quarter of an hour is not.
+        // Owner decision D26. Jira reads the date in the JQL in the account's time zone, which the tool does
+        // not know, and its search index lags. So a sync asks from two days before the newest update it has
+        // seen: an issue updated a day before that is fetched again wherever the account is, from twelve
+        // hours behind UTC to fourteen ahead; one updated five days before is not.
         await using var pipeline = new PipelineHarness();
+        pipeline.Jira.AccountTimeZone = TimeZoneInfo.FindSystemTimeZoneById(accountTimeZone);
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
-            .Moved(Local(2026, 1, 22, 8, 45), Workflow.Development);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 9, 9))
+            .Moved(Local(2026, 1, 17, 9), Workflow.Development);
         pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 20, 9))
-            .Moved(Local(2026, 1, 22, 8, 57), Workflow.Development);
+            .Moved(Local(2026, 1, 21, 9), Workflow.Development);
         pipeline.Jira.AddIssue("FAKE-3", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 22, 9), Workflow.Development);
         await pipeline.RunAllAsync(["backfill"]);
@@ -106,8 +113,8 @@ public class IncrementalSyncTests
         pipeline.Clock.Advance(TimeSpan.FromDays(1));
         await pipeline.RunAllAsync(["sync"], ["derive"], ["report", "--sprint", "42"]);
 
-        // The second fetch was not empty: the overlap brings the newest issue back, and it is written again.
-        await Assert.That(pipeline.Jira.SearchAnswers[1]).IsEquivalentTo(new[] { "FAKE-2" });
+        // The second fetch was not empty: the overlap brings the newest issues back, and they are written again.
+        await Assert.That(pipeline.Jira.SearchAnswers[1]).IsEquivalentTo(new[] { "FAKE-1", "FAKE-2" });
         await Assert.That(storeBefore).Contains("FAKE-2");
         await Assert.That(await pipeline.ReadStoreContentAsync()).IsEqualTo(storeBefore);
         await Assert.That(await pipeline.ReadReportBytesAsync(42)).IsEqualTo(reportBefore);

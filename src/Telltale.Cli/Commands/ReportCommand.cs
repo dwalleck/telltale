@@ -13,7 +13,7 @@ internal static class ReportCommand
             "report",
             "Write a sprint's report from the derived data in the store. Jira is not called.",
             fetches: false,
-            (pipeline, parse, cancellationToken) => pipeline.ReportAsync(parse.GetValue(sprint), cancellationToken),
+            (pipeline, parse, cancellationToken) => pipeline.ReportAsync(parse.GetValue(sprint), needsSprint: true, cancellationToken),
             sprint);
     }
 }

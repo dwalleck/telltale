@@ -111,6 +111,28 @@ public class SeparateCommandsTests
     }
 
     [Test]
+    public async Task Run_without_a_sprint_when_none_has_completed_updates_the_store_says_so_and_succeeds()
+    {
+        // Owner decision D28: the routine command does not fail on a board in its first sprint.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.AddSprint(43, "Fake Sprint 43", Local(2026, 2, 2, 10), plannedEnd: Local(2026, 2, 16, 9));
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 2, 2, 11))
+            .Moved(Local(2026, 2, 2, 12), Workflow.Development)
+            .Moved(Local(2026, 2, 3, 9), Workflow.Done);
+
+        var exit = await pipeline.RunAsync("run");
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(pipeline.Out.ToString().ReplaceLineEndings("\n")).IsEqualTo("The store is up to date. No sprint has completed yet, so no report was written.\n");
+        await Assert.That(ReportFiles(pipeline)).IsEmpty();
+
+        // The store was synced and derived: the running sprint's report can be written from it as it is.
+        await pipeline.RunAllAsync(["report", "--sprint", "43"]);
+        await Assert.That(await pipeline.ReadReportAsync(43)).Contains("\nDelivered issues: 1\n");
+    }
+
+    [Test]
     public async Task Report_before_any_derive_is_refused_with_a_plain_message()
     {
         await using var pipeline = new PipelineHarness();
