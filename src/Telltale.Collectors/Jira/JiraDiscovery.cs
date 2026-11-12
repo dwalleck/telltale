@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Text.Json;
 using Telltale.Core;
 using Telltale.Core.Secrets;
@@ -79,7 +80,7 @@ public sealed class JiraDiscovery
         return new JiraSiteFacts(statuses, boardStatusIds, resolutions, fields, sprintFields, storyPointFields, projectKeys);
     }
 
-    private static async Task<List<DiscoveredStatus>> ReadStatusesAsync(JiraClient jira, CancellationToken cancellationToken)
+    private async Task<List<DiscoveredStatus>> ReadStatusesAsync(JiraClient jira, CancellationToken cancellationToken)
     {
         using var document = await FirstCallAsync(jira, "rest/api/3/status", cancellationToken);
         return Read<List<DiscoveredStatus>>("status list", () => [.. document.RootElement.EnumerateArray().Select(status => new DiscoveredStatus(
@@ -89,17 +90,26 @@ public sealed class JiraDiscovery
     }
 
     /// <summary>
-    /// The connection check. A proxy can refuse with a status of its own, swallow the request or serve a page
-    /// of its own, and none of that looks like a TLS failure. So whatever goes wrong on this call, the
-    /// message says that the proxy or the trust in the corporate root certificate is the likely cause.
+    /// The connection check. What its failure most likely means depends on who answered. When Jira itself
+    /// refuses with 401 or 403, the request got through, so the Jira email or the API token is wrong. When no
+    /// answer of Jira's arrives (no connection, a TLS failure, a timeout, a proxy asking for its own sign-in,
+    /// a page served in place of JSON), the proxy or the trust in the corporate root certificate is. Any
+    /// other error from Jira is reported as it is.
     /// </summary>
-    private static async Task<JsonDocument> FirstCallAsync(JiraClient jira, string path, CancellationToken cancellationToken)
+    private async Task<JsonDocument> FirstCallAsync(JiraClient jira, string path, CancellationToken cancellationToken)
     {
         try
         {
             return await jira.GetAsync(path, cancellationToken);
         }
-        catch (UserFacingException exception)
+        catch (UserFacingException exception) when (jira.LastRefusal is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        {
+            throw new UserFacingException(
+                "Jira refused discover's first call. The likely cause is the Jira email or the API token in the secret store. "
+                + $"{_secrets.HowToSet(SecretName.JiraEmail)} {_secrets.HowToSet(SecretName.JiraApiToken)} The failure was: {exception.Message}",
+                exception);
+        }
+        catch (UserFacingException exception) when (jira.LastRefusal is null)
         {
             throw new UserFacingException(
                 "discover's first call to Jira failed. When this call fails, the likely cause is the system proxy or trust in the corporate root certificate. "

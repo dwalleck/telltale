@@ -957,16 +957,16 @@ public class DiscoverTests
     }
 
     [Test]
-    [Arguments("refused")]
+    [Arguments("proxy authentication")]
     [Arguments("timeout")]
     [Arguments("web page")]
-    public async Task Any_failure_of_the_first_call_names_the_proxy_and_the_root_certificate_as_the_likely_cause(string how)
+    public async Task A_first_call_that_never_gets_an_answer_from_jira_names_the_proxy_and_the_root_certificate(string how)
     {
-        // A proxy can refuse with its own 403, swallow the request, or serve a block page. None of these looks like TLS.
+        // A proxy can ask for its own sign-in, swallow the request, or serve a block page. None of these looks like TLS.
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/status", _ => true, how switch
         {
-            "refused" => StubHttpHandler.Json("""{ "message": "synthetic proxy refusal" }""", HttpStatusCode.Forbidden),
+            "proxy authentication" => StubHttpHandler.Json("""{ "message": "synthetic proxy challenge" }""", HttpStatusCode.ProxyAuthenticationRequired),
             "timeout" => _ => throw new TaskCanceledException("synthetic timeout", new TimeoutException()),
             _ => _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("<html>synthetic block page</html>") },
         });
@@ -976,11 +976,46 @@ public class DiscoverTests
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(FirstCallFailed + how switch
         {
-            "refused" => "Jira answered 403 (Forbidden) to GET rest/api/3/status.\n",
+            "proxy authentication" => "The proxy asked for authentication (407) on GET rest/api/3/status, so the request never reached Jira. "
+                + "Check the system proxy settings and that this account may use the proxy.\n",
             "timeout" => "Jira did not answer GET rest/api/3/status in time.\n",
             _ => "The answer to GET rest/api/3/status was not JSON. A proxy or sign-in page may have been served in place of Jira's answer.\n",
         });
         await Assert.That(File.Exists(pipeline.ConfigPath)).IsFalse();
+    }
+
+    [Test]
+    [Arguments(HttpStatusCode.Unauthorized, "401 (Unauthorized)")]
+    [Arguments(HttpStatusCode.Forbidden, "403 (Forbidden)")]
+    public async Task A_first_call_jira_refuses_names_the_jira_email_and_api_token_and_how_to_set_them(HttpStatusCode status, string shown)
+    {
+        // Jira answered, so the proxy and the certificate are fine. The answer's text is not shown.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/status", _ => true,
+            StubHttpHandler.Json("""{ "errorMessages": ["synthetic refusal quoting Fake Person One"] }""", status));
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira refused discover's first call. The likely cause is the Jira email or the API token in the secret store. "
+            + "Run 'telltale secrets set jira-email'. Run 'telltale secrets set jira-api-token'. "
+            + $"The failure was: Jira answered {shown} to GET rest/api/3/status.\n");
+        await Assert.That(pipeline.Jira.Handler.Requests.Select(request => request.Path)).IsEquivalentTo(["/rest/api/3/status"]);
+        await Assert.That(File.Exists(pipeline.ConfigPath)).IsFalse();
+    }
+
+    [Test]
+    public async Task A_first_call_jira_answers_with_another_error_is_reported_without_a_guess()
+    {
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/status", _ => true,
+            StubHttpHandler.Json("""{ "message": "synthetic outage" }""", HttpStatusCode.InternalServerError));
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo("Jira answered 500 (InternalServerError) to GET rest/api/3/status.\n");
     }
 
     [Test]
