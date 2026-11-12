@@ -14,12 +14,17 @@ public static class CliApp
         return await Build(services).Parse(args).InvokeAsync(invocation, cancellationToken);
     }
 
-    /// <summary>The command tree. A new command is a class in <c>Commands/</c> and a line here.</summary>
+    /// <summary>The command tree. A new command is a class in <c>Commands/</c> and a line here; one that works on the store is built with <see cref="PipelineCommand"/>.</summary>
     public static RootCommand Build(AppServices services) =>
         new("Telltale: delivery metrics for the team's work, never for individuals.")
         {
+            BackfillCommand.Create(services),
+            SyncCommand.Create(services),
+            DeriveCommand.Create(services),
+            ReportCommand.Create(services),
             RunCommand.Create(services),
             DiscoverCommand.Create(services),
+            SecretsCommand.Create(services),
         };
 
     /// <summary>The conventional exit code of a run ended by Ctrl+C (128 + SIGINT).</summary>

@@ -36,7 +36,7 @@ internal static class DiscoverCommand
         var timeZone = new Option<string?>("--time-zone") { Description = "The team's time zone as an IANA ID, e.g. America/Chicago. Needed the first time." };
         var backfillStart = new Option<string?>("--backfill-start") { Description = "The backfill fetches issues updated on or after this date (yyyy-MM-dd). Needed the first time." };
         var storyPointField = new Option<string?>("--story-point-field") { Description = "The ID of the board's story point field, e.g. customfield_10016. Needed when Jira lists none or several." };
-        var sprintField = new Option<string?>("--sprint-field") { Description = "The ID of the Sprint field, e.g. customfield_10020. Needed when Jira's field list does not show one." };
+        var sprintField = new Option<string?>("--sprint-field") { Description = "The ID of the Sprint field, e.g. customfield_10020. Needed when Jira lists none or several." };
 
         var command = new Command("discover", "Read the Jira site and write the configuration file. A rerun keeps what the file already says.")
         {
@@ -97,9 +97,8 @@ internal static class DiscoverCommand
         var facts = await new JiraDiscovery(services.HttpHandler, site, boardId!.Value, services.Secrets).ReadAsync(cancellationToken);
 
         // Whatever would make the file useless stops the command here, before anything is printed or written.
-        var storyPointInFile = given.StoryPointField is null ? FileText(jira, "storyPointFieldId", $"jira.storyPointFieldId in {path}") : null;
-        var (storyPointFieldId, storyPointSource) = ChooseStoryPointField(given.StoryPointField, storyPointInFile, facts, path);
-        var sprintLines = DescribeSprintField(given.SprintField, facts);
+        var sprint = ChooseField(SprintField, given.SprintField, jira, facts.SprintFields, facts, path);
+        var storyPoints = ChooseField(StoryPointField, given.StoryPointField, jira, facts.StoryPointFields, facts, path);
         var (projectKeys, projectKeySource) = ChooseProjectKeys(jira["projectKeys"], facts.ProjectKeys, boardId.Value);
 
         var output = services.Out;
@@ -111,21 +110,23 @@ internal static class DiscoverCommand
             await output.WriteLineAsync($"  {resolution.Id}  {resolution.Name}");
         }
 
-        foreach (var line in sprintLines)
-        {
-            await output.WriteLineAsync(line);
-        }
-
-        await output.WriteLineAsync($"Story point field: {storyPointFieldId} ({storyPointSource})");
+        await output.WriteLineAsync($"Sprint field: {sprint.Id} ({sprint.Source})");
+        await output.WriteLineAsync($"Story point field: {storyPoints.Id} ({storyPoints.Source})");
         await output.WriteLineAsync($"Project keys: {projectKeySource}");
 
         var changes = new List<string>();
         Set(jira, "siteUrl", site.AbsoluteUri, "jira.siteUrl", changes, showValues: false);
         Set(jira, "boardId", boardId.Value, "jira.boardId", changes);
         Set(jira, "projectKeys", projectKeys, "jira.projectKeys", changes);
-        Set(jira, "storyPointFieldId", storyPointFieldId, "jira.storyPointFieldId", changes);
+        Set(jira, "sprintFieldId", sprint.Id, "jira.sprintFieldId", changes);
+        Set(jira, "storyPointFieldId", storyPoints.Id, "jira.storyPointFieldId", changes);
         Set(jira, "backfillStart", backfillStart!, "jira.backfillStart", changes);
+
+        // Jira cannot say which resolutions mean abandoned or which days are holidays. Both lists are the
+        // owner's: discover starts them empty and never touches them again.
+        root["abandonedResolutionIds"] ??= new JsonArray();
         Set(root, "timeZone", timeZone!, "timeZone", changes);
+        root["holidays"] ??= new JsonArray();
 
         foreach (var change in changes)
         {
@@ -145,7 +146,7 @@ internal static class DiscoverCommand
         var backup = await ReplaceFileAsync(path, text, previous is not null, services.Clock, cancellationToken);
         if (backup is null)
         {
-            await output.WriteLineAsync($"Wrote {path}. Review the status roles before the first run.");
+            await output.WriteLineAsync($"Wrote {path}. Before the first run, review the status roles and fill in abandonedResolutionIds and holidays.");
             return;
         }
 
@@ -220,52 +221,55 @@ internal static class DiscoverCommand
             _ => null,
         };
 
+    /// <summary>What differs between the two fields discover has to find.</summary>
+    /// <param name="Setting">The setting's name inside the <c>jira</c> section.</param>
+    /// <param name="Option">The option that names the field.</param>
+    /// <param name="Noun">How messages call the field.</param>
+    /// <param name="NoneListed">What to say when Jira's field list shows none.</param>
+    /// <param name="HoldsNumber">Whether the field must hold a number.</param>
+    private sealed record FieldKind(string Setting, string Option, string Noun, string NoneListed, bool HoldsNumber);
+
+    private static readonly FieldKind SprintField = new(
+        "sprintFieldId", "--sprint-field", "Sprint field",
+        "Jira's field list has no Sprint field. Check that the site has Jira Software and that this account may see the field, or give the field's ID with --sprint-field.",
+        HoldsNumber: false);
+
+    private static readonly FieldKind StoryPointField = new(
+        "storyPointFieldId", "--story-point-field", "story point field",
+        "Jira's field list has no field this tool recognises as story points. Give the field's ID with --story-point-field.",
+        HoldsNumber: true);
+
     /// <summary>
-    /// The story point field and where it came from. The owner's word wins: the option, then the file. Jira's
-    /// list decides only when it names exactly one field, because a site often has two and the board uses one.
-    /// A field the owner names must be in Jira's field list and hold a number.
+    /// A field's ID and where it came from. The owner's word wins: the option, then the file. Jira's list
+    /// decides only when it names exactly one field; a site often has two story point fields, and the board
+    /// uses one. A field the owner names must be in Jira's field list, and hold a number where the kind says so.
     /// </summary>
-    private static (string Id, string Source) ChooseStoryPointField(string? given, string? inFile, JiraSiteFacts facts, string path)
+    private static (string Id, string Source) ChooseField(FieldKind kind, string? given, JsonObject jira, IReadOnlyList<DiscoveredField> listed, JiraSiteFacts facts, string path)
     {
-        var listed = facts.StoryPointFields;
         var names = string.Join(", ", listed.Select(field => $"{field.Id} ({field.Name})"));
+        var settingInFile = $"jira.{kind.Setting} in {path}";
+        var inFile = given is null ? FileText(jira, kind.Setting, settingInFile) : null;
 
         if ((given ?? inFile) is { } named)
         {
-            var from = given is not null ? "--story-point-field" : $"jira.storyPointFieldId in {path}";
-            if (RequireListed(named, from, facts).ValueType != "number")
+            var from = given is not null ? kind.Option : settingInFile;
+            var field = RequireListed(named, from, facts);
+            if (kind.HoldsNumber && field.ValueType != "number")
             {
                 throw new UserFacingException($"{from}: the field '{named}' does not hold a number, so it cannot hold story points. Nothing was written.");
             }
 
             return given is not null
-                ? (named, "given with --story-point-field")
+                ? (named, $"given with {kind.Option}")
                 : (named, listed.Count == 0 || listed.Any(field => field.Id == named) ? "from the file" : $"from the file; Jira lists {names}");
         }
 
         return listed.Count switch
         {
             1 => (listed[0].Id, listed[0].Name),
-            0 => throw new UserFacingException("Jira's field list has no field this tool recognises as story points. Give the field's ID with --story-point-field. Nothing was written."),
-            _ => throw new UserFacingException($"Jira lists more than one story point field: {names}. Say which one the board uses with --story-point-field. Nothing was written."),
+            0 => throw new UserFacingException($"{kind.NoneListed} Nothing was written."),
+            _ => throw new UserFacingException($"Jira lists more than one {kind.Noun}: {names}. Say which one the board uses with {kind.Option}. Nothing was written."),
         };
-    }
-
-    /// <summary>
-    /// What to say about the Sprint field. No setting holds it yet, so it is only listed, and a site that shows
-    /// none does not stop the command; the owner can name it, and a named field must be in Jira's field list.
-    /// </summary>
-    private static List<string> DescribeSprintField(string? given, JiraSiteFacts facts)
-    {
-        if (given is not null)
-        {
-            RequireListed(given, "--sprint-field", facts);
-            return [$"Sprint field: {given} (given with --sprint-field)"];
-        }
-
-        return facts.SprintFields.Count == 0
-            ? ["Sprint field: none found in Jira's field list. Give its ID with --sprint-field."]
-            : [.. facts.SprintFields.Select(field => $"Sprint field: {field.Id} ({field.Name})")];
     }
 
     private static DiscoveredField RequireListed(string fieldId, string from, JiraSiteFacts facts) =>
@@ -316,6 +320,7 @@ internal static class DiscoverCommand
             using var stream = new MemoryStream(Encoding.UTF8.GetBytes(text));
             var config = await ConfigFile.ReadAsync(stream, path, cancellationToken);
             PipelineSteps.ReadStatusRoles(config, path);
+            PipelineSteps.ReadAbandonedResolutionIds(config, path);
             PipelineSteps.ReadTimeZone(config, path);
         }
         catch (UserFacingException exception)

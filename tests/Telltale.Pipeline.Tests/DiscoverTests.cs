@@ -577,30 +577,134 @@ public class DiscoverTests
     }
 
     [Test]
-    public async Task A_field_list_without_a_sprint_field_is_said_and_does_not_stop_discover()
+    public async Task A_field_list_without_a_sprint_field_stops_discover_and_names_the_option()
     {
-        // Nothing reads the Sprint field yet; the setting arrives with a later ticket.
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.Fields.RemoveAll(field => field.Id == FakeJira.SprintFieldId);
 
         var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
 
-        await Assert.That(pipeline.Error.ToString()).IsEmpty();
-        await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(Output(pipeline)).Contains("Sprint field: none found in Jira's field list. Give its ID with --sprint-field.\n");
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira's field list has no Sprint field. Check that the site has Jira Software and that this account may see the field, "
+            + "or give the field's ID with --sprint-field. Nothing was written.\n");
+        await Assert.That(File.Exists(pipeline.ConfigPath)).IsFalse();
     }
 
     [Test]
-    public async Task The_sprint_field_the_owner_names_is_listed()
+    public async Task Two_sprint_fields_need_the_owners_choice()
     {
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.Fields.Add(new FakeField("customfield_10021", "Fake Other Sprint", "array", FakeJira.SprintFieldType));
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira lists more than one Sprint field: customfield_10020 (Fake Sprint), customfield_10021 (Fake Other Sprint). "
+            + "Say which one the board uses with --sprint-field. Nothing was written.\n");
+        await Assert.That(File.Exists(pipeline.ConfigPath)).IsFalse();
+    }
+
+    [Test]
+    public async Task The_sprint_field_the_owner_names_is_written_and_a_rerun_keeps_it()
+    {
+        // The field list shows this field without the Sprint type, so only the owner can name it.
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.Fields.Add(new FakeField("customfield_10099", "Fake Iteration", "array", null));
 
         var exit = await pipeline.RunWithFilesAsTheyAreAsync([.. FirstDiscover, "--sprint-field", "customfield_10099"]);
+        var rerun = await pipeline.RunWithFilesAsTheyAreAsync("discover", "--time-zone", "Europe/London");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(rerun).IsEqualTo(0);
+        await Assert.That((await ReadWrittenConfigAsync(pipeline))["jira"]!["sprintFieldId"]!.GetValue<string>()).IsEqualTo("customfield_10099");
+        await Assert.That(Output(pipeline)).Contains("Sprint field: customfield_10099 (given with --sprint-field)\n");
+        await Assert.That(Output(pipeline)).Contains("Sprint field: customfield_10099 (from the file; Jira lists customfield_10020 (Fake Sprint))\n");
+    }
+
+    [Test]
+    public async Task A_sprint_field_that_is_also_the_story_point_field_is_refused_as_run_would()
+    {
+        await using var pipeline = new PipelineHarness();
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync([.. FirstDiscover, "--sprint-field", FakeJira.StoryPointFieldId]);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"discover did not write {pipeline.ConfigPath}, because run would refuse it: "
+            + $"The configuration file {pipeline.ConfigPath} is not valid: jira.sprintFieldId and jira.storyPointFieldId name the same field.\n");
+        await Assert.That(File.Exists(pipeline.ConfigPath)).IsFalse();
+    }
+
+    [Test]
+    public async Task The_first_discover_writes_the_sprint_field_and_empty_lists_for_the_owner_to_fill()
+    {
+        await using var pipeline = new PipelineHarness();
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
 
         await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(Output(pipeline)).Contains("Sprint field: customfield_10099 (given with --sprint-field)\n");
-        await Assert.That(Output(pipeline)).DoesNotContain($"Sprint field: {FakeJira.SprintFieldId}");
+        var written = await ReadWrittenConfigAsync(pipeline);
+        await Assert.That(written["jira"]!["sprintFieldId"]!.GetValue<string>()).IsEqualTo("customfield_10020");
+        await Assert.That(written["abandonedResolutionIds"]!.ToJsonString()).IsEqualTo("[]");
+        await Assert.That(written["holidays"]!.ToJsonString()).IsEqualTo("[]");
+        await Assert.That(Output(pipeline)).Contains("Before the first run, review the status roles and fill in abandonedResolutionIds and holidays.\n");
+    }
+
+    [Test]
+    public async Task A_rerun_keeps_the_abandoned_resolutions_and_holidays_the_owner_listed()
+    {
+        await using var pipeline = new PipelineHarness();
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        await EditWrittenConfigAsync(pipeline, config =>
+        {
+            config["abandonedResolutionIds"] = new JsonArray("300002");
+            config["holidays"] = new JsonArray("2026-01-19", "2026-05-25");
+        });
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover", "--time-zone", "Europe/London");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        var written = await ReadWrittenConfigAsync(pipeline);
+        await Assert.That(written["timeZone"]!.GetValue<string>()).IsEqualTo("Europe/London");
+        await Assert.That(written["abandonedResolutionIds"]!.ToJsonString()).IsEqualTo("""["300002"]""");
+        await Assert.That(written["holidays"]!.ToJsonString()).IsEqualTo("""["2026-01-19","2026-05-25"]""");
+    }
+
+    [Test]
+    public async Task An_abandoned_resolution_run_would_refuse_stops_a_rerun()
+    {
+        // A resolution's name where its ID belongs would match no issue.
+        await using var pipeline = new PipelineHarness();
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        await EditWrittenConfigAsync(pipeline, config => config["abandonedResolutionIds"] = new JsonArray("Fake Won't Do"));
+        var edited = await File.ReadAllTextAsync(pipeline.ConfigPath);
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover", "--time-zone", "Europe/London");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("run would refuse it").And.Contains("abandonedResolutionIds: every entry must be a Jira resolution ID");
+        await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(edited);
+    }
+
+    [Test]
+    public async Task A_rerun_keeps_the_order_of_the_status_roles()
+    {
+        // The order is board order and reports list statuses in it. Here it is not the order of the IDs.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.BoardColumns.Reverse();
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover", "--time-zone", "Europe/London");
+
+        await Assert.That(exit).IsEqualTo(0);
+        var written = await ReadWrittenConfigAsync(pipeline);
+        await Assert.That(written["timeZone"]!.GetValue<string>()).IsEqualTo("Europe/London");
+        await Assert.That(string.Join(" ", written["statusRoles"]!.AsObject().Select(role => role.Key)))
+            .IsEqualTo("600008 600009 600004 600005 600006 600007 600001 600002 600003");
     }
 
     [Test]
@@ -712,9 +816,9 @@ public class DiscoverTests
     }
 
     [Test]
-    [Arguments(SecretName.JiraEmail, "'Jira email'")]
-    [Arguments(SecretName.JiraApiToken, "'Jira API token'")]
-    public async Task A_missing_jira_secret_stops_discover_before_any_call_and_is_named(SecretName missing, string expectedName)
+    [Arguments(SecretName.JiraEmail, "'Jira email'", "jira-email")]
+    [Arguments(SecretName.JiraApiToken, "'Jira API token'", "jira-api-token")]
+    public async Task A_missing_jira_secret_stops_discover_before_any_call_and_says_how_to_set_it(SecretName missing, string expectedName, string argument)
     {
         await using var pipeline = new PipelineHarness();
         pipeline.Secrets.Remove(missing);
@@ -722,7 +826,8 @@ public class DiscoverTests
         var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
 
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo($"The secret {expectedName} is not set in the secret store.\n");
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"The secret {expectedName} is not set in the secret store. Run 'telltale secrets set {argument}'.\n");
         await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
     }
 

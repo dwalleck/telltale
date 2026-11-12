@@ -73,16 +73,22 @@ public sealed class SqliteStore : ITelltaleStore
         }
     }
 
-    public async Task WriteRawAsync(RawData batch, CancellationToken cancellationToken = default)
+    public async Task WriteRawAsync(RawData batch, Watermark reached, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
+        // An issue that is out of scope now may have been stored while it was in scope (owner decision D13).
+        // Its rows go in the same transaction as the batch, so the store never holds half of the change.
+        var outOfScope = batch.OutOfScopeIssueIds.Select(issueId => new { issueId });
+        await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM change WHERE issue_id = @issueId;", outOfScope, transaction));
+        await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM issue WHERE issue_id = @issueId;", outOfScope, transaction));
+
         await connection.ExecuteAsync(Command(
             cancellationToken,
             """
-            INSERT INTO issue (issue_id, issue_key, issue_type_id, created, status_id, resolution_id, story_points, assignee_hash, updated)
-            VALUES (@IssueId, @Key, @IssueTypeId, @Created, @StatusId, @ResolutionId, @StoryPoints, @AssigneeHash, @Updated)
+            INSERT INTO issue (issue_id, issue_key, issue_type_id, created, status_id, resolution_id, story_points, assignee_hash, updated, sprint_ids)
+            VALUES (@IssueId, @Key, @IssueTypeId, @Created, @StatusId, @ResolutionId, @StoryPoints, @AssigneeHash, @Updated, @SprintIds)
             ON CONFLICT (issue_id) DO UPDATE SET
                 issue_key = excluded.issue_key,
                 issue_type_id = excluded.issue_type_id,
@@ -91,7 +97,8 @@ public sealed class SqliteStore : ITelltaleStore
                 resolution_id = excluded.resolution_id,
                 story_points = excluded.story_points,
                 assignee_hash = excluded.assignee_hash,
-                updated = excluded.updated;
+                updated = excluded.updated,
+                sprint_ids = excluded.sprint_ids;
             """,
             batch.Issues.Select(issue => new
             {
@@ -104,6 +111,7 @@ public sealed class SqliteStore : ITelltaleStore
                 issue.StoryPoints,
                 issue.AssigneeHash,
                 Updated = StoredTime.ToStored(issue.Updated),
+                issue.SprintIds,
             }),
             transaction));
 
@@ -161,7 +169,26 @@ public sealed class SqliteStore : ITelltaleStore
             batch.Statuses,
             transaction));
 
+        // Set, not raised: a batch that reaches less far (a backfill starting over) leaves a watermark that
+        // makes the next sync fetch more, which is always safe.
+        await connection.ExecuteAsync(Command(
+            cancellationToken,
+            """
+            INSERT INTO watermark (collector, covers, updated_through)
+            VALUES (@Collector, @Covers, @UpdatedThrough)
+            ON CONFLICT (collector) DO UPDATE SET covers = excluded.covers, updated_through = excluded.updated_through;
+            """,
+            new { reached.Collector, reached.Covers, UpdatedThrough = StoredTime.ToStored(reached.UpdatedThrough) },
+            transaction));
+
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task<Watermark?> ReadWatermarkAsync(string collector, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
+        var row = await connection.QuerySingleOrDefaultAsync<WatermarkRow>(Command(cancellationToken, "SELECT covers, updated_through FROM watermark WHERE collector = @collector;", new { collector }));
+        return row is null ? null : new Watermark(collector, row.Covers, StoredTime.FromStoredOrNull(row.UpdatedThrough));
     }
 
     public async Task<RawData> ReadRawAsync(CancellationToken cancellationToken = default)
@@ -174,13 +201,13 @@ public sealed class SqliteStore : ITelltaleStore
         var statuses = await connection.QueryAsync<StatusRow>(Command(cancellationToken, "SELECT * FROM status ORDER BY status_id;"));
 
         return new RawData(
-            [.. issues.Select(row => new RawIssue(row.IssueId, row.IssueKey, row.IssueTypeId, StoredTime.FromStored(row.Created), row.StatusId, row.ResolutionId, row.StoryPoints, row.AssigneeHash, StoredTime.FromStored(row.Updated)))],
+            [.. issues.Select(row => new RawIssue(row.IssueId, row.IssueKey, row.IssueTypeId, StoredTime.FromStored(row.Created), row.StatusId, row.ResolutionId, row.StoryPoints, row.AssigneeHash, StoredTime.FromStored(row.Updated), row.SprintIds))],
             [.. changes.Select(row => new RawChange(row.HistoryId, row.IssueId, StoredTime.FromStored(row.At), row.Field, row.FromValue, row.ToValue))],
             [.. sprints.Select(row => new RawSprint(row.SprintId, row.BoardId, row.Name, row.State, StoredTime.FromStoredOrNull(row.Started), StoredTime.FromStoredOrNull(row.PlannedEnd), StoredTime.FromStoredOrNull(row.Completed)))],
             [.. statuses.Select(row => new RawStatus(row.StatusId, row.Name, row.Category))]);
     }
 
-    public async Task ReplaceDerivedAsync(DerivedData derived, CancellationToken cancellationToken = default)
+    public async Task ReplaceDerivedAsync(DerivedData derived, string rawDigest, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -221,10 +248,43 @@ public sealed class SqliteStore : ITelltaleStore
         await InsertRowsAsync(
             connection,
             transaction,
-            "INSERT INTO issue_cycle (issue_id, cycle_end, delivered, delivery_sprint_id) VALUES (@issueId, @cycleEnd, @delivered, @deliverySprintId);",
-            ["@issueId", "@cycleEnd", "@delivered", "@deliverySprintId"],
-            derived.IssueCycles.Select(cycle => new object?[] { cycle.IssueId, StoredTime.ToStored(cycle.CycleEnd), cycle.Delivered ? 1L : 0L, cycle.DeliverySprintId }),
+            """
+            INSERT INTO issue_cycle (issue_id, cycle_start, cycle_end, calendar_days, business_days, point_bucket, delivered, delivery_sprint_id, reopen_count)
+            VALUES (@issueId, @cycleStart, @cycleEnd, @calendarDays, @businessDays, @pointBucket, @delivered, @deliverySprintId, @reopenCount);
+            """,
+            ["@issueId", "@cycleStart", "@cycleEnd", "@calendarDays", "@businessDays", "@pointBucket", "@delivered", "@deliverySprintId", "@reopenCount"],
+            derived.IssueCycles.Select(cycle => new object?[]
+            {
+                cycle.IssueId, StoredTime.ToStored(cycle.Cycle?.Start), StoredTime.ToStored(cycle.CycleEnd), cycle.Cycle?.CalendarDays, cycle.Cycle?.BusinessDays,
+                cycle.PointBucket, cycle.Delivered ? 1L : 0L, cycle.DeliverySprintId, (long)cycle.ReopenCount,
+            }),
             cancellationToken);
+
+        await InsertRowsAsync(
+            connection,
+            transaction,
+            "INSERT INTO membership_interval (issue_id, sprint_id, started, ended) VALUES (@issueId, @sprintId, @started, @ended);",
+            ["@issueId", "@sprintId", "@started", "@ended"],
+            derived.MembershipIntervals.Select(interval => new object?[] { interval.IssueId, interval.SprintId, StoredTime.ToStored(interval.Start), StoredTime.ToStored(interval.End) }),
+            cancellationToken);
+
+        await InsertRowsAsync(
+            connection,
+            transaction,
+            "INSERT INTO sprint_status_time (issue_id, sprint_id, status_id, calendar_seconds, business_seconds, business_days) VALUES (@issueId, @sprintId, @statusId, @calendarSeconds, @businessSeconds, @businessDays);",
+            ["@issueId", "@sprintId", "@statusId", "@calendarSeconds", "@businessSeconds", "@businessDays"],
+            derived.SprintStatusTimes.Select(time => new object?[] { time.IssueId, time.SprintId, time.StatusId, time.CalendarTime.TotalSeconds, time.BusinessTime.TotalSeconds, time.BusinessDays }),
+            cancellationToken);
+
+        await InsertRowsAsync(
+            connection,
+            transaction,
+            "INSERT INTO board_status (status_id, position, is_done) VALUES (@statusId, @position, @isDone);",
+            ["@statusId", "@position", "@isDone"],
+            derived.BoardStatuses.Select(status => new object?[] { status.StatusId, (long)status.Position, status.IsDone ? 1L : 0L }),
+            cancellationToken);
+
+        await connection.ExecuteAsync(Command(cancellationToken, "INSERT INTO derived_source (raw_digest) VALUES (@rawDigest);", new { rawDigest }, transaction));
 
         foreach (var (_, sql) in Scripts.InFolder("Views"))
         {
@@ -241,10 +301,40 @@ public sealed class SqliteStore : ITelltaleStore
         await transaction.CommitAsync(cancellationToken);
     }
 
+    public async Task<string?> ReadDerivedSourceAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
+
+        // The table is itself derived: before the first rebuild it does not exist.
+        var built = await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object WHERE name = 'derived_source');"));
+        return built
+            ? await connection.QuerySingleOrDefaultAsync<string?>(Command(cancellationToken, "SELECT raw_digest FROM derived_source;"))
+            : null;
+    }
+
     public async Task<IReadOnlyList<T>> QueryViewsAsync<T>(string sql, object? parameters = null, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_readOnlyConnectionString, cancellationToken);
         return (await connection.QueryAsync<T>(new CommandDefinition(sql, parameters, cancellationToken: cancellationToken))).AsList();
+    }
+
+    /// <summary>
+    /// Whether the database at this path holds at least one hashed person. A hash is only worth something with
+    /// the salt that made it, so this is what a missing or new salt would break. The file is opened read-only
+    /// and never created: no file, or one from before the raw tables existed, holds nobody.
+    /// </summary>
+    public static async Task<bool> HoldsHashedPeopleAsync(string databasePath, CancellationToken cancellationToken = default)
+    {
+        if (!File.Exists(databasePath))
+        {
+            return false;
+        }
+
+        var readOnly = new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false, Mode = SqliteOpenMode.ReadOnly }.ToString();
+        await using var connection = await OpenAsync(readOnly, cancellationToken);
+        var hasIssues = await connection.ExecuteScalarAsync<long>(Command(cancellationToken, "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'issue';"));
+        return hasIssues > 0
+            && await connection.ExecuteScalarAsync<long>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM issue WHERE assignee_hash IS NOT NULL);")) > 0;
     }
 
     private static CommandDefinition Command(CancellationToken cancellationToken, string sql, object? parameters = null, DbTransaction? transaction = null) =>
@@ -307,6 +397,7 @@ public sealed class SqliteStore : ITelltaleStore
         public double? StoryPoints { get; init; }
         public string? AssigneeHash { get; init; }
         public string Updated { get; init; } = "";
+        public string? SprintIds { get; init; }
     }
 
     private sealed class ChangeRow
@@ -328,6 +419,12 @@ public sealed class SqliteStore : ITelltaleStore
         public string? Started { get; init; }
         public string? PlannedEnd { get; init; }
         public string? Completed { get; init; }
+    }
+
+    private sealed class WatermarkRow
+    {
+        public string Covers { get; init; } = "";
+        public string? UpdatedThrough { get; init; }
     }
 
     private sealed class StatusRow

@@ -25,6 +25,15 @@ public static class ConfigFile
         AllowDuplicateProperties = false,
     };
 
+    /// <summary>True for <c>customfield_</c> followed by digits only, the form of every Jira custom field ID.</summary>
+    private static bool IsCustomFieldId(string fieldId)
+    {
+        const string prefix = "customfield_";
+        return fieldId.Length > prefix.Length
+            && fieldId.StartsWith(prefix, StringComparison.Ordinal)
+            && fieldId.AsSpan(prefix.Length).IndexOfAnyExceptInRange('0', '9') < 0;
+    }
+
     public static async Task<TelltaleConfig> LoadAsync(string path, CancellationToken cancellationToken = default)
     {
         if (!File.Exists(path))
@@ -67,6 +76,22 @@ public static class ConfigFile
             if (string.IsNullOrWhiteSpace(config.Jira.StoryPointFieldId))
             {
                 throw new UserFacingException($"The configuration file {path} is not valid: jira.storyPointFieldId must not be empty.");
+            }
+
+            if (string.IsNullOrWhiteSpace(config.Jira.SprintFieldId))
+            {
+                throw new UserFacingException($"The configuration file {path} is not valid: jira.sprintFieldId must not be empty.");
+            }
+
+            // The collector stores this field's history, so it must be a custom field, and not the estimate.
+            if (!IsCustomFieldId(config.Jira.SprintFieldId))
+            {
+                throw new UserFacingException($"The configuration file {path} is not valid: jira.sprintFieldId must be a custom field ID such as customfield_10020.");
+            }
+
+            if (config.Jira.SprintFieldId == config.Jira.StoryPointFieldId)
+            {
+                throw new UserFacingException($"The configuration file {path} is not valid: jira.sprintFieldId and jira.storyPointFieldId name the same field.");
             }
 
             if (config.Jira.ProjectKeys is not { Count: > 0 })

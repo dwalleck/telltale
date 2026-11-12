@@ -29,6 +29,17 @@ public sealed record FakeSprint(long Id, string Name, string State, DateTimeOffs
 }
 
 /// <summary>
+/// An issue type as Jira describes it on an issue. A null <see cref="HierarchyLevel"/> leaves the field out of the response.
+/// Jira's levels: -1 sub-task, 0 standard, 1 epic, higher for what sits above epics (research note 05).
+/// </summary>
+public sealed record FakeIssueType(string Id, string Name, bool Subtask, int? HierarchyLevel)
+{
+    public static readonly FakeIssueType Story = new(FakeJira.IssueTypeStoryId, "Fake Story", Subtask: false, HierarchyLevel: 0);
+    public static readonly FakeIssueType SubTask = new("800002", "Fake Sub-task", Subtask: true, HierarchyLevel: -1);
+    public static readonly FakeIssueType Epic = new("800003", "Fake Epic", Subtask: false, HierarchyLevel: 1);
+}
+
+/// <summary>
 /// A synthetic issue and its history. Build it with the fluent methods, in time order:
 /// <c>jira.AddIssue("FAKE-1", created).AssignedTo(People.One).Moved(at, Workflow.Development).Moved(later, Workflow.Done)</c>.
 /// To give later tickets a new kind of history (Sprint field, story points), add a method here that
@@ -66,13 +77,25 @@ public sealed class FakeIssue
     /// <summary>The status the issue is in now, after every move so far.</summary>
     public FakeStatus Status { get; private set; }
 
+    /// <summary>A story unless <see cref="OfType"/> says otherwise.</summary>
+    public FakeIssueType Type { get; private set; } = FakeIssueType.Story;
+
     public FakePerson? Assignee { get; private set; }
 
     public double? StoryPoints { get; private set; }
 
     public string? ResolutionId { get; private set; }
 
+    /// <summary>The sprints the issue's Sprint field lists now.</summary>
+    public IReadOnlyList<long> SprintIds { get; private set; } = [];
+
     public IReadOnlyList<FakeHistory> Histories => _histories;
+
+    public FakeIssue OfType(FakeIssueType type)
+    {
+        Type = type;
+        return this;
+    }
 
     public FakeIssue AssignedTo(FakePerson person)
     {
@@ -112,6 +135,29 @@ public sealed class FakeIssue
         return this;
     }
 
+    /// <summary>Sets the Sprint field without recording history, as for an issue created inside a sprint.</summary>
+    public FakeIssue InSprints(params long[] sprintIds)
+    {
+        SprintIds = sprintIds;
+        return this;
+    }
+
+    /// <summary>
+    /// Changes the Sprint field from what it lists now to <paramref name="sprintIds"/> and records the change.
+    /// No IDs means the issue was taken out of every sprint.
+    /// </summary>
+    public FakeIssue SprintsChanged(DateTimeOffset at, params long[] sprintIds)
+    {
+        AddHistory(at, FakeJira.SprintFieldId, "Sprint", SprintList(SprintIds), SprintNames(SprintIds), SprintList(sprintIds), SprintNames(sprintIds));
+        SprintIds = sprintIds;
+        return this;
+    }
+
+    // A Sprint changelog item holds comma-separated sprint IDs, and an empty text for no sprint (research note 05).
+    private static string SprintList(IReadOnlyList<long> sprintIds) => string.Join(", ", sprintIds.Select(id => id.ToString(CultureInfo.InvariantCulture)));
+
+    private static string SprintNames(IReadOnlyList<long> sprintIds) => string.Join(", ", sprintIds.Select(FakeJira.SprintName));
+
     /// <summary>Appends one changelog entry with the next history ID.</summary>
     public FakeIssue AddHistory(DateTimeOffset at, string fieldId, string fieldName, string? from, string? fromText, string? to, string? toText, FakePerson? author = null)
     {
@@ -146,6 +192,7 @@ public sealed partial class FakeJira
     private readonly Lock _gate = new();
     private readonly List<FakeSprint> _sprints = [];
     private readonly List<FakeIssue> _issues = [];
+    private readonly List<IReadOnlyList<string>> _searchAnswers = [];
     private readonly Dictionary<string, string> _statusNames = Workflow.BoardOrder.ToDictionary(status => status.Id, status => status.DefaultName);
     private int _nextIssueId = 900001;
     private int _nextHistoryId = 200001;
@@ -155,7 +202,7 @@ public sealed partial class FakeJira
         Handler = new StubHttpHandler()
             .On(HttpMethod.Get, $"/rest/agile/1.0/board/{BoardId}/sprint", _ => Respond(Sprints()))
             .On(HttpMethod.Get, "/rest/api/3/status", _ => Respond(Statuses()))
-            .On(HttpMethod.Post, "/rest/api/3/search/jql", _ => Respond(Search()))
+            .On(HttpMethod.Post, "/rest/api/3/search/jql", request => Respond(Search(request)))
             .On(HttpMethod.Post, "/rest/api/3/changelog/bulkfetch", request => Respond(Changelogs(request)));
         AddDiscoverRoutes();
     }
@@ -164,6 +211,12 @@ public sealed partial class FakeJira
 
     /// <summary>Runs before each of the site's own answers, for example to move the clock as if the fetch took time.</summary>
     public Action? BeforeResponse { get; set; }
+
+    /// <summary>
+    /// The time zone of the Jira account the tool signs in with: a quoted JQL date is read in it (research
+    /// note 05). The team's zone by default; the tool does not know it.
+    /// </summary>
+    public TimeZoneInfo AccountTimeZone { get; set; } = TimeZoneInfo.FindSystemTimeZoneById(TeamTime.ZoneId);
 
     /// <summary>Which of the two documented response shapes to serve.</summary>
     public JiraShapes Shapes { get; set; } = JiraShapes.AsSchemas;
@@ -175,6 +228,21 @@ public sealed partial class FakeJira
             lock (_gate)
             {
                 return [.. _issues];
+            }
+        }
+    }
+
+    /// <summary>
+    /// The issue keys each search answered with, one entry per search, oldest first: what the tool fetched,
+    /// whatever JQL it used to ask.
+    /// </summary>
+    public IReadOnlyList<IReadOnlyList<string>> SearchAnswers
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return [.. _searchAnswers];
             }
         }
     }
@@ -321,10 +389,17 @@ public sealed partial class FakeJira
 
     private JsonArray Statuses() => new(Workflow.BoardOrder.Select(status => (JsonNode)StatusDetails(status)).ToArray());
 
-    private JsonObject Search()
+    private JsonObject Search(StubRequest request)
     {
+        var updatedSince = UpdatedSince(request);
+        var found = Issues.Where(issue => issue.Updated >= updatedSince).OrderBy(issue => issue.Updated).ToList();
+        lock (_gate)
+        {
+            _searchAnswers.Add([.. found.Select(issue => issue.Key)]);
+        }
+
         var issues = new JsonArray();
-        foreach (var issue in Issues.OrderBy(issue => issue.Updated))
+        foreach (var issue in found)
         {
             issues.Add(new JsonObject
             {
@@ -336,13 +411,13 @@ public sealed partial class FakeJira
                 {
                     ["summary"] = issue.Summary,
                     ["description"] = issue.Description,
-                    ["issuetype"] = new JsonObject { ["id"] = IssueTypeStoryId, ["name"] = "Story", ["subtask"] = false, ["hierarchyLevel"] = 0 },
+                    ["issuetype"] = IssueTypeDetails(issue.Type),
                     ["status"] = StatusDetails(issue.Status),
                     ["resolution"] = issue.ResolutionId is null ? null : new JsonObject { ["id"] = issue.ResolutionId, ["name"] = "Fake Resolution", ["description"] = ResolutionDescription },
                     ["assignee"] = issue.Assignee is null ? null : UserDetails(issue.Assignee),
                     ["created"] = PlatformTime(issue.Created),
                     ["updated"] = PlatformTime(issue.Updated),
-                    [SprintFieldId] = null,
+                    [SprintFieldId] = SprintField(issue),
                     [StoryPointFieldId] = issue.StoryPoints,
                 },
             });
@@ -352,6 +427,52 @@ public sealed partial class FakeJira
         AddLastPageToken(page);
         return page;
     }
+
+    /// <summary>
+    /// The lower bound on <c>updated</c> in the search's JQL: a quoted date, or date and minute, read in
+    /// <see cref="AccountTimeZone"/> (research note 05; owner decision D26). A search without one fails the
+    /// test: Jira refuses unbounded JQL.
+    /// </summary>
+    private DateTimeOffset UpdatedSince(StubRequest request)
+    {
+        using var body = JsonDocument.Parse(request.Body);
+        var jql = body.RootElement.GetProperty("jql").GetString() ?? "";
+        var bound = System.Text.RegularExpressions.Regex.Match(jql, """\bupdated >= "(?<quoted>[^"]+)"(?= |$)""");
+        if (bound.Groups["quoted"].Success)
+        {
+            var wallClock = DateTime.ParseExact(bound.Groups["quoted"].Value, ["yyyy-MM-dd", "yyyy-MM-dd HH:mm", "yyyy/MM/dd", "yyyy/MM/dd HH:mm"], CultureInfo.InvariantCulture, DateTimeStyles.None);
+            return new DateTimeOffset(wallClock, AccountTimeZone.GetUtcOffset(wallClock));
+        }
+
+        throw new InvalidOperationException($"FakeJira: the search JQL has no lower bound on updated that the fake understands: {jql}");
+    }
+
+    /// <summary>The Sprint field of a search result: null when the issue is in no sprint, otherwise one object per sprint.</summary>
+    private JsonArray? SprintField(FakeIssue issue)
+    {
+        if (issue.SprintIds.Count == 0)
+        {
+            return null;
+        }
+
+        var known = SprintList().ToDictionary(sprint => sprint.Id);
+        return new JsonArray([.. issue.SprintIds.Select(id =>
+        {
+            // The field's shape differs from the board's sprint list: boardId, not originBoardId.
+            var value = new JsonObject { ["id"] = id, ["name"] = SprintName(id), ["state"] = "closed", ["boardId"] = BoardId };
+            if (known.TryGetValue(id, out var sprint))
+            {
+                value["name"] = sprint.Name;
+                value["state"] = sprint.State;
+                value["goal"] = sprint.Goal;
+            }
+
+            return (JsonNode)value;
+        })]);
+    }
+
+    /// <summary>The name the fake gives a sprint in changelog text.</summary>
+    internal static string SprintName(long id) => $"Fake Sprint {id}";
 
     private JsonObject Changelogs(StubRequest request)
     {
@@ -402,6 +523,17 @@ public sealed partial class FakeJira
         {
             page["nextPageToken"] = null;
         }
+    }
+
+    private static JsonObject IssueTypeDetails(FakeIssueType type)
+    {
+        var details = new JsonObject { ["id"] = type.Id, ["name"] = type.Name, ["subtask"] = type.Subtask };
+        if (type.HierarchyLevel is { } level)
+        {
+            details["hierarchyLevel"] = level;
+        }
+
+        return details;
     }
 
     private JsonObject StatusDetails(FakeStatus status) => new()
