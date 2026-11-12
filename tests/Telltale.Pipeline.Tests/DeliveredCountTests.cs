@@ -138,9 +138,12 @@ public class DeliveredCountTests
             .Moved(Local(2026, 1, 12, 9), Workflow.Development);
         pipeline.Jira.AddIssue("FAKE-3", Local(2026, 1, 6, 9));
 
+        // No history at all: only the issue's current status says where it is.
+        pipeline.Jira.AddIssue("FAKE-4", Local(2026, 1, 8, 9), createdIn: Workflow.Done);
+
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 2\n");
     }
 
     [Test]
