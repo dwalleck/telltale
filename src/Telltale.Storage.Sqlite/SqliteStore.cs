@@ -18,7 +18,10 @@ namespace Telltale.Storage.Sqlite;
 /// <remarks>
 /// <list type="bullet">
 /// <item><c>Sql/Migrations</c>: raw tables. Each script runs once per database, recorded by file name. Never edit one
-/// that has been merged; add a new file. Raw data is costly to refetch, so these tables are never dropped.</item>
+/// that has been merged; add a new file. Raw data is costly to refetch, so these tables are never dropped.
+/// Their rows are added and updated by Jira's own IDs (<see cref="WriteRawAsync(RawData, Watermark, CancellationToken)"/>),
+/// except in <see cref="ReplaceRawAsync"/>: a backfill removes every issue, change and sprint and writes what it
+/// fetched in their place, so a row for something that has left Jira does not stay. Statuses are only ever added and updated.</item>
 /// <item><c>Sql/Derived</c>: derived tables. Every rebuild drops what the last one created and runs every script, so a
 /// changed definition needs no migration (ADR-0002). A script only creates; it never drops.</item>
 /// <item><c>Sql/Views</c>: metric views, the only thing Reporting and ad hoc SQL read. Rebuilt the same way, after the
@@ -79,17 +82,41 @@ public sealed class SqliteStore : ITelltaleStore
         }
     }
 
-    public async Task WriteRawAsync(RawData batch, Watermark reached, CancellationToken cancellationToken = default)
+    public Task WriteRawAsync(RawData batch, Watermark reached, CancellationToken cancellationToken = default) =>
+        WriteRawAsync(batch, reached, replaceAll: false, cancellationToken);
+
+    public Task ReplaceRawAsync(RawData everything, Watermark reached, CancellationToken cancellationToken = default) =>
+        WriteRawAsync(everything, reached, replaceAll: true, cancellationToken);
+
+    public async Task<RawCounts> CountRawAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
+        return await connection.QuerySingleAsync<RawCounts>(Command(
+            cancellationToken,
+            "SELECT (SELECT COUNT(*) FROM issue) AS Issues, (SELECT COUNT(*) FROM sprint) AS Sprints, (SELECT COUNT(*) FROM change) AS Changes;"));
+    }
+
+    private async Task WriteRawAsync(RawData batch, Watermark reached, bool replaceAll, CancellationToken cancellationToken)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
         var hashedWithBefore = await ReadSaltFingerprintAsync(connection, transaction, cancellationToken);
 
+        // A backfill's batch is everything Jira holds now, so whatever else the raw tables hold has left Jira,
+        // or was fetched under settings or a salt that no longer apply (owner decision D4). Inside the
+        // transaction, so a failed write leaves the rows that were there. The status table is not cleared:
+        // it gives a status ID its name, and stored history can name a status Jira no longer lists.
+        if (replaceAll)
+        {
+            await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM change; DELETE FROM issue; DELETE FROM sprint;", transaction: transaction));
+        }
+
         // An issue that is out of scope now may have been stored while it was in scope (owner decision D13).
         // Its rows go in the same transaction as the batch, so the store never holds half of the change.
         // One statement per table, however many issues: the IDs travel as one JSON array.
-        var outOfScope = new { issueIds = JsonSerializer.Serialize(batch.OutOfScopeIssueIds) };
+        // After a replace nothing of such an issue is left to delete.
+        var outOfScope = new { issueIds = JsonSerializer.Serialize(replaceAll ? [] : batch.OutOfScopeIssueIds) };
         await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM change WHERE issue_id IN (SELECT value FROM json_each(@issueIds));", outOfScope, transaction));
         await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM issue WHERE issue_id IN (SELECT value FROM json_each(@issueIds));", outOfScope, transaction));
 
@@ -195,31 +222,16 @@ public sealed class SqliteStore : ITelltaleStore
         ?? (await connection.ExecuteScalarAsync<long>(Command(cancellationToken, "SELECT COUNT(*) FROM issue WHERE assignee_hash IS NOT NULL;", transaction: transaction)) > 0 ? UnknownSalt : null);
 
     /// <summary>
-    /// Records the salt a batch was hashed with, after the batch's rows are written. When it is another salt
-    /// than the store's people were hashed with, every stored issue with an assignee must have been in the
-    /// batch: a row left behind would keep a hash of the old salt, and the same person would count twice.
+    /// Records the salt a batch was hashed with, after the batch's rows are written. A batch under another
+    /// salt than the store's people were hashed with comes only from a backfill, which replaces every issue
+    /// (<see cref="ReplaceRawAsync"/>), so no row is left with a hash of the old salt. A sync never brings one:
+    /// the collector refuses to fetch under another salt than the store's.
     /// </summary>
     private static async Task RecordSaltAsync(DbConnection connection, DbTransaction transaction, RawData batch, string? hashedWithBefore, CancellationToken cancellationToken)
     {
         if (batch.SaltFingerprint is not { } fingerprint || fingerprint == hashedWithBefore)
         {
             return;
-        }
-
-        if (hashedWithBefore is not null)
-        {
-            var rewritten = batch.Issues.Select(issue => issue.IssueId).ToHashSet(StringComparer.Ordinal);
-            var withAssignee = await connection.QueryAsync<string>(Command(cancellationToken, "SELECT issue_id FROM issue WHERE assignee_hash IS NOT NULL;", transaction: transaction));
-            var leftBehind = withAssignee.Count(issueId => !rewritten.Contains(issueId));
-            if (leftBehind > 0)
-            {
-                // Thrown before the commit, so the transaction rolls back and nothing of the batch is kept.
-                throw new UserFacingException(
-                    (leftBehind == 1
-                        ? "1 issue in the database is no longer in Jira's answer, so its assignee cannot be hashed again with the new salt."
-                        : $"{leftBehind} issues in the database are no longer in Jira's answer, so their assignees cannot be hashed again with the new salt.")
-                    + " Nothing was stored. Restore the original salt, or delete the database file and run backfill.");
-            }
         }
 
         await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM person_hashing;", transaction: transaction));
@@ -249,7 +261,7 @@ public sealed class SqliteStore : ITelltaleStore
             [.. statuses.Select(row => new RawStatus(row.StatusId, row.Name, row.Category))]);
     }
 
-    public async Task ReplaceDerivedAsync(DerivedData derived, string rawDigest, CancellationToken cancellationToken = default)
+    public async Task ReplaceDerivedAsync(DerivedData derived, DerivedSource source, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -329,12 +341,18 @@ public sealed class SqliteStore : ITelltaleStore
         await ExecuteForEachRowAsync(
             connection,
             transaction,
-            "INSERT INTO baseline_sprint (sprint_id) VALUES (@sprintId);",
-            ["@sprintId"],
-            derived.BaselineSprintIds.Select(sprintId => new object?[] { sprintId }),
+            "INSERT INTO run (as_of, raw_digest, time_zone, holidays, baseline_sprint_ids, objects_version) VALUES (@asOf, @rawDigest, @timeZone, @holidays, @baselineSprintIds, @objectsVersion);",
+            ["@asOf", "@rawDigest", "@timeZone", "@holidays", "@baselineSprintIds", "@objectsVersion"],
+            [[StoredTime.ToStored(derived.AsOf), source.RawDigest, source.TimeZone, source.Holidays, source.BaselineSprintIds, DerivedObjectsVersion]],
             cancellationToken);
 
-        await connection.ExecuteAsync(Command(cancellationToken, "INSERT INTO derived_source (raw_digest, objects_version) VALUES (@rawDigest, @DerivedObjectsVersion);", new { rawDigest, DerivedObjectsVersion }, transaction));
+        await ExecuteForEachRowAsync(
+            connection,
+            transaction,
+            "INSERT INTO anomaly (issue_id, message) VALUES (@issueId, @message);",
+            ["@issueId", "@message"],
+            derived.Anomalies.Select(anomaly => new object?[] { anomaly.IssueId, anomaly.Message }),
+            cancellationToken);
 
         foreach (var (_, sql) in Scripts.InFolder("Views"))
         {
@@ -345,7 +363,7 @@ public sealed class SqliteStore : ITelltaleStore
         // a refused list leaves the previous derived data as it was.
         var shortOfFive = (await connection.QueryAsync<string>(Command(
             cancellationToken,
-            "SELECT b.sprint_id FROM baseline_sprint b LEFT JOIN sprint_team t ON t.sprint_id = b.sprint_id WHERE COALESCE(t.suppressed, 1) <> 0 ORDER BY b.sprint_id;",
+            "SELECT b.value FROM json_each((SELECT baseline_sprint_ids FROM run)) b LEFT JOIN sprint_team t ON t.sprint_id = b.value WHERE COALESCE(t.suppressed, 1) <> 0 ORDER BY b.value;",
             transaction: transaction))).AsList();
         if (shortOfFive.Count > 0)
         {
@@ -362,15 +380,28 @@ public sealed class SqliteStore : ITelltaleStore
         await transaction.CommitAsync(cancellationToken);
     }
 
-    public async Task<string?> ReadDerivedSourceAsync(CancellationToken cancellationToken = default)
+    public async Task<DerivedSource?> ReadDerivedSourceAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
 
         // The table is itself derived: before the first rebuild it does not exist.
-        var built = await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object WHERE name = 'derived_source');"));
+        var built = await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object WHERE name = 'run');"));
         return built
-            ? await connection.QuerySingleOrDefaultAsync<string?>(Command(cancellationToken, "SELECT raw_digest FROM derived_source;"))
+            ? await connection.QuerySingleOrDefaultAsync<DerivedSource?>(Command(cancellationToken, "SELECT raw_digest, time_zone, holidays, baseline_sprint_ids FROM run;"))
             : null;
+    }
+
+    public async Task<IReadOnlySet<(string IssueId, string Message)>> ReadAnomaliesAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
+
+        // Before the first rebuild there is no anomaly table, and so no anomaly the store has seen.
+        if (!await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object WHERE name = 'anomaly');")))
+        {
+            return new HashSet<(string, string)>();
+        }
+
+        return (await connection.QueryAsync<(string, string)>(Command(cancellationToken, "SELECT issue_id, message FROM anomaly;"))).ToHashSet();
     }
 
     public async Task<IReadOnlyList<T>> QueryViewsAsync<T>(string sql, object? parameters = null, CancellationToken cancellationToken = default)
@@ -420,14 +451,14 @@ public sealed class SqliteStore : ITelltaleStore
     /// </remarks>
     private static async Task<HashSet<string>> CopyMetricViewsAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)
     {
-        if (!await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object WHERE name = 'derived_source');")))
+        if (!await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object WHERE name = 'run');")))
         {
             throw new UserFacingException("The store has no derived data yet. Run derive first.");
         }
 
         // Derived data from before the version was recorded has no such column.
-        var recordsVersion = await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM pragma_table_info('derived_source') WHERE name = 'objects_version');"));
-        var version = recordsVersion ? await connection.QuerySingleOrDefaultAsync<string?>(Command(cancellationToken, "SELECT objects_version FROM derived_source;")) : null;
+        var recordsVersion = await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM pragma_table_info('run') WHERE name = 'objects_version');"));
+        var version = recordsVersion ? await connection.QuerySingleOrDefaultAsync<string?>(Command(cancellationToken, "SELECT objects_version FROM run;")) : null;
         if (version != DerivedObjectsVersion)
         {
             throw new UserFacingException("The derived data in the store was built by another version of this tool. Run derive first.");

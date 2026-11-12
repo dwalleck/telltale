@@ -48,6 +48,52 @@ public sealed record SprintStatusTime(string IssueId, string SprintId, string St
 /// </summary>
 public sealed record BoardStatus(string StatusId, int Position, bool IsDone);
 
+/// <summary>The ways an issue's changelog can fail to line up. Each has one fixed message.</summary>
+public enum ChangelogAnomalyKind
+{
+    /// <summary>A status change does not start where the one before it ended, is dated before the issue was created, or the history ends in a status the issue is not in.</summary>
+    StatusHistory,
+
+    /// <summary>A Sprint field change does not start from the sprints the one before it left, or the history ends in sprints the field does not list.</summary>
+    SprintHistory,
+
+    /// <summary>The issue is in a done-role status, but its status history ends in one that is not done: nothing dates a delivery (owner decision D8).</summary>
+    DoneButHistoryEndsOutsideDone,
+
+    /// <summary>The issue is in a done-role status and its history holds no move into one: it was created there (owner decision D9).</summary>
+    DoneWithoutMoveIntoDone,
+}
+
+/// <summary>
+/// One changelog anomaly of one issue. It can only say which issue and which kind: <see cref="Message"/> is the
+/// kind's fixed text, so no name, summary or changelog value can travel in it to the store or a log.
+/// </summary>
+public sealed record IssueAnomaly(string IssueId, ChangelogAnomalyKind Kind)
+{
+    public string Message => Kind switch
+    {
+        ChangelogAnomalyKind.StatusHistory => "its status history does not line up",
+        ChangelogAnomalyKind.SprintHistory => "its Sprint field history does not line up",
+        ChangelogAnomalyKind.DoneButHistoryEndsOutsideDone => "it is in a done status but its status history ends outside done, so it is not counted as delivered",
+        ChangelogAnomalyKind.DoneWithoutMoveIntoDone => "it is in a done status but its history holds no move into done, so it is not counted as delivered",
+        _ => throw new ArgumentOutOfRangeException(nameof(Kind), Kind, "Not a changelog anomaly kind."),
+    };
+}
+
+/// <summary>
+/// What a rebuild of the derived data was built from, besides its as-of time: a digest that identifies the raw
+/// data it read, and the settings its business days were counted with. <see cref="Holidays"/> is the holiday
+/// list as ISO dates in order, separated by commas. <see cref="BaselineSprintIds"/> is the baseline sprint list
+/// the baseline views pool over, as a JSON array of the IDs in order, e.g. <c>["41","42"]</c>; <c>[]</c> when
+/// there is no baseline. When any of the four no longer matches, the derived data is stale.
+/// </summary>
+public sealed record DerivedSource(string RawDigest, string TimeZone, string Holidays, string BaselineSprintIds)
+{
+    /// <summary><see cref="BaselineSprintIds"/> for a list of sprint IDs: the form the store keeps and the views read.</summary>
+    public static string BaselineSprintIdsOf(IEnumerable<string> sprintIds) =>
+        System.Text.Json.JsonSerializer.Serialize(sprintIds.Order(StringComparer.Ordinal));
+}
+
 /// <summary>Everything derive computes. It replaces the previous derived data as a whole (ADR-0002).</summary>
 public sealed record DerivedData(
     IReadOnlyList<DerivedSprintWindow> SprintWindows,
@@ -57,6 +103,9 @@ public sealed record DerivedData(
     IReadOnlyList<SprintStatusTime> SprintStatusTimes,
     IReadOnlyList<BoardStatus> BoardStatuses)
 {
-    /// <summary>The IDs of the sprints the baseline is drawn from, each a sprint of the configured board. Empty when no baseline is configured.</summary>
-    public IReadOnlyList<string> BaselineSprintIds { get; init; } = [];
+    /// <summary>The as-of time the rebuild used to close open intervals and the running sprint's window.</summary>
+    public required DateTimeOffset AsOf { get; init; }
+
+    /// <summary>The changelog anomalies found, at most one per issue and kind.</summary>
+    public required IReadOnlyList<IssueAnomaly> Anomalies { get; init; }
 }

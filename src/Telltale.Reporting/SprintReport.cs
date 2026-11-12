@@ -39,18 +39,13 @@ public static class SprintReport
     }
 
     /// <summary>
-    /// The IDs of the sprints the store's baseline figures are pooled over: the configured list as it was when
-    /// the derived data was built. Empty when there is no baseline.
+    /// Renders the report. Dates are shown in <paramref name="teamTimeZone"/>. <paramref name="baselineSprintIds"/>
+    /// is the baseline sprint list the derived data was built with, in order: when it is not empty, both tables
+    /// get baseline columns and the method note says what the baseline is.
     /// </summary>
-    public static Task<IReadOnlyList<string>> BaselineSprintIdsAsync(ITelltaleStore store, CancellationToken cancellationToken = default) =>
-        store.QueryViewsAsync<string>("SELECT sprint_id FROM baseline_sprints ORDER BY sprint_id;", cancellationToken: cancellationToken);
-
-    /// <summary>
-    /// Renders the report. Dates are shown in <paramref name="teamTimeZone"/>. With <paramref name="withBaseline"/>
-    /// both tables get baseline columns: pass whether <see cref="BaselineSprintIdsAsync"/> lists any sprint.
-    /// </summary>
-    public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, bool withBaseline, CancellationToken cancellationToken = default)
+    public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, IReadOnlyList<string> baselineSprintIds, CancellationToken cancellationToken = default)
     {
+        var withBaseline = baselineSprintIds.Count > 0;
         var rows = await store.QueryViewsAsync<DeliveredRow>(
             "SELECT sprint_name, started, ended, planned_end, delivered_count, suppressed FROM delivered_per_sprint WHERE sprint_id = @sprintId;",
             new { sprintId },
@@ -65,7 +60,7 @@ public static class SprintReport
         var report = new StringBuilder();
         AppendTitle(report, sprint, teamTimeZone);
         AppendDeliveredCount(report, sprint);
-        AppendCycleTime(report, withBaseline, await store.QueryViewsAsync<CycleTimeRow>(
+        AppendCycleTime(report, sprint, withBaseline, await store.QueryViewsAsync<CycleTimeRow>(
             """
             SELECT v.point_bucket, v.issue_count, v.median_business_days, v.p85_business_days, v.median_calendar_days, v.p85_calendar_days, v.suppressed,
                    b.median_business_days AS baseline_median_business_days, b.p85_business_days AS baseline_p85_business_days, b.suppressed AS baseline_suppressed
@@ -76,7 +71,10 @@ public static class SprintReport
             """,
             new { sprintId },
             cancellationToken));
-        AppendTimeInStatus(report, withBaseline, await ReadTimeInStatusAsync(store, sprintId, cancellationToken));
+        AppendTimeInStatus(report, sprint, withBaseline, await ReadTimeInStatusAsync(store, sprintId, cancellationToken));
+        var quality = await ReadDataQualityAsync(store, cancellationToken);
+        AppendMethodNote(report, quality, baselineSprintIds);
+        AppendFooter(report, quality);
         return report.ToString();
     }
 
@@ -93,10 +91,15 @@ public static class SprintReport
             new { sprintId },
             cancellationToken);
 
+    // A store without this view never gets here: the view-query path refuses derived data another version
+    // of the tool built, or a set of views that is not complete (SqliteStore.QueryViewsAsync).
+    private static async Task<DataQualityRow> ReadDataQualityAsync(ITelltaleStore store, CancellationToken cancellationToken) =>
+        (await store.QueryViewsAsync<DataQualityRow>("SELECT as_of, time_zone, anomaly_issue_count, delivered_between_sprints_count, suppressed FROM data_quality;", cancellationToken: cancellationToken)).Single();
+
     /// <summary>Renders the report and writes it into <paramref name="directory"/>. Returns the file's path.</summary>
-    public static async Task<string> WriteAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, bool withBaseline, string directory, CancellationToken cancellationToken = default)
+    public static async Task<string> WriteAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, IReadOnlyList<string> baselineSprintIds, string directory, CancellationToken cancellationToken = default)
     {
-        var text = await RenderAsync(store, sprintId, teamTimeZone, withBaseline, cancellationToken);
+        var text = await RenderAsync(store, sprintId, teamTimeZone, baselineSprintIds, cancellationToken);
 
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, FileName(sprintId));
@@ -121,9 +124,14 @@ public static class SprintReport
         report.Append("Delivered issues: ").Append(Figure(sprint.Suppressed, sprint.DeliveredCount?.ToString(CultureInfo.InvariantCulture))).Append('\n');
 
     /// <summary>The cycle time table: one row per point bucket, smallest estimate first and unestimated issues last.</summary>
-    private static void AppendCycleTime(StringBuilder report, bool withBaseline, IReadOnlyList<CycleTimeRow> buckets)
+    private static void AppendCycleTime(StringBuilder report, DeliveredRow sprint, bool withBaseline, IReadOnlyList<CycleTimeRow> buckets)
     {
         report.Append("\n## Cycle time by point bucket\n\n");
+        if (AppendSuppressedTable(report, sprint))
+        {
+            return;
+        }
+
         if (buckets.Count == 0)
         {
             report.Append("No issue delivered in this sprint has a cycle time.\n");
@@ -142,9 +150,14 @@ public static class SprintReport
     }
 
     /// <summary>One row per status issues spent time in during the sprint, in board order. A status nobody was in has no row.</summary>
-    private static void AppendTimeInStatus(StringBuilder report, bool withBaseline, IReadOnlyList<TimeInStatusRow> rows)
+    private static void AppendTimeInStatus(StringBuilder report, DeliveredRow sprint, bool withBaseline, IReadOnlyList<TimeInStatusRow> rows)
     {
         report.Append("\n## Time in status\n\n");
+        if (AppendSuppressedTable(report, sprint))
+        {
+            return;
+        }
+
         if (rows.Count == 0)
         {
             report.Append("No issue of this sprint spent time in a status that is not done.\n");
@@ -158,6 +171,62 @@ public static class SprintReport
             string[] baseline = withBaseline ? [BaselineDays(row.BaselineSuppressed, row.BaselineMedianBusinessDays)] : [];
             AppendTableRow(report, [row.StatusName, Count(row.IssueCount), Days(row.Suppressed, row.MedianBusinessDays), .. baseline]);
         }
+    }
+
+    /// <summary>
+    /// For a sprint that fails the team check, writes the one line that stands for a whole table and returns
+    /// true (owner decision D45): no row, and no sentence about an empty table either, because which buckets
+    /// or statuses have rows says what the sprint's few people worked on.
+    /// </summary>
+    private static bool AppendSuppressedTable(StringBuilder report, DeliveredRow sprint)
+    {
+        if (sprint.Suppressed == 0)
+        {
+            return false;
+        }
+
+        report.Append(Suppressed).Append('\n');
+        return true;
+    }
+
+    /// <summary>
+    /// What the figures mean, with each rule as the glossary and the owner's decisions state it. The suppression
+    /// rule is ADR-0003's for results grouped by issue attributes. The time zone is the one derive stored.
+    /// </summary>
+    private static void AppendMethodNote(StringBuilder report, DataQualityRow quality, IReadOnlyList<string> baselineSprintIds)
+    {
+        report.Append("\n## Method\n\n")
+            .Append("- Durations are in business days: days that are neither a weekend nor a company holiday, each counted in full (24 hours) in the team's time zone (").Append(quality.TimeZone).Append("). Calendar days are shown alongside: elapsed time divided by 24 hours.\n")
+            .Append("- Cycle time runs from an issue's first entry into a work status to its last entry into a done status, for delivered issues only. It belongs to the sprint in which the issue was delivered.\n")
+            .Append("- Figures are medians and P85s. The median is the middle value, or the mean of the two middle values. The P85 is the smallest value with at least 85% of the values at or below it.\n")
+            .Append("- Time in status covers the statuses before done. An issue counts toward a status only if it spent more than zero business days there.\n")
+            .Append("- A figure is shown only where it cannot show one person's work. The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in it. When the team is smaller than five, the delivered count and both tables read \"suppressed\", with no rows. With a team of five or more, a row with fewer than three distinct assignees behind it keeps its issue count and reads \"suppressed\" for its figures. The footer's two counts read \"suppressed\" when the issues in the whole store have fewer than five distinct assignees.\n")
+            .Append("- An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. An unassigned issue counts toward nobody.\n");
+
+        // Said only when there is a baseline: without one the report has no baseline column to explain.
+        if (baselineSprintIds.Count > 0)
+        {
+            report.Append("- The baseline columns pool every issue of the baseline sprints, a list fixed in the configuration (sprints ").AppendJoin(", ", baselineSprintIds)
+                .Append("), each a completed sprint with a team of five or more. A baseline figure reads \"suppressed\" when any baseline sprint has that row suppressed in its own report, so that a pooled figure cannot give back a withheld one. It reads \"none\" when no issue of the baseline sprints is in the row.\n");
+        }
+
+        report.Append("- An interval that is still open (an issue still in a status, a sprint not yet completed) ends at the as-of time below.\n")
+            .Append("- Work that has since been removed from Jira stays in the figures until the next backfill.\n");
+    }
+
+    /// <summary>
+    /// The data-quality footer. Its two counts cover the whole store, not the sprint: an issue delivered
+    /// between sprints belongs to no sprint. They are counts only: no issue is named. The view withholds
+    /// them when the whole store has fewer than five distinct assignees.
+    /// </summary>
+    private static void AppendFooter(StringBuilder report, DataQualityRow quality)
+    {
+        // In the zone derive counted business days in, which is the one the note names.
+        var asOf = TimeZoneInfo.ConvertTime(StoredTime.FromStored(quality.AsOf), TimeZoneInfo.FindSystemTimeZoneById(quality.TimeZone));
+        report.Append("\n---\n\n")
+            .Append("- As-of time: ").Append(asOf.ToString("yyyy-MM-dd HH:mm zzz", CultureInfo.InvariantCulture)).Append(" (").Append(quality.TimeZone).Append(")\n")
+            .Append("- Issues with changelog anomalies, in the whole store: ").Append(Figure(quality.Suppressed, quality.AnomalyIssueCount?.ToString(CultureInfo.InvariantCulture))).Append('\n')
+            .Append("- Issues delivered between sprints, in the whole store: ").Append(Figure(quality.Suppressed, quality.DeliveredBetweenSprintsCount?.ToString(CultureInfo.InvariantCulture))).Append('\n');
     }
 
     /// <summary>
@@ -230,6 +299,15 @@ public static class SprintReport
         public double? BaselineMedianBusinessDays { get; init; }
         /// <summary>Null when the baseline has no row for the status.</summary>
         public long? BaselineSuppressed { get; init; }
+    }
+
+    private sealed class DataQualityRow
+    {
+        public string AsOf { get; init; } = "";
+        public string TimeZone { get; init; } = "";
+        public long? AnomalyIssueCount { get; init; }
+        public long? DeliveredBetweenSprintsCount { get; init; }
+        public long Suppressed { get; init; } = 1;
     }
 
     private sealed class DeliveredRow

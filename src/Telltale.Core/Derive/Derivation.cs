@@ -16,7 +16,7 @@ namespace Telltale.Core.Derive;
 /// </remarks>
 public static class Derivation
 {
-    public static DerivedData Derive(RawData raw, long boardId, StatusRoles roles, IReadOnlySet<string> abandonedResolutionIds, BusinessCalendar calendar, DateTimeOffset asOf, IReadOnlySet<string> baselineSprintIds)
+    public static DerivedData Derive(RawData raw, long boardId, StatusRoles roles, IReadOnlySet<string> abandonedResolutionIds, BusinessCalendar calendar, DateTimeOffset asOf)
     {
         // Unknown is not "in no sprint": deriving anyway would leave these issues out of every sprint's time in status.
         var sprintsUnknown = raw.Issues.Count(issue => issue.SprintIds is null);
@@ -26,8 +26,6 @@ public static class Derivation
                 ? "1 issue in the store was fetched before the Sprint field was kept, so the sprints it belonged to are unknown. Run a backfill to fetch it again. No figures were derived."
                 : $"{sprintsUnknown} issues in the store were fetched before the Sprint field was kept, so the sprints they belonged to are unknown. Run a backfill to fetch them again. No figures were derived.");
         }
-
-        RequireCompletedBaselineSprints(raw.Sprints, boardId, baselineSprintIds);
 
         var sprintChanges = raw.Changes
             .Where(change => change.Field == ChangeFields.Sprint)
@@ -77,6 +75,7 @@ public static class Derivation
         var cycles = new List<IssueCycle>();
         var memberships = new List<IssueMembershipInterval>();
         var sprintStatusTimes = new List<SprintStatusTime>();
+        var anomalies = new List<IssueAnomaly>();
 
         foreach (var issue in raw.Issues)
         {
@@ -84,7 +83,8 @@ public static class Derivation
             intervals.AddRange(timeline.Intervals.Select(interval => new IssueStatusInterval(issue.IssueId, interval.StatusId, interval.Start, interval.End)));
 
             var reopens = Cycles.ReopenCount(timeline.Entries, roles);
-            cycles.Add(Delivery.Of(issue.StatusId, issue.ResolutionId, timeline.Entries, roles, abandonedResolutionIds) switch
+            var outcome = Delivery.Of(issue.StatusId, issue.ResolutionId, timeline.Entries, roles, abandonedResolutionIds);
+            cycles.Add(outcome switch
             {
                 Delivered delivered => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At), reopens)
                 {
@@ -99,6 +99,7 @@ public static class Derivation
             });
 
             var membership = SprintMembership.Build(issue.Created, SprintMembership.ParseSprintIds(issue.SprintIds), sprintChanges[issue.IssueId]);
+            anomalies.AddRange(ChangelogAnomalies.Of(issue, timeline, membership, outcome, roles));
             memberships.AddRange(membership.Intervals.Select(interval => new IssueMembershipInterval(issue.IssueId, interval.SprintId, interval.Start, interval.End)));
 
             // Only sprints that count (the windows above) have time in status. A sprint the issue was never in
@@ -120,30 +121,9 @@ public static class Derivation
             sprintStatusTimes,
             [.. roles.StatusIds.Select((statusId, index) => new BoardStatus(statusId, index + 1, roles.IsDone(statusId)))])
         {
-            BaselineSprintIds = [.. baselineSprintIds.Order(StringComparer.Ordinal)],
+            AsOf = asOf,
+            Anomalies = anomalies,
         };
-    }
-
-    /// <summary>
-    /// Stops with a message naming the setting and the IDs when a baseline sprint ID is not a completed sprint
-    /// of the configured board in the store. A mistyped ID would otherwise leave its sprint out of the baseline
-    /// without a sign, and a sprint that is running or has not started would make the baseline move, or add
-    /// nothing to it: the baseline is a fixed list of past sprints (GLOSSARY: Baseline).
-    /// The IDs are digits (the configuration's checks), so the message can quote them.
-    /// </summary>
-    public static void RequireCompletedBaselineSprints(IReadOnlyList<RawSprint> sprints, long boardId, IReadOnlySet<string> baselineSprintIds)
-    {
-        var completed = sprints
-            .Where(sprint => sprint.BoardId == boardId && sprint.State == SprintStates.Closed)
-            .Select(sprint => sprint.SprintId)
-            .ToHashSet(StringComparer.Ordinal);
-        var refused = baselineSprintIds.Where(sprintId => !completed.Contains(sprintId)).Order(StringComparer.Ordinal).ToList();
-        if (refused.Count > 0)
-        {
-            throw new UserFacingException(
-                $"baselineSprintIds in the configuration file lists {string.Join(", ", refused)}, and the store holds no completed sprint of board {boardId} with such an ID. "
-                + "The baseline is drawn from completed sprints only. Correct the list, or run backfill if the sprint has completed since, and run again.");
-        }
     }
 
     /// <summary>

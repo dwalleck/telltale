@@ -14,11 +14,24 @@ public interface ITelltaleStore
     /// issue row and the change rows of every issue in <see cref="RawData.OutOfScopeIssueIds"/>, and setting the
     /// collector's watermark to <paramref name="reached"/>: the watermark advances only when the whole batch
     /// is written, and no batch is written without saying how far it reaches.
-    /// A batch hashed with another salt than the store's people (<see cref="RawData.SaltFingerprint"/>) must
-    /// carry every stored issue that has an assignee; otherwise nothing is written and
-    /// <see cref="UserFacingException"/> is thrown, since the rows left behind could not be hashed again.
+    /// The batch must be hashed with the salt the store's people were hashed with
+    /// (<see cref="ReadSaltFingerprintAsync"/>): the rows it does not touch keep their hashes. The caller checks
+    /// that before fetching; only <see cref="ReplaceRawAsync"/> takes a batch under another salt.
     /// </summary>
     Task WriteRawAsync(RawData batch, Watermark reached, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Destructive: removes every issue, change and sprint the store holds and writes <paramref name="everything"/>
+    /// in their place, with the watermark, in one transaction. Afterwards the store holds no issue, change or
+    /// sprint that is not in <paramref name="everything"/>; if the write fails, it holds what it held before.
+    /// Only for a batch that is all the source holds (a backfill; owner decision D4). Statuses are reference
+    /// data (an ID's name) and are added and updated, never removed: stored history can name a status the
+    /// source no longer lists.
+    /// </summary>
+    Task ReplaceRawAsync(RawData everything, Watermark reached, CancellationToken cancellationToken = default);
+
+    /// <summary>How many issues, sprints and changes the raw tables hold.</summary>
+    Task<RawCounts> CountRawAsync(CancellationToken cancellationToken = default);
 
     /// <summary>The watermark <paramref name="collector"/> last wrote, or null when it has never written a batch.</summary>
     Task<Watermark?> ReadWatermarkAsync(string collector, CancellationToken cancellationToken = default);
@@ -35,17 +48,21 @@ public interface ITelltaleStore
 
     /// <summary>
     /// Drops the derived tables and the metric views, and rebuilds them around <paramref name="derived"/>.
-    /// <paramref name="rawDigest"/> identifies the raw data it was derived from (see <see cref="ReadDerivedSourceAsync"/>).
-    /// When a baseline sprint has fewer than five distinct assignees, nothing is replaced and
-    /// <see cref="UserFacingException"/> is thrown (owner decision D47).
+    /// <paramref name="source"/> says what it was derived from (see <see cref="ReadDerivedSourceAsync"/>).
     /// </summary>
-    Task ReplaceDerivedAsync(DerivedData derived, string rawDigest, CancellationToken cancellationToken = default);
+    Task ReplaceDerivedAsync(DerivedData derived, DerivedSource source, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// The digest the last <see cref="ReplaceDerivedAsync"/> was given, or null when the derived tables and
+    /// What the last <see cref="ReplaceDerivedAsync"/> was given, or null when the derived tables and
     /// metric views have never been built.
     /// </summary>
-    Task<string?> ReadDerivedSourceAsync(CancellationToken cancellationToken = default);
+    Task<DerivedSource?> ReadDerivedSourceAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The changelog anomalies the last <see cref="ReplaceDerivedAsync"/> stored, as issue ID and message.
+    /// Empty when the derived tables have never held any.
+    /// </summary>
+    Task<IReadOnlySet<(string IssueId, string Message)>> ReadAnomaliesAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Runs a query over metric views, and only over them: a query that reads a raw or derived table, or

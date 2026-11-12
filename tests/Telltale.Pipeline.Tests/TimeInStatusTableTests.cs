@@ -249,6 +249,14 @@ public class TimeInStatusTableTests
         // In sprint 41 only: sprint 42 has no member.
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41);
 
+        // Sprint 42 still has a team of five, or its table would read "suppressed" (owner decision D45): five
+        // issues delivered in its window that were never members of it, so none spent time in it.
+        foreach (var (person, number) in People.Team.Select((person, index) => (person, index + 2)))
+        {
+            pipeline.Jira.AddIssue($"FAKE-{number}", Local(2026, 1, 20, 9)).AssignedTo(person)
+                .Moved(Local(2026, 1, 21, 9), Workflow.Done);
+        }
+
         await pipeline.RunAsync("run", "--sprint", "42");
 
         var report = await pipeline.ReadReportAsync(42);
@@ -503,7 +511,7 @@ public class TimeInStatusTableTests
 
         // The store as an earlier version of the tool derived it: no time in status view, and no record of
         // the raw data the derived tables were built from.
-        await pipeline.ExecuteAsync("DROP VIEW time_in_status_per_sprint; DROP TABLE derived_source; DELETE FROM derived_object WHERE name IN ('time_in_status_per_sprint', 'derived_source');");
+        await pipeline.ExecuteAsync("DROP VIEW time_in_status_per_sprint; DROP TABLE run; DELETE FROM derived_object WHERE name IN ('time_in_status_per_sprint', 'run');");
 
         var exit = await pipeline.RunAsync("report", "--sprint", "41");
 
@@ -517,6 +525,7 @@ public class TimeInStatusTableTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41);
         var issue = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).AssignedTo(People.One);
         issue.AddHistory(Local(2026, 1, 7, 9), FakeJira.SprintFieldId, "Sprint", "", "", "41", "Fake Sprint 41", author: People.Two);
         issue.InSprints(41);
@@ -527,8 +536,9 @@ public class TimeInStatusTableTests
         var files = await pipeline.ReadAllFilesAsync();
 
         // The scan means something only if the sprint data went through: the report has the status's row.
-        // One person's sprint, so the row's count and figure are withheld.
-        await Assert.That(files[Path.Combine("reports", "sprint-41.md")]).Contains("| Fake Development | suppressed | suppressed |");
+        // The sprint has a team, so its rows are shown (owner decision D45); one person's row keeps its count
+        // and withholds its figure.
+        await Assert.That(files[Path.Combine("reports", "sprint-41.md")]).Contains("| Fake Development | 1 | suppressed |");
         await Assert.That(pipeline.Jira.ForbiddenText).Contains(People.Two.AccountId).And.Contains("Synthetic goal of sprint 41 that must never be stored");
         var found = pipeline.Jira.ForbiddenText.Where(text => files.Values.Any(content => content.Contains(text, StringComparison.Ordinal))).ToList();
         await Assert.That(found).IsEmpty();

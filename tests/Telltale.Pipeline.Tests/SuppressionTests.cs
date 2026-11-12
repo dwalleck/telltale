@@ -7,7 +7,7 @@ namespace Telltale.Pipeline.Tests;
 /// <summary>
 /// The minimum group size (GLOSSARY, ADR-0003): a figure is shown only when the sprint has at least five
 /// distinct assignees and the figure itself has at least three behind it. A row short of three keeps its issue
-/// count (owner decision D5); a sprint short of five shows no count either (D41). Sprint 41 runs from 5 to 19 January 2026.
+/// count (owner decision D5); a sprint short of five shows no count either (D41) and no rows (D45). Sprint 41 runs from 5 to 19 January 2026.
 /// </summary>
 public class SuppressionTests
 {
@@ -17,6 +17,12 @@ public class SuppressionTests
         + "| --- | ---: | ---: | ---: | ---: | ---: |\n";
 
     private const string TimeInStatusHeading = "\n## Time in status\n";
+
+    /// <summary>Both tables of a sprint short of five assignees: one line each, no rows (owner decision D45).</summary>
+    private const string SuppressedTables = "\n## Cycle time by point bucket\n\nsuppressed\n" + TimeInStatusHeading + "\nsuppressed\n";
+
+    /// <summary>What follows the two tables.</summary>
+    private const string MethodHeading = "\n## Method\n";
 
     [Test]
     public async Task A_point_bucket_with_two_assignees_reads_suppressed_beside_its_issue_count_and_one_with_three_is_reported()
@@ -82,28 +88,25 @@ public class SuppressionTests
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).IsEqualTo(
+        // Owner decision D45: each table is one "suppressed" line. A row per bucket or status, even an empty
+        // one, would show which buckets and statuses the sprint's few people had work in.
+        await Assert.That(await pipeline.ReadReportAsync(41)).StartsWith(
             "# Fake Sprint 41 (2026-01-05 to 2026-01-19)\n\n"
             + "Delivered issues: suppressed\n"
-            + CycleTimeHeader
-            + "| 3 | suppressed | suppressed | suppressed | suppressed | suppressed |\n"
-            + TimeInStatusHeading
-            + "\n| Status | Issues | Median (business days) |\n| --- | ---: | ---: |\n"
-            + "| Fake New | suppressed | suppressed |\n"
-            + "| Fake Development | suppressed | suppressed |\n");
+            + SuppressedTables
+            + MethodHeading);
 
         var delivered = await pipeline.QueryAsync<(long? DeliveredCount, long Suppressed)>("SELECT delivered_count, suppressed FROM delivered_per_sprint WHERE sprint_id = '41';");
         await Assert.That(delivered).IsEquivalentTo(new (long?, long)[] { (null, 1) });
 
+        // The views say no more than the report: one row for the sprint, with no bucket and no status.
         var cycleTime = await pipeline.QueryAsync<CycleTimeRow>("SELECT * FROM cycle_time_per_sprint_and_bucket WHERE sprint_id = '41';");
-        await Assert.That(cycleTime.Select(row => (row.IssueCount, row.Suppressed, row.MedianBusinessDays, row.P85BusinessDays, row.MedianCalendarDays, row.P85CalendarDays)))
-            .IsEquivalentTo(new (long?, long, double?, double?, double?, double?)[] { (null, 1, null, null, null, null) });
+        await Assert.That(cycleTime.Select(row => (row.PointBucket, row.IssueCount, row.Suppressed, row.MedianBusinessDays, row.P85BusinessDays, row.MedianCalendarDays, row.P85CalendarDays)))
+            .IsEquivalentTo(new (double?, long?, long, double?, double?, double?, double?)[] { (null, null, 1, null, null, null, null) });
 
-        var timeInStatus = await pipeline.QueryAsync<(string StatusName, long? IssueCount, long Suppressed, double? MedianBusinessDays)>(
-            "SELECT status_name, issue_count, suppressed, median_business_days FROM time_in_status_per_sprint WHERE sprint_id = '41' ORDER BY board_position;");
-        await Assert.That(timeInStatus).IsEquivalentTo(
-            new (string, long?, long, double?)[] { ("Fake New", null, 1, null), ("Fake Development", null, 1, null) },
-            CollectionOrdering.Matching);
+        var timeInStatus = await pipeline.QueryAsync<(string? StatusId, string? StatusName, long? BoardPosition, long? IssueCount, long Suppressed, double? MedianBusinessDays)>(
+            "SELECT status_id, status_name, board_position, issue_count, suppressed, median_business_days FROM time_in_status_per_sprint WHERE sprint_id = '41';");
+        await Assert.That(timeInStatus).IsEquivalentTo(new (string?, string?, long?, long?, long, double?)[] { (null, null, null, null, 1, null) });
 
         // Owner decision D41: nothing countable is left either. The counts of a small sprint are its people's
         // throughput, and summed they would give back the delivered count that is withheld.
@@ -160,13 +163,14 @@ public class SuppressionTests
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith(
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(
             TimeInStatusHeading
             + "\n| Status | Issues | Median (business days) |\n| --- | ---: | ---: |\n"
             + "| Fake New | 7 | 1.0 |\n"
             + "| Fake Development | 7 | 2.0 |\n"
             + "| Fake Review | 4 | suppressed |\n"
-            + "| Fake QE | 3 | 1.0 |\n");
+            + "| Fake QE | 3 | 1.0 |\n"
+            + MethodHeading);
 
         var rows = await pipeline.QueryAsync<(string StatusName, long IssueCount, long Suppressed, double? MedianBusinessDays)>(
             "SELECT status_name, issue_count, suppressed, median_business_days FROM time_in_status_per_sprint WHERE sprint_id = '41' ORDER BY board_position;");
@@ -215,11 +219,67 @@ public class SuppressionTests
 
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).Contains("\nDelivered issues: suppressed\n");
-        await Assert.That(report).Contains(CycleTimeHeader + "| 3 | suppressed | suppressed | suppressed | suppressed | suppressed |\n" + TimeInStatusHeading);
+        await Assert.That(report).Contains(SuppressedTables + MethodHeading);
     }
 
     [Test]
-    public async Task The_report_prints_no_figure_from_a_row_the_view_marks_suppressed_even_if_the_row_carries_one()
+    public async Task A_sprint_short_of_five_with_nothing_in_its_tables_reads_suppressed_like_one_that_has()
+    {
+        // Owner decision D45: "no issue has a cycle time" would say the sprint's few people delivered nothing
+        // with a cycle, and "no issue spent time" that none of them had work in the sprint.
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).AssignedTo(People.One);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        var report = await pipeline.ReadReportAsync(41);
+        await Assert.That(report).StartsWith(
+            "# Fake Sprint 41 (2026-01-05 to 2026-01-19)\n\n"
+            + "Delivered issues: suppressed\n"
+            + SuppressedTables
+            + MethodHeading);
+        await Assert.That(report).DoesNotContain("No issue");
+
+        var rows = await pipeline.QueryAsync<(long InBuckets, long InStatuses)>(
+            """
+            SELECT (SELECT COUNT(*) FROM cycle_time_per_sprint_and_bucket WHERE sprint_id = '41' AND suppressed = 1 AND point_bucket IS NULL AND issue_count IS NULL),
+                   (SELECT COUNT(*) FROM time_in_status_per_sprint WHERE sprint_id = '41' AND suppressed = 1 AND status_id IS NULL AND issue_count IS NULL);
+            """);
+        await Assert.That(rows).IsEquivalentTo(new[] { (1L, 1L) });
+    }
+
+    [Test]
+    public async Task A_sprint_with_a_team_of_five_and_nothing_in_its_tables_still_says_so()
+    {
+        // The other side of D45: with a team, an empty table is a fact about the work and is stated.
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+        foreach (var (person, number) in People.Team.Select((person, index) => (person, index + 1)))
+        {
+            // Delivered in the sprint straight from New: a delivery with no cycle time, and no time in the sprint as a member.
+            pipeline.Jira.AddIssue($"FAKE-{number}", Local(2026, 1, 6, 9)).AssignedTo(person)
+                .Moved(Local(2026, 1, 7, 9), Workflow.Done);
+        }
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).StartsWith(
+            "# Fake Sprint 41 (2026-01-05 to 2026-01-19)\n\n"
+            + "Delivered issues: 5\n"
+            + "\n## Cycle time by point bucket\n\nNo issue delivered in this sprint has a cycle time.\n"
+            + TimeInStatusHeading + "\nNo issue of this sprint spent time in a status that is not done.\n"
+            + MethodHeading);
+
+        var rows = await pipeline.QueryAsync<long>(
+            "SELECT (SELECT COUNT(*) FROM cycle_time_per_sprint_and_bucket WHERE sprint_id = '41') + (SELECT COUNT(*) FROM time_in_status_per_sprint WHERE sprint_id = '41');");
+        await Assert.That(rows).IsEquivalentTo(new[] { 0L });
+    }
+
+    [Test]
+    [Arguments(1)]
+    [Arguments(0)]
+    public async Task The_report_prints_no_figure_from_a_row_the_view_marks_suppressed_even_if_the_row_carries_one(int sprintSuppressed)
     {
         // The flag decides, not the figure being null: a view that set the flag and still let a figure through
         // (a fault, or a view changed by hand) must not get that figure into the report.
@@ -232,7 +292,7 @@ public class SuppressionTests
 
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
         await pipeline.ExecuteAsync(
-            """
+            $$"""
             DROP VIEW cycle_time_per_sprint_and_bucket;
             CREATE VIEW cycle_time_per_sprint_and_bucket AS
             SELECT '41' AS sprint_id, 3.0 AS point_bucket, 5 AS issue_count, 2.0 AS median_business_days, 2.0 AS p85_business_days,
@@ -244,19 +304,22 @@ public class SuppressionTests
             DROP VIEW delivered_per_sprint;
             CREATE VIEW delivered_per_sprint AS
             SELECT '41' AS sprint_id, 'Fake Sprint 41' AS sprint_name, 'closed' AS state, '2026-01-05T15:00:00.000Z' AS started,
-                   '2026-01-19T16:00:00.000Z' AS ended, '2026-01-19T15:00:00.000Z' AS planned_end, 5 AS delivered_count, 1 AS suppressed;
+                   '2026-01-19T16:00:00.000Z' AS ended, '2026-01-19T15:00:00.000Z' AS planned_end, 5 AS delivered_count, {{sprintSuppressed}} AS suppressed;
             """);
 
         await pipeline.RunAllAsync(["report", "--sprint", "41"]);
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).IsEqualTo(
-            "# Fake Sprint 41 (2026-01-05 to 2026-01-19)\n\n"
-            + "Delivered issues: suppressed\n"
-            + CycleTimeHeader
-            + "| 3 | 5 | suppressed | suppressed | suppressed | suppressed |\n"
-            + TimeInStatusHeading
-            + "\n| Status | Issues | Median (business days) |\n| --- | ---: | ---: |\n"
-            + "| Fake Development | 5 | suppressed |\n");
+        // A sprint the view marks suppressed shows no row at all (owner decision D45), whatever its rows carry.
+        // In one it does not, a row's own flag withholds the row's figures.
+        var expected = sprintSuppressed == 1
+            ? "Delivered issues: suppressed\n" + SuppressedTables
+            : "Delivered issues: 5\n"
+                + CycleTimeHeader
+                + "| 3 | 5 | suppressed | suppressed | suppressed | suppressed |\n"
+                + TimeInStatusHeading
+                + "\n| Status | Issues | Median (business days) |\n| --- | ---: | ---: |\n"
+                + "| Fake Development | 5 | suppressed |\n";
+        await Assert.That(await pipeline.ReadReportAsync(41)).StartsWith("# Fake Sprint 41 (2026-01-05 to 2026-01-19)\n\n" + expected + MethodHeading);
     }
 
     private sealed class CycleTimeRow

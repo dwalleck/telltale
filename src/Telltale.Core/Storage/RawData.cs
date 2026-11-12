@@ -59,8 +59,8 @@ public sealed record RawData(
 {
     /// <summary>
     /// In a batch: the fingerprint (<c>IdentityHash.SaltFingerprint</c>) of the salt the batch's person hashes
-    /// were made with. The store records it, and refuses a batch made with another salt than its other rows
-    /// unless the batch replaces every one of them. Null when read back from the store.
+    /// were made with. The store records it. A batch made with another salt than the stored rows is one that
+    /// replaces them all (a backfill), so the store holds one salt. Null when read back from the store.
     /// </summary>
     public string? SaltFingerprint { get; init; }
 
@@ -71,3 +71,6 @@ public sealed record RawData(
     /// </summary>
     public IReadOnlyList<string> OutOfScopeIssueIds { get; init; } = [];
 }
+
+/// <summary>How many issues, sprints and changes the raw tables hold.</summary>
+public sealed record RawCounts(long Issues, long Sprints, long Changes);

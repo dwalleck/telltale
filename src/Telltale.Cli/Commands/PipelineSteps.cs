@@ -82,22 +82,67 @@ internal sealed class PipelineSteps : IDisposable
 
     public void Dispose() => _storeLock.Dispose();
 
-    /// <summary>Fetches everything from the configured start date into the raw tables.</summary>
-    public Task BackfillAsync(CancellationToken cancellationToken) => CollectAsync(CollectionMode.Backfill, cancellationToken);
+    /// <summary>
+    /// Fetches everything from the configured start date and replaces the store's issues, changes and sprints
+    /// with it, then says how many of each the store held before and holds now. A backfill removes what it
+    /// did not fetch, so the counts are how the user sees one that replaced much with little.
+    /// </summary>
+    /// <param name="allowEmpty">Lets the backfill replace stored issues or sprints with none (<c>--allow-empty</c>).</param>
+    public async Task BackfillAsync(bool allowEmpty, CancellationToken cancellationToken)
+    {
+        // The store is this command's alone (StoreLock), so nothing changes it between the counts and the write.
+        var before = await _store.CountRawAsync(cancellationToken);
+        await CollectAsync(CollectionMode.Backfill, allowEmpty, cancellationToken);
+        var now = await _store.CountRawAsync(cancellationToken);
+        await _services.Out.WriteLineAsync(string.Create(
+            CultureInfo.InvariantCulture,
+            $"The store now holds what Jira returned. Issues: {before.Issues} before, {now.Issues} now. Sprints: {before.Sprints} before, {now.Sprints} now. Changes: {before.Changes} before, {now.Changes} now."));
+    }
 
     /// <summary>Brings the raw tables up to date with what changed in Jira since the last sync or backfill.</summary>
-    public Task SyncAsync(CancellationToken cancellationToken) => CollectAsync(CollectionMode.Incremental, cancellationToken);
+    public Task SyncAsync(CancellationToken cancellationToken) => CollectAsync(CollectionMode.Incremental, allowEmpty: false, cancellationToken);
 
-    private Task CollectAsync(CollectionMode mode, CancellationToken cancellationToken) =>
-        new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets, _services.Clock, _services.Error).BringUpToDateAsync(_store, mode, cancellationToken);
+    private Task CollectAsync(CollectionMode mode, bool allowEmpty, CancellationToken cancellationToken) =>
+        new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets, _services.Clock, _services.Error).BringUpToDateAsync(_store, mode, allowEmpty, cancellationToken);
 
-    /// <summary>Rebuilds every derived table and metric view from the raw tables.</summary>
+    /// <summary>
+    /// Rebuilds every derived table and metric view from the raw tables, and logs the changelog anomalies it
+    /// found to standard error: one line with the totals, then one line for each anomaly (an issue and a kind)
+    /// the previous rebuild did not have. The store's <c>anomaly</c> table holds the full list. A line holds the
+    /// Jira issue ID and the kind's fixed message, never the key. Derive is the step that builds the timelines,
+    /// so it is the one that logs.
+    /// </summary>
     public async Task DeriveAsync(CancellationToken cancellationToken)
     {
         await RequireStoredSaltAsync(cancellationToken);
         var raw = await _store.ReadRawAsync(cancellationToken);
-        await _store.ReplaceDerivedAsync(Derivation.Derive(raw, _config.Jira.BoardId, _roles, _abandonedResolutionIds, new BusinessCalendar(_timeZone, _config.Holidays), AsOf(raw), _baselineSprintIds), DigestOf(raw), cancellationToken);
+        await RequireBaselineSprintsAsync(raw, cancellationToken);
+        var derived = Derivation.Derive(raw, _config.Jira.BoardId, _roles, _abandonedResolutionIds, new BusinessCalendar(_timeZone, _config.Holidays), AsOf(raw));
+        var previous = await _store.ReadAnomaliesAsync(cancellationToken);
+        await _store.ReplaceDerivedAsync(derived, SourceOf(raw), cancellationToken);
+
+        if (derived.Anomalies.Count == 0)
+        {
+            return;
+        }
+
+        var unseen = derived.Anomalies.Where(anomaly => !previous.Contains((anomaly.IssueId, anomaly.Message))).ToList();
+        var issues = derived.Anomalies.Select(anomaly => anomaly.IssueId).Distinct(StringComparer.Ordinal).Count();
+        await _services.Error.WriteLineAsync(
+            $"Changelog anomalies: {derived.Anomalies.Count} across {issues} {(issues == 1 ? "issue" : "issues")}, {unseen.Count} new since the previous derive.");
+        foreach (var anomaly in unseen)
+        {
+            await _services.Error.WriteLineAsync($"Changelog anomaly: issue {anomaly.IssueId}: {anomaly.Message}.");
+        }
     }
+
+    /// <summary>What a rebuild from <paramref name="raw"/> under the current configuration is built from.</summary>
+    private DerivedSource SourceOf(RawData raw) =>
+        new(
+            DigestOf(raw),
+            _config.TimeZone,
+            string.Join(",", _config.Holidays.Order().Select(day => day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))),
+            DerivedSource.BaselineSprintIdsOf(_baselineSprintIds));
 
     /// <summary>
     /// Derive and report need no secret. But when the salt is at hand and is not the one the stored people
@@ -153,19 +198,25 @@ internal sealed class PipelineSteps : IDisposable
 
         // The views would answer from the old derived tables without a sign, so the report checks first.
         var raw = await _store.ReadRawAsync(cancellationToken);
-        if (derivedFrom != DigestOf(raw))
+        var current = SourceOf(raw);
+        if (derivedFrom.RawDigest != current.RawDigest)
         {
             throw new UserFacingException("The raw data changed since the derived data was built. Run derive first.");
         }
 
+        // The stored business days were counted in the old time zone, around the old holidays.
+        if (derivedFrom.TimeZone != current.TimeZone || derivedFrom.Holidays != current.Holidays)
+        {
+            throw new UserFacingException("The time zone or the holidays in the configuration changed since the derived data was built. Run derive first.");
+        }
+
         // The baseline views were built from the list as it was at the last derive. A report under another
         // list would print the old baseline as if it were the configured one. This is the one check: a list
-        // equal to the derived one passed derive's check against this same raw data.
-        var derivedBaseline = await SprintReport.BaselineSprintIdsAsync(_store, cancellationToken);
-        if (!_baselineSprintIds.SetEquals(derivedBaseline))
+        // equal to the derived one passed derive's checks against this same raw data.
+        if (derivedFrom.BaselineSprintIds != current.BaselineSprintIds)
         {
             // Deriving again is the remedy only for a list derive would accept; otherwise say what derive would.
-            Derivation.RequireCompletedBaselineSprints(raw.Sprints, _config.Jira.BoardId, _baselineSprintIds);
+            await RequireBaselineSprintsAsync(raw, cancellationToken);
             var teamsOfFive = await _store.QueryViewsAsync<string>("SELECT sprint_id FROM sprint_team WHERE suppressed = 0;", cancellationToken: cancellationToken);
             var shortOfFive = _baselineSprintIds.Except(teamsOfFive, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
             if (shortOfFive.Count > 0)
@@ -189,8 +240,44 @@ internal sealed class PipelineSteps : IDisposable
             return;
         }
 
-        var path = await SprintReport.WriteAsync(_store, sprint, _timeZone, withBaseline: derivedBaseline.Count > 0, _services.ReportDirectory, cancellationToken);
+        await RequireSprintWithinWhatWasFetchedAsync(raw, sprint, cancellationToken);
+        var path = await SprintReport.WriteAsync(_store, sprint, _timeZone, [.. _baselineSprintIds.Order(StringComparer.Ordinal)], _services.ReportDirectory, cancellationToken);
         await _services.Out.WriteLineAsync($"Wrote {path}");
+    }
+
+    /// <summary>
+    /// What the raw data can say against the baseline sprint list: every baseline sprint is a completed sprint
+    /// of the board, and none started before the start date the store was last filled from. The third rule, a
+    /// team of five, is the views' and is asked by the rebuild itself (<see cref="ITelltaleStore.ReplaceDerivedAsync"/>).
+    /// </summary>
+    private async Task RequireBaselineSprintsAsync(RawData raw, CancellationToken cancellationToken)
+    {
+        BaselineSprintRules.RequireCompleted(raw.Sprints, _config.Jira.BoardId, _baselineSprintIds);
+        if (_baselineSprintIds.Count > 0)
+        {
+            BaselineSprintRules.RequireWithinWhatWasFetched(raw.Sprints, _baselineSprintIds, await CompleteFromAsync(cancellationToken));
+        }
+    }
+
+    /// <summary>The moment from which the store holds every issue: the start date it was last filled from. Null when it names none.</summary>
+    private async Task<DateTimeOffset?> CompleteFromAsync(CancellationToken cancellationToken) =>
+        await _store.ReadWatermarkAsync(JiraCollector.WatermarkName, cancellationToken) is { } filled ? JiraCollector.CompleteFrom(filled.Covers) : null;
+
+    /// <summary>
+    /// Refuses a sprint that started before the start date the store was last filled from. The store holds
+    /// only issues updated since that date, so issues delivered in such a sprint and not touched since are
+    /// missing, and the report would show too few deliveries without a sign.
+    /// </summary>
+    private async Task RequireSprintWithinWhatWasFetchedAsync(RawData raw, string sprintId, CancellationToken cancellationToken)
+    {
+        if (await CompleteFromAsync(cancellationToken) is { } completeFrom
+            && raw.Sprints.FirstOrDefault(sprint => sprint.SprintId == sprintId)?.Start < completeFrom)
+        {
+            throw new UserFacingException(
+                $"Sprint {sprintId} started before {completeFrom.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}, the jira.backfillStart the store was last filled from, "
+                + "so issues delivered in it can be missing and its figures would be too low. "
+                + "No report was written. To report on it, set jira.backfillStart to a date before the sprint started and run backfill.");
+        }
     }
 
     /// <summary>

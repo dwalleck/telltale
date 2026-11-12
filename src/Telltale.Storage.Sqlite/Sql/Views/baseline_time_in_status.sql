@@ -15,14 +15,14 @@ WITH pooled AS (
            ROW_NUMBER() OVER (PARTITION BY t.status_id ORDER BY t.business_days) AS rn,
            COUNT(*)     OVER (PARTITION BY t.status_id)                          AS n
     FROM sprint_status_time t
-    JOIN baseline_sprint b ON b.sprint_id = t.sprint_id
+    JOIN json_each((SELECT baseline_sprint_ids FROM run)) b ON b.value = t.sprint_id
     WHERE t.business_days > 0
 ),
 -- One row per status: 1 when any baseline sprint's own view withholds the status.
 withheld AS (
     SELECT v.status_id, MAX(v.suppressed) AS suppressed
     FROM time_in_status_per_sprint v
-    JOIN baseline_sprint b ON b.sprint_id = v.sprint_id
+    JOIN json_each((SELECT baseline_sprint_ids FROM run)) b ON b.value = v.sprint_id
     GROUP BY v.status_id
 ),
 status_time AS (

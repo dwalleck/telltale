@@ -1,6 +1,7 @@
 -- The baseline's cycle time by point bucket (GLOSSARY: Baseline): the median and P85 of the cycle times of all
 -- issues delivered in the baseline sprints, pooled together. One row per bucket that has at least one such
--- cycle time; point_bucket is null for unestimated issues. No row when no baseline is configured. Median and
+-- cycle time; point_bucket is null for unestimated issues. No row when no baseline is configured. The
+-- baseline sprints are the list the rebuild recorded (run.baseline_sprint_ids, a JSON array). Median and
 -- P85 are picked as in cycle_time_per_sprint_and_bucket.
 --
 -- Minimum group size (GLOSSARY, ADR-0003; owner decisions D44, D47). A pooled figure sits beside the figures
@@ -23,14 +24,14 @@ WITH pooled AS (
            ROW_NUMBER() OVER (PARTITION BY c.point_bucket ORDER BY c.calendar_days) AS calendar_rank,
            COUNT(*)     OVER (PARTITION BY c.point_bucket)                          AS n
     FROM issue_cycle c
-    JOIN baseline_sprint b ON b.sprint_id = c.delivery_sprint_id
+    JOIN json_each((SELECT baseline_sprint_ids FROM run)) b ON b.value = c.delivery_sprint_id
     WHERE c.delivered = 1 AND c.business_days IS NOT NULL
 ),
 -- One row per bucket: 1 when any baseline sprint's own view withholds the bucket.
 withheld AS (
     SELECT v.point_bucket, MAX(v.suppressed) AS suppressed
     FROM cycle_time_per_sprint_and_bucket v
-    JOIN baseline_sprint b ON b.sprint_id = v.sprint_id
+    JOIN json_each((SELECT baseline_sprint_ids FROM run)) b ON b.value = v.sprint_id
     GROUP BY v.point_bucket
 ),
 bucket AS (

@@ -96,8 +96,8 @@ public class StoreTests
     }
 
     [Test]
-    [Arguments("UPDATE derived_source SET objects_version = 'synthetic-older-version';")]
-    [Arguments("ALTER TABLE derived_source DROP COLUMN objects_version;")]
+    [Arguments("UPDATE run SET objects_version = 'synthetic-older-version';")]
+    [Arguments("ALTER TABLE run DROP COLUMN objects_version;")]
     public async Task A_report_from_derived_data_built_by_another_version_of_the_tool_is_refused_until_derive_runs_again(string howTheStoreWasLeft)
     {
         // An earlier version's views may lack a rule this version relies on, the minimum group size above all.
@@ -157,7 +157,7 @@ public class StoreTests
         await pipeline.RunAllAsync(["backfill"]);
         var store = new SqliteStore(pipeline.DatabasePath);
 
-        await Assert.That(async () => await SprintReport.RenderAsync(store, "41", TimeZoneInfo.Utc, withBaseline: false)).Throws<UserFacingException>().WithMessage(NoDerivedData);
+        await Assert.That(async () => await SprintReport.RenderAsync(store, "41", TimeZoneInfo.Utc, baselineSprintIds: [])).Throws<UserFacingException>().WithMessage(NoDerivedData);
         await Assert.That(async () => await SprintReport.MostRecentlyCompletedSprintAsync(store)).Throws<UserFacingException>().WithMessage(NoDerivedData);
     }
 
@@ -173,7 +173,7 @@ public class StoreTests
         await pipeline.ExecuteAsync($"DROP VIEW {view};");
         var store = new SqliteStore(pipeline.DatabasePath);
 
-        await Assert.That(async () => await SprintReport.RenderAsync(store, "41", TimeZoneInfo.Utc, withBaseline: false)).Throws<UserFacingException>().WithMessage($"The metric view {view} is not in the store. Run derive first.");
+        await Assert.That(async () => await SprintReport.RenderAsync(store, "41", TimeZoneInfo.Utc, baselineSprintIds: [])).Throws<UserFacingException>().WithMessage($"The metric view {view} is not in the store. Run derive first.");
     }
 
     [Test]
@@ -187,7 +187,7 @@ public class StoreTests
         await File.WriteAllTextAsync(pipeline.DatabasePath, new string('x', 4096));
         var store = new SqliteStore(pipeline.DatabasePath);
 
-        await Assert.That(async () => await SprintReport.RenderAsync(store, "41", TimeZoneInfo.Utc, withBaseline: false)).Throws<SqliteException>().WithMessageContaining("not a database");
+        await Assert.That(async () => await SprintReport.RenderAsync(store, "41", TimeZoneInfo.Utc, baselineSprintIds: [])).Throws<SqliteException>().WithMessageContaining("not a database");
     }
 
     [Test]

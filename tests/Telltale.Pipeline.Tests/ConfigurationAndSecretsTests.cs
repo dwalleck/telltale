@@ -342,14 +342,17 @@ public class ConfigurationAndSecretsTests
         AddOneSprint(pipeline.Jira);
         pipeline.Jira.AddIdleTeam(41);
         pipeline.Config["statusRoles"]!.AsObject().Remove(Workflow.Review.Id);
-        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
+        var odd = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .NowIn(Workflow.Review)
             .Moved(Local(2026, 1, 9, 9), Workflow.Done);
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
-        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        // The anomaly is logged (ticket 07), with the issue's ID and a fixed message: the status is not quoted.
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Changelog anomalies: 1 across 1 issue, 1 new since the previous derive.\n"
+            + $"Changelog anomaly: issue {odd.Id}: its status history does not line up.\n");
         await Assert.That(exit).IsEqualTo(0);
         await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
     }

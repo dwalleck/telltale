@@ -17,6 +17,9 @@ public class BaselineTests
         + "| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) | Baseline median (business days) | Baseline P85 (business days) |\n"
         + "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n";
 
+    /// <summary>What follows the time in status table: the method note's heading.</summary>
+    private const string AfterTheTables = "\n## Method\n";
+
     private const string TimeInStatusHeader =
         "\n## Time in status\n\n"
         + "| Status | Issues | Median (business days) | Baseline median (business days) |\n| --- | ---: | ---: | ---: |\n";
@@ -49,13 +52,13 @@ public class BaselineTests
 
         // Bucket 3 pooled is 1 to 8: the median is the mean of 4 and 5, and P85 is the seventh of eight values.
         // Development pooled is 1, 1, 1, 1, 2, 3, 4, 5, 6, 7, 8: the sixth of eleven is 3.
-        await Assert.That(await pipeline.ReadReportAsync(42)).EndsWith(
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains(
             CycleTimeHeader
             + "| 3 | 3 | 7.0 | 8.0 | 9.0 | 10.0 | 4.5 | 7.0 |\n"
             + "| 5 | 3 | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 |\n"
             + TimeInStatusHeader
             + "| Fake New | 6 | 1.0 | 1.0 |\n"
-            + "| Fake Development | 6 | 3.5 | 3.0 |\n");
+            + "| Fake Development | 6 | 3.5 | 3.0 |\n" + AfterTheTables);
     }
 
     [Test]
@@ -83,7 +86,7 @@ public class BaselineTests
 
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith(
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(
             "\n## Cycle time by point bucket\n\n"
             + "| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |\n"
             + "| --- | ---: | ---: | ---: | ---: | ---: |\n"
@@ -91,11 +94,41 @@ public class BaselineTests
             + "\n## Time in status\n\n"
             + "| Status | Issues | Median (business days) |\n| --- | ---: | ---: |\n"
             + "| Fake New | 5 | 1.0 |\n"
-            + "| Fake Development | 5 | 3.0 |\n");
+            + "| Fake Development | 5 | 3.0 |\n" + AfterTheTables);
 
-        await Assert.That(await pipeline.QueryAsync<string>("SELECT sprint_id FROM baseline_sprints;")).IsEmpty();
         await Assert.That(await pipeline.QueryAsync<long>("SELECT suppressed FROM baseline_cycle_time_per_bucket;")).IsEmpty();
         await Assert.That(await pipeline.QueryAsync<long>("SELECT suppressed FROM baseline_time_in_status;")).IsEmpty();
+    }
+
+    [Test]
+    public async Task With_a_baseline_the_method_note_says_what_it_is_pooled_over_and_when_a_baseline_cell_reads_suppressed_or_none()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprints(pipeline.Jira);
+        pipeline.Config["baselineSprintIds"] = new JsonArray("42", "41");
+        AddSprintWithOneAssigneeInBucketThreeAndInReview(pipeline.Jira);
+        AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
+
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains(
+            "- An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. An unassigned issue counts toward nobody.\n"
+            + "- The baseline columns pool every issue of the baseline sprints, a list fixed in the configuration (sprints 41, 42), each a completed sprint with a team of five or more. "
+            + "A baseline figure reads \"suppressed\" when any baseline sprint has that row suppressed in its own report, so that a pooled figure cannot give back a withheld one. "
+            + "It reads \"none\" when no issue of the baseline sprints is in the row.\n"
+            + "- An interval that is still open");
+    }
+
+    [Test]
+    public async Task Without_a_baseline_the_report_says_nothing_about_one()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprints(pipeline.Jira);
+        AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
+
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+
+        await Assert.That(await pipeline.ReadReportAsync(42)).DoesNotContain("aseline");
     }
 
     [Test]
@@ -113,16 +146,16 @@ public class BaselineTests
 
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith(
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(
             CycleTimeHeader
             + "| 3 | 5 | 3.0 | 5.0 | 3.0 | 7.0 | 3.0 | 5.0 |\n"
             + TimeInStatusHeader
             + "| Fake New | 5 | 1.0 | 1.0 |\n"
-            + "| Fake Development | 5 | 3.0 | 3.0 |\n");
+            + "| Fake Development | 5 | 3.0 | 3.0 |\n" + AfterTheTables);
     }
 
     [Test]
-    public async Task A_query_over_the_views_reads_the_three_baseline_views()
+    public async Task A_query_over_the_views_reads_the_two_baseline_views()
     {
         await using var pipeline = new PipelineHarness();
         AddSprints(pipeline.Jira);
@@ -135,21 +168,20 @@ public class BaselineTests
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
         var store = new SqliteStore(pipeline.DatabasePath);
 
-        var rows = await store.QueryViewsAsync<(long Sprints, long Buckets, long Statuses)>(
+        var rows = await store.QueryViewsAsync<(long Buckets, long Statuses)>(
             """
-            SELECT (SELECT COUNT(*) FROM baseline_sprints),
-                   (SELECT COUNT(*) FROM baseline_cycle_time_per_bucket),
+            SELECT (SELECT COUNT(*) FROM baseline_cycle_time_per_bucket),
                    (SELECT COUNT(*) FROM baseline_time_in_status);
             """);
 
-        await Assert.That(rows).IsEquivalentTo(new[] { (1L, 1L, 2L) });
+        await Assert.That(rows).IsEquivalentTo(new[] { (1L, 2L) });
     }
 
     [Test]
-    [Arguments("SELECT sprint_id FROM baseline_sprint;")]
-    [Arguments("SELECT COUNT(*) FROM baseline_sprint;")]
-    [Arguments("SELECT s.sprint_id FROM baseline_sprints s JOIN baseline_sprint t ON t.sprint_id = s.sprint_id;")]
-    public async Task A_query_over_the_views_cannot_read_the_derived_table_of_baseline_sprints(string sql)
+    [Arguments("SELECT baseline_sprint_ids FROM run;")]
+    [Arguments("SELECT COUNT(*) FROM run;")]
+    [Arguments("SELECT b.point_bucket FROM baseline_cycle_time_per_bucket b JOIN json_each((SELECT baseline_sprint_ids FROM run)) j;")]
+    public async Task A_query_over_the_views_cannot_read_the_derived_table_that_holds_the_baseline_list(string sql)
     {
         await using var pipeline = new PipelineHarness();
         AddSprints(pipeline.Jira);
@@ -211,7 +243,7 @@ public class BaselineTests
         await pipeline.RunAsync("run", "--sprint", "42");
 
         // Baseline Development is 1, 1, 1, 1, 2, 3, 4, 5: the mean of 1 and 2.
-        await Assert.That(await pipeline.ReadReportAsync(42)).EndsWith(
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains(
             CycleTimeHeader
             + "| 3 | 3 | 1.0 | 1.0 | 1.0 | 1.0 | 3.0 | 5.0 |\n"
             + "| 5 | 3 | 2.0 | 2.0 | 2.0 | 2.0 | suppressed | suppressed |\n"
@@ -219,7 +251,7 @@ public class BaselineTests
             + TimeInStatusHeader
             + "| Fake New | 9 | 1.0 | 1.0 |\n"
             + "| Fake Development | 9 | 2.0 | 1.5 |\n"
-            + "| Fake Review | 3 | 1.0 | none |\n");
+            + "| Fake Review | 3 | 1.0 | none |\n" + AfterTheTables);
 
         var cycleTime = await pipeline.QueryAsync<BaselineCycleTimeRow>("SELECT * FROM baseline_cycle_time_per_bucket ORDER BY point_bucket;");
         await Assert.That(cycleTime.Select(row => (row.PointBucket, row.Suppressed, row.MedianBusinessDays, row.P85BusinessDays, row.MedianCalendarDays, row.P85CalendarDays)))
@@ -251,14 +283,14 @@ public class BaselineTests
 
         // The pooled group passes on its own: four assignees in bucket 3 and in Review, and a team of six.
         // Bucket 5 pooled is 2, 2, 2, 3, 3, 3, 3, 3 and Development is 1, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 3.
-        await Assert.That(await pipeline.ReadReportAsync(42)).EndsWith(
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains(
             CycleTimeHeader
             + "| 3 | 3 | 3.0 | 4.0 | 3.0 | 6.0 | suppressed | suppressed |\n"
             + "| 5 | 3 | 2.0 | 2.0 | 2.0 | 2.0 | 3.0 | 3.0 |\n"
             + TimeInStatusHeader
             + "| Fake New | 6 | 1.0 | 1.0 |\n"
             + "| Fake Development | 6 | 1.5 | 2.0 |\n"
-            + "| Fake Review | 3 | 2.0 | suppressed |\n");
+            + "| Fake Review | 3 | 2.0 | suppressed |\n" + AfterTheTables);
 
         var cycleTime = await pipeline.QueryAsync<BaselineCycleTimeRow>("SELECT * FROM baseline_cycle_time_per_bucket ORDER BY point_bucket;");
         await Assert.That(cycleTime.Select(row => (row.PointBucket, row.Suppressed, row.MedianBusinessDays, row.P85BusinessDays, row.MedianCalendarDays, row.P85CalendarDays)))
@@ -273,6 +305,57 @@ public class BaselineTests
         await Assert.That(await ReadBaselineTimeInStatusAsync(pipeline)).IsEquivalentTo(
             new (string, long, double?)[] { ("Fake New", 0, 1), ("Fake Development", 0, 2), ("Fake Review", 1, null) },
             CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task A_baseline_sprint_that_started_before_the_start_date_the_store_was_filled_from_stops_derive_naming_the_setting_the_sprint_and_the_date()
+    {
+        // The store holds only issues updated since jira.backfillStart, so a sprint that started before it can
+        // lack issues delivered in it, and a baseline pooled from it would be too low without a sign.
+        // Sprint 41 started on 5 January and sprint 42 on 19 January.
+        await using var pipeline = new PipelineHarness();
+        AddSprints(pipeline.Jira);
+        AddSprintWithOneAssigneeInBucketThreeAndInReview(pipeline.Jira);
+        AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
+        pipeline.Config["jira"]!["backfillStart"] = "2026-01-10";
+        await pipeline.RunAllAsync(["backfill"]);
+        var before = await pipeline.ReadStoreContentAsync();
+        pipeline.Config["baselineSprintIds"] = new JsonArray("41", "42");
+
+        var exit = await pipeline.RunAsync("derive");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "baselineSprintIds in the configuration file lists 41, which started before 2026-01-10, the jira.backfillStart the store was last filled from, "
+            + "so issues delivered in it can be missing and the baseline would be too low. "
+            + "Take it out of the list, or set jira.backfillStart to a date before it started and run backfill.\n");
+        await Assert.That(await pipeline.ReadStoreContentAsync()).IsEqualTo(before);
+    }
+
+    [Test]
+    public async Task A_report_refuses_a_baseline_list_that_gained_a_sprint_from_before_the_start_date_and_a_sprint_after_it_is_accepted()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprints(pipeline.Jira);
+        AddSprintWithOneAssigneeInBucketThreeAndInReview(pipeline.Jira);
+        AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
+        pipeline.Config["jira"]!["backfillStart"] = "2026-01-10";
+
+        // Sprint 42 started after the start date: it is a baseline sprint like any other.
+        pipeline.Config["baselineSprintIds"] = new JsonArray("42");
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+        var written = await pipeline.ReadReportAsync(42);
+        pipeline.Config["baselineSprintIds"] = new JsonArray("41", "42");
+
+        var exit = await pipeline.RunAsync("report", "--sprint", "42");
+
+        await Assert.That(written).Contains(CycleTimeHeader + "| 3 | 3 | 3.0 | 4.0 | 3.0 | 6.0 | 3.0 | 4.0 |\n");
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "baselineSprintIds in the configuration file lists 41, which started before 2026-01-10, the jira.backfillStart the store was last filled from, "
+            + "so issues delivered in it can be missing and the baseline would be too low. "
+            + "Take it out of the list, or set jira.backfillStart to a date before it started and run backfill.\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).IsEqualTo(written);
     }
 
     // Replaced (owner decision D47): a test here asserted that a baseline sprint short of five assignees
@@ -361,24 +444,24 @@ public class BaselineTests
         await pipeline.RunAllAsync(["run", "--sprint", "42"]);
         var underBothSprints = await pipeline.ReadReportAsync(42);
 
-        await Assert.That(underSprint42Alone).EndsWith(
+        await Assert.That(underSprint42Alone).Contains(
             CycleTimeHeader
             + "| 3 | 3 | 3.0 | 4.0 | 3.0 | 6.0 | 3.0 | 4.0 |\n"
             + "| 5 | 3 | 2.0 | 2.0 | 2.0 | 2.0 | 2.0 | 2.0 |\n"
             + TimeInStatusHeader
             + "| Fake New | 6 | 1.0 | 1.0 |\n"
             + "| Fake Development | 6 | 1.5 | 1.5 |\n"
-            + "| Fake Review | 3 | 2.0 | 2.0 |\n");
+            + "| Fake Review | 3 | 2.0 | 2.0 |\n" + AfterTheTables);
 
         // Adding sprint 41 changes a baseline figure only where sprint 41's own row is shown.
-        await Assert.That(underBothSprints).EndsWith(
+        await Assert.That(underBothSprints).Contains(
             CycleTimeHeader
             + "| 3 | 3 | 3.0 | 4.0 | 3.0 | 6.0 | suppressed | suppressed |\n"
             + "| 5 | 3 | 2.0 | 2.0 | 2.0 | 2.0 | 3.0 | 3.0 |\n"
             + TimeInStatusHeader
             + "| Fake New | 6 | 1.0 | 1.0 |\n"
             + "| Fake Development | 6 | 1.5 | 2.0 |\n"
-            + "| Fake Review | 3 | 2.0 | suppressed |\n");
+            + "| Fake Review | 3 | 2.0 | suppressed |\n" + AfterTheTables);
     }
 
     [Test]
@@ -437,7 +520,6 @@ public class BaselineTests
 
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(await pipeline.QueryAsync<string>("SELECT sprint_id FROM baseline_sprints;")).IsEquivalentTo(new[] { "41" });
         await Assert.That(await pipeline.ReadReportAsync(41)).Contains(CycleTimeHeader + "| 3 | 5 | 3.0 | 5.0 | 3.0 | 7.0 | 3.0 | 5.0 |\n");
     }
 
@@ -458,6 +540,7 @@ public class BaselineTests
         pipeline.Jira.AddSprint(77, "Fake Other Team Sprint", Local(2026, 1, 12, 9), plannedEnd: Local(2026, 1, 26, 9), completed: Local(2026, 1, 26, 9), originBoardId: 499999);
         pipeline.Jira.AddIdleTeam(41);
         await pipeline.RunAllAsync(["backfill"]);
+        var before = await pipeline.ReadStoreContentAsync();
         pipeline.Config["baselineSprintIds"] = new JsonArray([.. listed.Split(',').Select(id => (JsonNode)id)]);
 
         var exit = await pipeline.RunAsync("derive");
@@ -466,7 +549,7 @@ public class BaselineTests
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
             $"baselineSprintIds in the configuration file lists {refused}, and the store holds no completed sprint of board 400001 with such an ID. "
             + "The baseline is drawn from completed sprints only. Correct the list, or run backfill if the sprint has completed since, and run again.\n");
-        await Assert.That(await pipeline.QueryAsync<long>("SELECT count(*) FROM sqlite_master WHERE name = 'baseline_sprints';")).IsEquivalentTo(new[] { 0L });
+        await Assert.That(await pipeline.ReadStoreContentAsync()).IsEqualTo(before);
     }
 
     [Test]

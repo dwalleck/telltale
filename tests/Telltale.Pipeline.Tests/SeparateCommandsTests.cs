@@ -28,14 +28,15 @@ public class SeparateCommandsTests
         await using var pipeline = new PipelineHarness();
         AddBoard(pipeline.Jira);
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "42"]);
-        var first = await pipeline.ReadReportBytesAsync(42);
+        var first = await pipeline.ReadReportBytesAsync(42, withoutAsOf: true);
 
-        // A day later, with the derived data rebuilt as well: nothing in a completed sprint's report depends on when it was made.
+        // A day later, with the derived data rebuilt as well: nothing in a completed sprint's report depends on when
+        // it was made, apart from the as-of time it prints (owner decision D33).
         pipeline.Clock.Advance(TimeSpan.FromDays(1));
         await pipeline.RunAllAsync(["derive"], ["report", "--sprint", "42"]);
 
         await Assert.That(first).IsNotEmpty();
-        await Assert.That(await pipeline.ReadReportBytesAsync(42)).IsEqualTo(first);
+        await Assert.That(await pipeline.ReadReportBytesAsync(42, withoutAsOf: true)).IsEqualTo(first);
     }
 
     [Test]

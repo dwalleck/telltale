@@ -169,7 +169,12 @@ public sealed class PipelineHarness : IAsyncDisposable
     /// sorted, for comparing the whole store before and after a command. It names no table, so it holds
     /// whatever the schema becomes.
     /// </summary>
-    public async Task<string> ReadStoreContentAsync()
+    /// <param name="withoutAsOf">
+    /// Leaves the stored as-of time (<c>run.as_of</c> and <c>data_quality.as_of</c>, nothing else) out, for
+    /// comparing stores derived at different times: "identical" means identical apart from the as-of time
+    /// (owner decision D33).
+    /// </param>
+    public async Task<string> ReadStoreContentAsync(bool withoutAsOf = false)
     {
         var connectionString = new SqliteConnectionStringBuilder
         {
@@ -194,6 +199,14 @@ public sealed class PipelineHarness : IAsyncDisposable
             {
                 var values = new object[reader.FieldCount];
                 reader.GetValues(values);
+                for (var column = 0; withoutAsOf && column < values.Length; column++)
+                {
+                    if (name is "run" or "data_quality" && reader.GetName(column) == "as_of")
+                    {
+                        values[column] = "(as-of time)";
+                    }
+                }
+
                 rows.Add(string.Join(" | ", values.Select(value => value is DBNull ? "NULL" : Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture))));
             }
 
@@ -209,8 +222,30 @@ public sealed class PipelineHarness : IAsyncDisposable
     /// The bytes of the report file written for a sprint, exactly as they are on disk, as hexadecimal text:
     /// two reports are byte for byte the same when these strings are equal.
     /// </summary>
-    public async Task<string> ReadReportBytesAsync(long sprintId) =>
-        Convert.ToHexString(await File.ReadAllBytesAsync(Path.Combine(ReportDirectory, $"sprint-{sprintId}.md")));
+    /// <param name="sprintId">The sprint whose report is read.</param>
+    /// <param name="withoutAsOf">
+    /// Leaves the as-of time out of the footer's as-of line (the time only; the rest of the line stays), for
+    /// comparing reports derived at different times (owner decision D33). The report must hold exactly one such time.
+    /// </param>
+    public async Task<string> ReadReportBytesAsync(long sprintId, bool withoutAsOf = false)
+    {
+        var bytes = await File.ReadAllBytesAsync(Path.Combine(ReportDirectory, $"sprint-{sprintId}.md"));
+        if (!withoutAsOf)
+        {
+            return Convert.ToHexString(bytes);
+        }
+
+        // Latin-1 maps every byte to one character and back, so only the time's bytes are replaced.
+        var text = System.Text.Encoding.Latin1.GetString(bytes);
+        var asOfTime = new System.Text.RegularExpressions.Regex(@"(?<=\n- As-of time: )\d{4}-\d{2}-\d{2} \d{2}:\d{2} [+-]\d{2}:\d{2}(?= \()");
+        var found = asOfTime.Matches(text).Count;
+        if (found != 1)
+        {
+            throw new InvalidOperationException($"The report for sprint {sprintId} holds {found} as-of times; expected 1.");
+        }
+
+        return Convert.ToHexString(System.Text.Encoding.Latin1.GetBytes(asOfTime.Replace(text, "(as-of time)")));
+    }
 
     /// <summary>Runs a statement against the store with a writable connection, as the owner could from any SQLite client.</summary>
     public async Task ExecuteAsync(string sql)
