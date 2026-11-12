@@ -25,16 +25,8 @@ public static class ConfigFile
         AllowDuplicateProperties = false,
     };
 
-    /// <summary>True for <c>customfield_</c> followed by digits only, the form of every Jira custom field ID.</summary>
-    internal static bool IsCustomFieldId(string fieldId)
-    {
-        const string prefix = "customfield_";
-        return fieldId.Length > prefix.Length
-            && fieldId.StartsWith(prefix, StringComparison.Ordinal)
-            && fieldId.AsSpan(prefix.Length).IndexOfAnyExceptInRange('0', '9') < 0;
-    }
-
-    public static async Task<TelltaleConfig> LoadAsync(string path, CancellationToken cancellationToken = default)
+    /// <summary>Reads the file and checks every setting. Throws <see cref="UserFacingException"/> naming the file and the setting that is refused.</summary>
+    public static async Task<TelltaleSettings> LoadAsync(string path, CancellationToken cancellationToken = default)
     {
         if (!File.Exists(path))
         {
@@ -42,86 +34,23 @@ public static class ConfigFile
         }
 
         await using var stream = File.OpenRead(path);
-        return await ReadAsync(stream, path, cancellationToken);
+        return await ReadAsync(stream, path, cancellationToken: cancellationToken);
     }
 
     /// <summary>
     /// Reads and checks the content of the file at <paramref name="path"/>, or content about to be written
     /// there: <c>discover</c> passes what it is about to write, so it never writes a file the run would refuse.
+    /// The rules are <see cref="TelltaleSettings.From"/>'s, for both.
     /// </summary>
-    public static async Task<TelltaleConfig> ReadAsync(Stream stream, string path, CancellationToken cancellationToken = default)
+    public static async Task<TelltaleSettings> ReadAsync(Stream stream, string path, bool requireDone = true, CancellationToken cancellationToken = default)
     {
         try
         {
             var config = await JsonSerializer.DeserializeAsync<TelltaleConfig>(stream, Options, cancellationToken)
                 ?? throw new UserFacingException($"The configuration file {path} is empty.");
-
-            // Basic authentication sends the Jira email and API token with every request, so only https will do.
-            if (config.Jira.SiteUrl is not { IsAbsoluteUri: true } siteUrl || siteUrl.Scheme != Uri.UriSchemeHttps)
-            {
-                throw new UserFacingException($"The configuration file {path} is not valid: jira.siteUrl must be an absolute https:// address.");
-            }
-
-            // The file holds no secrets, and the address is printed in messages. The message does not repeat it.
-            if (siteUrl.UserInfo.Length > 0)
-            {
-                throw new UserFacingException($"The configuration file {path} is not valid: jira.siteUrl must not carry a user name or password.");
-            }
-
-            if (config.Jira.BoardId <= 0)
-            {
-                throw new UserFacingException($"The configuration file {path} is not valid: jira.boardId must be a positive number.");
-            }
-
-            if (string.IsNullOrWhiteSpace(config.Jira.StoryPointFieldId))
-            {
-                throw new UserFacingException($"The configuration file {path} is not valid: jira.storyPointFieldId must not be empty.");
-            }
-
-            // The search asks Jira for this field by name, so it must be a custom field: a system field
-            // such as "description" would bring free text over the wire.
-            if (!IsCustomFieldId(config.Jira.StoryPointFieldId))
-            {
-                throw new UserFacingException($"The configuration file {path} is not valid: jira.storyPointFieldId must be a custom field ID such as customfield_10016.");
-            }
-
-            if (string.IsNullOrWhiteSpace(config.Jira.SprintFieldId))
-            {
-                throw new UserFacingException($"The configuration file {path} is not valid: jira.sprintFieldId must not be empty.");
-            }
-
-            // The collector stores this field's history, so it must be a custom field, and not the estimate.
-            if (!IsCustomFieldId(config.Jira.SprintFieldId))
-            {
-                throw new UserFacingException($"The configuration file {path} is not valid: jira.sprintFieldId must be a custom field ID such as customfield_10020.");
-            }
-
-            if (config.Jira.SprintFieldId == config.Jira.StoryPointFieldId)
-            {
-                throw new UserFacingException($"The configuration file {path} is not valid: jira.sprintFieldId and jira.storyPointFieldId name the same field.");
-            }
-
-            if (config.Jira.ProjectKeys is not { Count: > 0 })
-            {
-                throw new UserFacingException($"The configuration file {path} is not valid: jira.projectKeys must list at least one project key.");
-            }
-
-            try
-            {
-                JiraProjectKey.RequireValid(config.Jira.ProjectKeys);
-            }
-            catch (FormatException exception)
-            {
-                throw new UserFacingException($"The configuration file {path} is not valid: jira.projectKeys: {exception.Message}", exception);
-            }
-
-            // Relative addresses are resolved against the site URL, and a base address without a trailing
-            // slash loses its last path segment: https://host/tenant + rest/api would become https://host/rest/api.
-            return siteUrl.AbsolutePath.EndsWith('/')
-                ? config
-                : config with { Jira = config.Jira with { SiteUrl = new UriBuilder(siteUrl) { Path = siteUrl.AbsolutePath + "/" }.Uri } };
+            return TelltaleSettings.From(config, requireDone);
         }
-        catch (JsonException exception)
+        catch (Exception exception) when (exception is JsonException or SettingRefusedException)
         {
             throw new UserFacingException($"The configuration file {path} is not valid: {exception.Message}", exception);
         }

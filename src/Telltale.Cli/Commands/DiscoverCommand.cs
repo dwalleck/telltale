@@ -110,13 +110,13 @@ internal static class DiscoverCommand
         {
             var inFile = jira["boardId"];
             long? fileNumber = inFile is JsonValue value && value.TryGetValue<long>(out var number) ? number : null;
-            var fileProblem = inFile is null ? null : fileNumber is null ? " must be a whole number." : BoardProblem(fileNumber.Value);
+            var fileProblem = inFile is null ? null : fileNumber is null ? " must be a whole number." : SettingRules.BoardIdProblem(fileNumber.Value);
             if (given.Board is not { } board)
             {
                 return fileProblem is null ? fileNumber : throw new UserFacingException($"jira.boardId in {path}{fileProblem}");
             }
 
-            if (BoardProblem(board) is { } optionProblem)
+            if (SettingRules.BoardIdProblem(board) is { } optionProblem)
             {
                 throw new UserFacingException("--board" + optionProblem);
             }
@@ -137,7 +137,7 @@ internal static class DiscoverCommand
         var storyPointsInFile = Choose(given.StoryPointField, StoryPointField.Option, jira, StoryPointField.Setting, $"jira.{StoryPointField.Setting}", FieldIdProblem("customfield_10016"));
         RequireAll(path, ("--site-url", siteText is null), ("--board", boardId is null), ("--time-zone", timeZone is null), ("--backfill-start", backfillStart is null));
 
-        var site = WithTrailingSlash(new Uri(siteText!));
+        var site = SettingRules.WithTrailingSlash(new Uri(siteText!));
         if (replacedUnshown.Contains("jira.siteUrl"))
         {
             // The change is already noted. The address is written as it will be, so it is not noted twice.
@@ -383,12 +383,8 @@ internal static class DiscoverCommand
         try
         {
             using var stream = new MemoryStream(Encoding.UTF8.GetBytes(text));
-            var config = await ConfigFile.ReadAsync(stream, path, cancellationToken);
-            var roles = PipelineSteps.ReadStatusRoles(config, path, requireDone: !mayLackDoneRole);
-            PipelineSteps.ReadAbandonedResolutionIds(config, path);
-            PipelineSteps.ReadBaselineSprintIds(config, path);
-            PipelineSteps.ReadTimeZone(config, path);
-            return roles.HasDone;
+            var settings = await ConfigFile.ReadAsync(stream, path, requireDone: !mayLackDoneRole, cancellationToken);
+            return settings.StatusRoles.HasDone;
         }
         catch (UserFacingException exception)
         {
@@ -487,7 +483,7 @@ internal static class DiscoverCommand
     private static void RequireRunWouldAcceptRolesAndProjectKeys(JsonObject jira, JsonObject statusRoles, string path)
     {
         // The IDs first: a role's message shows its status ID.
-        if (statusRoles.Any(role => !IsStatusId(role.Key)))
+        if (!statusRoles.All(role => SettingRules.IsJiraId(role.Key)))
         {
             throw new UserFacingException($"statusRoles in {path}: every status ID must be a Jira status ID (digits only), and one is not. Correct it in the file, then run discover again.");
         }
@@ -509,22 +505,16 @@ internal static class DiscoverCommand
         }
     }
 
-    private static bool IsStatusId(string statusId) => statusId.Length > 0 && statusId.All(char.IsAsciiDigit);
-
     // What run would refuse in one value, as the end of a sentence that starts with where the value came from
     // (the option, or the setting and the file), or null. The second argument says the value came from an
     // option. Only then may a message repeat it: the command line is the owner's own, the file may hold a secret.
 
-    /// <summary>The rules the run applies to <c>jira.siteUrl</c>: https only, because the Jira email and API token travel with every request, and no secret in the address.</summary>
+    /// <summary>The rules the run applies to <c>jira.siteUrl</c> (<see cref="SettingRules.SiteUrlProblem"/>), for a value that is still text.</summary>
     private static string? SiteProblem(string text, bool fromOption) =>
-        !Uri.TryCreate(text, UriKind.Absolute, out var site) || site.Scheme != Uri.UriSchemeHttps ? " must be an absolute https:// address."
-        : site.UserInfo.Length > 0 ? " must not carry a user name or password."
-        : null;
-
-    private static string? BoardProblem(long boardId) => boardId <= 0 ? " must be a positive number." : null;
+        SettingRules.SiteUrlProblem(Uri.TryCreate(text, UriKind.Absolute, out var site) ? site : null);
 
     private static string? TimeZoneProblem(string timeZone, bool fromOption) =>
-        TimeZoneInfo.TryFindSystemTimeZoneById(timeZone, out _) ? null
+        SettingRules.FindTimeZone(timeZone) is not null ? null
         : fromOption ? $": '{timeZone}' is not a known IANA time zone ID."
         : " is not a known IANA time zone ID.";
 
@@ -533,7 +523,7 @@ internal static class DiscoverCommand
 
     /// <summary>A field ID in the file must have the form of a custom field ID. One given by an option is looked up in Jira's field list instead.</summary>
     private static Func<string, bool, string?> FieldIdProblem(string example) =>
-        (fieldId, fromOption) => fromOption || ConfigFile.IsCustomFieldId(fieldId) ? null : $" must be a custom field ID such as {example}.";
+        (fieldId, fromOption) => fromOption ? null : SettingRules.CustomFieldIdProblem(fieldId, example);
 
     private static void RequireAll(string path, params (string Option, bool Missing)[] options)
     {
@@ -544,10 +534,6 @@ internal static class DiscoverCommand
             throw new UserFacingException($"discover needs {names}: the configuration file {path} does not give {(missing.Count == 1 ? "it" : "them")} yet.");
         }
     }
-
-    /// <summary>The site address ending in a slash, so relative addresses keep its path.</summary>
-    private static Uri WithTrailingSlash(Uri site) =>
-        site.AbsolutePath.EndsWith('/') ? site : new UriBuilder(site) { Path = site.AbsolutePath + "/" }.Uri;
 
     /// <summary>
     /// Writes one setting and notes the change when the file held another value. The values are shown unless

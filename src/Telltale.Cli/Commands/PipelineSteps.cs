@@ -20,23 +20,15 @@ namespace Telltale.Cli.Commands;
 internal sealed class PipelineSteps : IDisposable
 {
     private readonly AppServices _services;
-    private readonly TelltaleConfig _config;
-    private readonly StatusRoles _roles;
-    private readonly IReadOnlySet<string> _abandonedResolutionIds;
-    private readonly IReadOnlySet<string> _baselineSprintIds;
-    private readonly TimeZoneInfo _timeZone;
+    private readonly TelltaleSettings _settings;
     private readonly ITelltaleStore _store;
     private readonly IDisposable _storeLock;
 
-    private PipelineSteps(AppServices services, TelltaleConfig config, StatusRoles roles, IReadOnlySet<string> abandonedResolutionIds, IReadOnlySet<string> baselineSprintIds, TimeZoneInfo timeZone, ITelltaleStore store, IDisposable storeLock)
+    private PipelineSteps(AppServices services, TelltaleSettings settings, ITelltaleStore store, IDisposable storeLock)
     {
-        _abandonedResolutionIds = abandonedResolutionIds;
-        _baselineSprintIds = baselineSprintIds;
         _storeLock = storeLock;
         _services = services;
-        _config = config;
-        _roles = roles;
-        _timeZone = timeZone;
+        _settings = settings;
         _store = store;
     }
 
@@ -49,11 +41,7 @@ internal sealed class PipelineSteps : IDisposable
     /// </summary>
     public static async Task<PipelineSteps> StartAsync(AppServices services, bool needsJira, CancellationToken cancellationToken)
     {
-        var config = await ConfigFile.LoadAsync(services.ConfigPath, cancellationToken);
-        var roles = ReadStatusRoles(config, services.ConfigPath);
-        var abandonedResolutionIds = ReadAbandonedResolutionIds(config, services.ConfigPath);
-        var baselineSprintIds = ReadBaselineSprintIds(config, services.ConfigPath);
-        var timeZone = ReadTimeZone(config, services.ConfigPath);
+        var settings = await ConfigFile.LoadAsync(services.ConfigPath, cancellationToken);
 
         if (needsJira)
         {
@@ -69,7 +57,7 @@ internal sealed class PipelineSteps : IDisposable
         {
             var store = new SqliteStore(services.DatabasePath);
             await store.InitializeAsync(cancellationToken);
-            return new PipelineSteps(services, config, roles, abandonedResolutionIds, baselineSprintIds, timeZone, store, storeLock);
+            return new PipelineSteps(services, settings, store, storeLock);
         }
         catch
         {
@@ -101,7 +89,7 @@ internal sealed class PipelineSteps : IDisposable
     public Task SyncAsync(CancellationToken cancellationToken) => CollectAsync(CollectionMode.Incremental, allowEmpty: false, cancellationToken);
 
     private Task CollectAsync(CollectionMode mode, bool allowEmpty, CancellationToken cancellationToken) =>
-        new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets, _services.Clock, _services.Error).BringUpToDateAsync(_store, mode, allowEmpty, cancellationToken);
+        new JiraCollector(_services.HttpHandler, _settings.Jira, _services.Secrets, _services.Clock, _services.Error).BringUpToDateAsync(_store, mode, allowEmpty, cancellationToken);
 
     /// <summary>
     /// Rebuilds every derived table and metric view from the raw tables, and logs the changelog anomalies it
@@ -116,7 +104,7 @@ internal sealed class PipelineSteps : IDisposable
         await RequireStoredSaltAsync(cancellationToken);
         var raw = await _store.ReadRawAsync(cancellationToken);
         await RequireBaselineSprintsAsync(raw, cancellationToken);
-        var derived = Derivation.Derive(raw, new DerivationSettings(new DeliveryRules(_roles, _abandonedResolutionIds), new BusinessCalendar(_timeZone, _config.Holidays)), AsOf(raw));
+        var derived = Derivation.Derive(raw, _settings.Derivation, AsOf(raw));
         var previous = await _store.ReadAnomaliesAsync(cancellationToken);
         await _store.ReplaceDerivedAsync(derived, await SourceAsync(cancellationToken), cancellationToken);
 
@@ -158,13 +146,7 @@ internal sealed class PipelineSteps : IDisposable
     /// keeps the digest of its raw data, so this reads one row and no raw row.
     /// </summary>
     private async Task<DerivedSource> SourceAsync(CancellationToken cancellationToken) =>
-        new(
-            await _store.ReadRawDigestAsync(cancellationToken) ?? "",
-            _config.TimeZone,
-            string.Join(",", _config.Holidays.Order().Select(day => day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))),
-            DerivedSource.BaselineSprintIdsOf(_baselineSprintIds),
-            string.Join(",", _config.StatusRoles.Select(status => $"{status.Key}={status.Value}")),
-            string.Join(",", _abandonedResolutionIds.Order(StringComparer.Ordinal)));
+        _settings.DerivedFrom(await _store.ReadRawDigestAsync(cancellationToken) ?? "");
 
     /// <summary>
     /// Derive and report read what the store holds, and the store holds what the settings it was last filled
@@ -173,7 +155,7 @@ internal sealed class PipelineSteps : IDisposable
     /// fetched into has nothing of another setting's.
     /// </summary>
     private async Task RequireFilledUnderTheConfigurationAsync(CancellationToken cancellationToken) =>
-        (await _store.ReadWatermarkAsync(JiraCollector.WatermarkName, cancellationToken))?.Scope.RequireSameAs(JiraCollector.ScopeOf(_config.Jira));
+        (await _store.ReadWatermarkAsync(JiraCollector.WatermarkName, cancellationToken))?.Scope.RequireSameAs(JiraCollector.ScopeOf(_settings.Jira));
 
     /// <summary>
     /// Derive and report need no secret. But when the salt is at hand and is not the one the stored people
@@ -257,8 +239,8 @@ internal sealed class PipelineSteps : IDisposable
             return;
         }
 
-        BaselineSprintRules.RequireWithinWhatWasFetched(starts, _baselineSprintIds, completeFrom);
-        var path = await SprintReport.WriteAsync(_store, sprint, _timeZone, [.. _baselineSprintIds.Order(StringComparer.Ordinal)], _services.ReportDirectory, cancellationToken);
+        BaselineSprintRules.RequireWithinWhatWasFetched(starts, _settings.BaselineSprintIds, completeFrom);
+        var path = await SprintReport.WriteAsync(_store, sprint, _settings.TimeZone, [.. _settings.BaselineSprintIds.Order(StringComparer.Ordinal)], _services.ReportDirectory, cancellationToken);
         await _services.Out.WriteLineAsync($"Wrote {path}");
     }
 
@@ -330,13 +312,13 @@ internal sealed class PipelineSteps : IDisposable
     /// </summary>
     private async Task RequireBaselineSprintsAsync(RawData raw, CancellationToken cancellationToken)
     {
-        BaselineSprintRules.RequireCompleted(raw.Sprints, _baselineSprintIds);
-        BaselineSprintRules.RequireWindow(raw.Sprints, _baselineSprintIds);
-        if (_baselineSprintIds.Count > 0)
+        BaselineSprintRules.RequireCompleted(raw.Sprints, _settings.BaselineSprintIds);
+        BaselineSprintRules.RequireWindow(raw.Sprints, _settings.BaselineSprintIds);
+        if (_settings.BaselineSprintIds.Count > 0)
         {
             BaselineSprintRules.RequireWithinWhatWasFetched(
                 raw.Sprints.Where(sprint => sprint.Start is not null).Select(sprint => (sprint.SprintId, sprint.Start!.Value)),
-                _baselineSprintIds,
+                _settings.BaselineSprintIds,
                 await CompleteFromAsync(cancellationToken));
         }
     }
@@ -373,83 +355,6 @@ internal sealed class PipelineSteps : IDisposable
             // Only a store 'secrets set' can write to can be given a generated salt.
             var generate = services.Secrets is IWritableSecretStore ? " Add --generate to have a new random salt made." : string.Empty;
             throw new UserFacingException($"The secret {secret.Label} is not set in the secret store. {howToSet}{generate}");
-        }
-    }
-
-    /// <summary>
-    /// The status roles of the configuration. Every status ID must be digits, as Jira's are: anything else
-    /// could match no issue. Without <paramref name="requireDone"/>, a map in which no status has the done role
-    /// is returned and not refused; only <c>discover</c> asks for that (owner decision D40).
-    /// </summary>
-    internal static StatusRoles ReadStatusRoles(TelltaleConfig config, string path, bool requireDone = true)
-    {
-        try
-        {
-            // The message does not repeat the ID: what is not a status ID could be a secret pasted into the wrong place.
-            if (config.StatusRoles.Keys.Any(statusId => statusId.Length == 0 || !statusId.All(char.IsAsciiDigit)))
-            {
-                throw new FormatException("every status ID must be a Jira status ID (digits only), and one is not.");
-            }
-
-            var roles = StatusRoles.Parse(config.StatusRoles);
-            if (requireDone && !roles.HasDone)
-            {
-                throw new FormatException("no status has the role 'done', so nothing could ever be delivered.");
-            }
-
-            return roles;
-        }
-        catch (FormatException exception)
-        {
-            throw new UserFacingException($"The configuration file {path} is not valid: statusRoles: {exception.Message}", exception);
-        }
-    }
-
-    /// <summary>
-    /// The abandoned resolution IDs, trimmed. Jira's resolution IDs are digits, so anything else (a resolution's
-    /// name, a stray character, an empty entry) is refused: it could match no issue, and the abandoned work it
-    /// was meant to exclude would count as delivered.
-    /// </summary>
-    internal static HashSet<string> ReadAbandonedResolutionIds(TelltaleConfig config, string path)
-    {
-        // The element type says "not null", but JSON can still carry a null entry.
-        var ids = config.AbandonedResolutionIds.Select(id => id?.Trim() ?? "").ToHashSet(StringComparer.Ordinal);
-        if (ids.Any(id => id.Length == 0 || !id.All(char.IsAsciiDigit)))
-        {
-            throw new UserFacingException(
-                $"The configuration file {path} is not valid: abandonedResolutionIds: every entry must be a Jira resolution ID (digits only), and one is not.");
-        }
-
-        return ids;
-    }
-
-    /// <summary>
-    /// The baseline sprint IDs, trimmed, each once. Jira's sprint IDs are digits, so anything else (a sprint's
-    /// name, an empty entry) is refused. Whether each is a completed sprint of the board is checked against the
-    /// store, by derive and report.
-    /// </summary>
-    internal static HashSet<string> ReadBaselineSprintIds(TelltaleConfig config, string path)
-    {
-        // The element type says "not null", but JSON can still carry a null entry.
-        var ids = config.BaselineSprintIds.Select(id => id?.Trim() ?? "").ToHashSet(StringComparer.Ordinal);
-        if (ids.Any(id => id.Length == 0 || !id.All(char.IsAsciiDigit)))
-        {
-            throw new UserFacingException(
-                $"The configuration file {path} is not valid: baselineSprintIds: every entry must be a Jira sprint ID (digits only), and one is not.");
-        }
-
-        return ids;
-    }
-
-    internal static TimeZoneInfo ReadTimeZone(TelltaleConfig config, string path)
-    {
-        try
-        {
-            return TimeZoneInfo.FindSystemTimeZoneById(config.TimeZone);
-        }
-        catch (TimeZoneNotFoundException exception)
-        {
-            throw new UserFacingException($"The configuration file {path} is not valid: timeZone: '{config.TimeZone}' is not a known IANA time zone ID.", exception);
         }
     }
 }
