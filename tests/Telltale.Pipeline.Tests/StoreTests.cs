@@ -98,6 +98,7 @@ public class StoreTests
     [Test]
     [Arguments("UPDATE run SET objects_version = 'synthetic-older-version';")]
     [Arguments("ALTER TABLE run DROP COLUMN objects_version;")]
+    [Arguments("DROP TABLE run; CREATE TABLE run (as_of TEXT NOT NULL, raw_digest TEXT NOT NULL, time_zone TEXT NOT NULL, holidays TEXT NOT NULL, objects_version TEXT NOT NULL); INSERT INTO run VALUES ('2026-02-03T18:00:00.000Z', 'synthetic-digest', 'America/Chicago', '', 'synthetic-older-version');")]
     public async Task A_report_from_derived_data_built_by_another_version_of_the_tool_is_refused_until_derive_runs_again(string howTheStoreWasLeft)
     {
         // An earlier version's views may lack a rule this version relies on, the minimum group size above all.

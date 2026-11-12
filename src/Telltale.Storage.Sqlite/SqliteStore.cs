@@ -414,10 +414,29 @@ public sealed class SqliteStore : ITelltaleStore
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
 
         // The table is itself derived: before the first rebuild it does not exist.
-        var built = await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object WHERE name = 'run');"));
-        return built
-            ? await connection.QuerySingleOrDefaultAsync<DerivedSource?>(Command(cancellationToken, "SELECT raw_digest, time_zone, holidays, baseline_sprint_ids FROM run;"))
-            : null;
+        if (!await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object WHERE name = 'run');")))
+        {
+            return null;
+        }
+
+        // Another version's table can lack a column read here, so its version is asked first.
+        await RequireDerivedByThisVersionAsync(connection, cancellationToken);
+        return await connection.QuerySingleOrDefaultAsync<DerivedSource?>(Command(cancellationToken, "SELECT raw_digest, time_zone, holidays, baseline_sprint_ids FROM run;"));
+    }
+
+    /// <summary>
+    /// Stops when the derived tables and metric views were created by other scripts than this version's.
+    /// Their columns and rules are then not the ones this version reads and relies on. Deriving again repairs it.
+    /// </summary>
+    private static async Task RequireDerivedByThisVersionAsync(DbConnection connection, CancellationToken cancellationToken)
+    {
+        // Derived data from before the version was recorded has no such column.
+        var recordsVersion = await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM pragma_table_info('run') WHERE name = 'objects_version');"));
+        var version = recordsVersion ? await connection.QuerySingleOrDefaultAsync<string?>(Command(cancellationToken, "SELECT objects_version FROM run;")) : null;
+        if (version != DerivedObjectsVersion)
+        {
+            throw new UserFacingException("The derived data in the store was built by another version of this tool. Run derive first.");
+        }
     }
 
     public async Task<IReadOnlySet<(string IssueId, string Message)>> ReadAnomaliesAsync(CancellationToken cancellationToken = default)
@@ -485,13 +504,7 @@ public sealed class SqliteStore : ITelltaleStore
             throw new UserFacingException("The store has no derived data yet. Run derive first.");
         }
 
-        // Derived data from before the version was recorded has no such column.
-        var recordsVersion = await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM pragma_table_info('run') WHERE name = 'objects_version');"));
-        var version = recordsVersion ? await connection.QuerySingleOrDefaultAsync<string?>(Command(cancellationToken, "SELECT objects_version FROM run;")) : null;
-        if (version != DerivedObjectsVersion)
-        {
-            throw new UserFacingException("The derived data in the store was built by another version of this tool. Run derive first.");
-        }
+        await RequireDerivedByThisVersionAsync(connection, cancellationToken);
 
         // SQLite matches table names without regard to case, and so must the guard.
         var views = (await connection.QueryAsync<string>(Command(cancellationToken, "SELECT name FROM derived_object WHERE kind = 'view' ORDER BY name;"))).ToHashSet(StringComparer.OrdinalIgnoreCase);
