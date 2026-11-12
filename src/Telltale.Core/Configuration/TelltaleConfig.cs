@@ -13,6 +13,12 @@ public sealed record TelltaleConfig
     /// <summary>The role of each workflow status by status ID: "not started", "work", "blocked" or "done".</summary>
     public required IReadOnlyDictionary<string, string> StatusRoles { get; init; }
 
+    /// <summary>
+    /// The IDs of the resolutions that mean an issue was abandoned (closed without being done, e.g. "Won't Do").
+    /// An issue in a done status with one of them is not delivered. The list may be empty.
+    /// </summary>
+    public required IReadOnlyList<string> AbandonedResolutionIds { get; init; }
+
     /// <summary>The team's time zone as an IANA ID, e.g. "America/Chicago".</summary>
     public required string TimeZone { get; init; }
 }

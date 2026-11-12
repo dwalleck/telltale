@@ -29,6 +29,17 @@ public sealed record FakeSprint(long Id, string Name, string State, DateTimeOffs
 }
 
 /// <summary>
+/// An issue type as Jira describes it on an issue. A null <see cref="HierarchyLevel"/> leaves the field out of the response.
+/// Jira's levels: -1 sub-task, 0 standard, 1 epic, higher for what sits above epics (research note 05).
+/// </summary>
+public sealed record FakeIssueType(string Id, string Name, bool Subtask, int? HierarchyLevel)
+{
+    public static readonly FakeIssueType Story = new(FakeJira.IssueTypeStoryId, "Fake Story", Subtask: false, HierarchyLevel: 0);
+    public static readonly FakeIssueType SubTask = new("800002", "Fake Sub-task", Subtask: true, HierarchyLevel: -1);
+    public static readonly FakeIssueType Epic = new("800003", "Fake Epic", Subtask: false, HierarchyLevel: 1);
+}
+
+/// <summary>
 /// A synthetic issue and its history. Build it with the fluent methods, in time order:
 /// <c>jira.AddIssue("FAKE-1", created).AssignedTo(People.One).Moved(at, Workflow.Development).Moved(later, Workflow.Done)</c>.
 /// To give later tickets a new kind of history (Sprint field, story points), add a method here that
@@ -66,6 +77,9 @@ public sealed class FakeIssue
     /// <summary>The status the issue is in now, after every move so far.</summary>
     public FakeStatus Status { get; private set; }
 
+    /// <summary>A story unless <see cref="OfType"/> says otherwise.</summary>
+    public FakeIssueType Type { get; private set; } = FakeIssueType.Story;
+
     public FakePerson? Assignee { get; private set; }
 
     public double? StoryPoints { get; private set; }
@@ -73,6 +87,12 @@ public sealed class FakeIssue
     public string? ResolutionId { get; private set; }
 
     public IReadOnlyList<FakeHistory> Histories => _histories;
+
+    public FakeIssue OfType(FakeIssueType type)
+    {
+        Type = type;
+        return this;
+    }
 
     public FakeIssue AssignedTo(FakePerson person)
     {
@@ -335,7 +355,7 @@ public sealed class FakeJira
                 {
                     ["summary"] = issue.Summary,
                     ["description"] = issue.Description,
-                    ["issuetype"] = new JsonObject { ["id"] = IssueTypeStoryId, ["name"] = "Story", ["subtask"] = false, ["hierarchyLevel"] = 0 },
+                    ["issuetype"] = IssueTypeDetails(issue.Type),
                     ["status"] = StatusDetails(issue.Status),
                     ["resolution"] = issue.ResolutionId is null ? null : new JsonObject { ["id"] = issue.ResolutionId, ["name"] = "Fake Resolution", ["description"] = ResolutionDescription },
                     ["assignee"] = issue.Assignee is null ? null : UserDetails(issue.Assignee),
@@ -401,6 +421,17 @@ public sealed class FakeJira
         {
             page["nextPageToken"] = null;
         }
+    }
+
+    private static JsonObject IssueTypeDetails(FakeIssueType type)
+    {
+        var details = new JsonObject { ["id"] = type.Id, ["name"] = type.Name, ["subtask"] = type.Subtask };
+        if (type.HierarchyLevel is { } level)
+        {
+            details["hierarchyLevel"] = level;
+        }
+
+        return details;
     }
 
     private JsonObject StatusDetails(FakeStatus status) => new()

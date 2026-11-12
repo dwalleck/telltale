@@ -6,6 +6,7 @@ public sealed record IssueStatusInterval(string IssueId, string StatusId, DateTi
 /// <summary>
 /// What derive concluded about one issue. <see cref="CycleEnd"/> is the delivery moment, and
 /// <see cref="DeliverySprintId"/> the sprint whose window contains it (null when it fell between sprints).
+/// An abandoned issue keeps its <see cref="CycleEnd"/> but is not delivered and has no delivery sprint.
 /// </summary>
 public sealed record IssueCycle(string IssueId, DateTimeOffset? CycleEnd, bool Delivered, string? DeliverySprintId);
 

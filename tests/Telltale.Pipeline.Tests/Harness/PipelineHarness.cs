@@ -58,6 +58,7 @@ public sealed class PipelineHarness : IAsyncDisposable
             ["backfillStart"] = "2025-01-01",
         },
         ["statusRoles"] = new JsonObject(Workflow.BoardOrder.Select(status => KeyValuePair.Create(status.Id, (JsonNode?)status.Role))),
+        ["abandonedResolutionIds"] = new JsonArray(),
         ["timeZone"] = TeamTime.ZoneId,
     };
 
