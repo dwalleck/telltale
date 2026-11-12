@@ -10,9 +10,8 @@ namespace Telltale.Core.Derive;
 /// configured status roles, abandoned resolutions and business calendar, and the as-of time, so changing a definition means rerunning it (ADR-0002).
 /// </summary>
 /// <remarks>
-/// Throws <see cref="UserFacingException"/> when an issue is in, or its timeline entered, a status that has no configured role, when
-/// a closed sprint has neither a completion time nor a planned end, or when an issue was stored
-/// before its Sprint field was fetched.
+/// Throws <see cref="UserFacingException"/> when an issue is in, or its timeline entered, a status that has no configured role,
+/// or when an issue was stored before its Sprint field was fetched.
 /// </remarks>
 public static class Derivation
 {
@@ -39,14 +38,10 @@ public static class Derivation
             .Where(change => change.Field == ChangeFields.Points)
             .ToLookup(change => change.IssueId, change => PointChange.FromRaw(change.HistoryId, change.At, change.From, change.To));
 
-        // Which sprints count is decided here and nowhere else: sprints that have started. A future sprint
-        // has no window yet, even when it carries planned dates. Every sprint in the store is the configured
-        // board's: a backfill replaces them all, and no command reads a store filled under another board
-        // (CollectionScope.RequireSameAs).
-        var windows = raw.Sprints
-            .Where(sprint => sprint.State != SprintStates.Future && sprint.Start is not null)
-            .Select(sprint => new SprintWindow(sprint.SprintId, sprint.Start!.Value, WindowEnd(sprint)))
-            .ToList();
+        // Which sprints count is decided by SprintWindows: the sprints that have a window. Every sprint in the
+        // store is the configured board's: a backfill replaces them all, and no command reads a store filled
+        // under another board (CollectionScope.RequireSameAs).
+        var windows = raw.Sprints.Select(SprintWindows.Of).OfType<SprintWindow>().ToList();
 
         // Every status has exactly one role. Guessing one for a status the configuration does not mention
         // (a new status, a mistyped ID) would quietly move issues in or out of the delivered count. Checked
@@ -124,6 +119,7 @@ public static class Derivation
         {
             AsOf = asOf,
             Anomalies = anomalies,
+            ClosedSprintsWithoutAnEnd = [.. raw.Sprints.Where(SprintWindows.IsClosedWithoutAnEnd).Select(sprint => sprint.SprintId)],
         };
     }
 
@@ -140,22 +136,4 @@ public static class Derivation
                 ? PointHistory.EstimateAt(measured.Start, measured.StartHistoryId, cycle.PointBucket, pointChanges)
                 : PointHistory.EstimateAt(delivered.At, delivered.HistoryId, cycle.PointBucket, pointChanges),
         };
-
-    /// <summary>
-    /// When a sprint's window ends: at its completion; for a closed sprint Jira gives no completion time,
-    /// at its planned end (owner decision D7); null while the sprint is still running, so its window runs
-    /// to the as-of time. A closed sprint with neither time stops the run: nothing says when it ended.
-    /// </summary>
-    private static DateTimeOffset? WindowEnd(RawSprint sprint)
-    {
-        if (sprint.State != SprintStates.Closed)
-        {
-            return sprint.Completed;
-        }
-
-        return sprint.Completed
-            ?? sprint.PlannedEnd
-            ?? throw new UserFacingException(
-                $"Sprint {sprint.SprintId} is closed, but Jira gives it neither a completion time nor a planned end, so when it ended is unknown. No figures were derived.");
-    }
 }

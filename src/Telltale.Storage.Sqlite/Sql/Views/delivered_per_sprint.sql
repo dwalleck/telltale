@@ -1,6 +1,6 @@
 -- One row per sprint that counts (see sprint_window): what the report's title needs, and how many
 -- issues were delivered in the sprint's window. started and ended are the window's: ended is null
--- while the sprint is not completed. When a sprint ends is decided by derive alone (Derivation.cs).
+-- while the sprint is not completed. When a sprint ends is decided by derive alone (SprintWindows.cs).
 -- planned_end is Jira's planned end, for information only: no figure is counted to it.
 -- Minimum group size (GLOSSARY, ADR-0003; owner decision D49): delivered_count is null and suppressed is 1
 -- when the sprint has fewer than five distinct assignees (sprint_team) or fewer than three distinct assignees

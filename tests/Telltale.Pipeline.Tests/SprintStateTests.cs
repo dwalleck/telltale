@@ -139,23 +139,71 @@ public class SprintStateTests
         await Assert.That(await pipeline.ReadReportAsync(41)).StartsWith("# Fake Sprint 41 (2026-01-05 to 2026-01-19)\n");
     }
 
+    private const string Sprint41HasNoWindow =
+        "Sprint 41 is closed, but Jira gives it neither a completion time nor a planned end, so it has no sprint window: no delivery is counted in it, and it cannot be reported or be a baseline sprint.\n";
+
     [Test]
-    public async Task A_closed_sprint_with_neither_a_completion_time_nor_a_planned_end_stops_the_run_and_is_named()
+    public async Task A_closed_sprint_with_neither_a_completion_time_nor_a_planned_end_has_no_window_is_named_and_the_run_carries_on()
     {
-        // Nothing says when this sprint ended, and guessing would move deliveries between sprints.
+        // Owner decision D51. Nothing says when this sprint ended, and guessing would move deliveries between
+        // sprints; stopping would leave the owner with no report and no remedy. FAKE-1 is delivered on the
+        // 9th, while sprint 41 ran, and FAKE-2 on the 21st, in sprint 42.
         await using var pipeline = new PipelineHarness(Now);
         pipeline.Jira.AddClosedSprintWithoutCompletion(41, "Fake Sprint 41", Local(2026, 1, 5, 9));
         pipeline.Jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9));
-        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
+        pipeline.Jira.AddTeam(41, 42);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).InSprints(41)
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done);
+        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 21, 9), Workflow.Done);
 
         var exit = await pipeline.RunAsync("run", "--sprint", "42");
 
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(Sprint41HasNoWindow);
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
+
+        // Sprint 41 is in no view, and the delivery during it is one between sprints (with the team's three).
+        await Assert.That(await pipeline.QueryAsync<string>("SELECT sprint_id FROM delivered_per_sprint;")).IsEquivalentTo(new[] { "42" });
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM sprint_status_time WHERE sprint_id = '41';")).IsEquivalentTo(new[] { 0L });
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM issue_cycle WHERE delivered = 1 AND delivery_sprint_id IS NULL;")).IsEquivalentTo(new[] { 4L });
+    }
+
+    [Test]
+    public async Task A_report_of_a_closed_sprint_without_a_window_is_refused_with_a_message_saying_why()
+    {
+        await using var pipeline = new PipelineHarness(Now);
+        pipeline.Jira.AddClosedSprintWithoutCompletion(41, "Fake Sprint 41", Local(2026, 1, 5, 9));
+        pipeline.Jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9));
+        pipeline.Jira.AddTeam(41, 42);
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+        pipeline.Error.GetStringBuilder().Clear();
+
+        var exit = await pipeline.RunAsync("report", "--sprint", "41");
+
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            "Sprint 41 is closed, but Jira gives it neither a completion time nor a planned end, so when it ended is unknown. No figures were derived.\n");
-        await Assert.That(File.Exists(Path.Combine(pipeline.ReportDirectory, "sprint-42.md"))).IsFalse();
+            "Sprint 41 is closed, but Jira gives it neither a completion time nor a planned end, so it has no sprint window and no figures. No report was written.\n");
+        await Assert.That(Directory.Exists(pipeline.ReportDirectory)).IsFalse();
+    }
+
+    [Test]
+    public async Task A_closed_sprint_without_a_window_cannot_be_a_baseline_sprint()
+    {
+        await using var pipeline = new PipelineHarness(Now);
+        pipeline.Jira.AddClosedSprintWithoutCompletion(41, "Fake Sprint 41", Local(2026, 1, 5, 9));
+        pipeline.Jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9));
+        pipeline.Jira.AddTeam(41, 42);
+        pipeline.Config["baselineSprintIds"] = new System.Text.Json.Nodes.JsonArray("41");
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "42");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "baselineSprintIds in the configuration file lists 41, which has no sprint window: Jira gives it no start date, or no completion time and no planned end, so nothing says when it ran. "
+            + "A sprint without a window has no figures and cannot be a baseline sprint: take it out of the list and run again.\n");
     }
 
     [Test]

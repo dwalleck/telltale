@@ -122,6 +122,12 @@ internal sealed class PipelineSteps : IDisposable
         var previous = await _store.ReadAnomaliesAsync(cancellationToken);
         await _store.ReplaceDerivedAsync(derived, SourceOf(raw), cancellationToken);
 
+        // Owner decision D51: such a sprint stops nothing. It is in no figure, and the console says so.
+        foreach (var sprintId in derived.ClosedSprintsWithoutAnEnd)
+        {
+            await _services.Error.WriteLineAsync($"{SprintWindows.ClosedWithoutAnEnd(sprintId)}: no delivery is counted in it, and it cannot be reported or be a baseline sprint.");
+        }
+
         // Owner decision D50: a baseline sprint short of five assignees stops nothing. The views withhold
         // every baseline figure, and the console says which sprint is why.
         var shortOfFive = await _store.QueryViewsAsync<string>("SELECT sprint_id FROM baseline_sprint WHERE suppressed <> 0 ORDER BY sprint_id;", cancellationToken: cancellationToken);
@@ -258,6 +264,11 @@ internal sealed class PipelineSteps : IDisposable
 
             await _services.Out.WriteLineAsync("The store is up to date. No sprint has completed yet, so no report was written.");
             return;
+        }
+
+        if (raw.Sprints.FirstOrDefault(stored => stored.SprintId == sprint) is { } named && SprintWindows.IsClosedWithoutAnEnd(named))
+        {
+            throw new UserFacingException($"{SprintWindows.ClosedWithoutAnEnd(sprint)} and no figures. No report was written.");
         }
 
         await RequireSprintWithinWhatWasFetchedAsync(raw, sprint, cancellationToken);

@@ -113,4 +113,10 @@ public sealed record DerivedData(
 
     /// <summary>The changelog anomalies found, at most one per issue and kind.</summary>
     public required IReadOnlyList<IssueAnomaly> Anomalies { get; init; }
+
+    /// <summary>
+    /// The IDs of the closed sprints that have no sprint window because Jira gives them neither a completion
+    /// time nor a planned end (owner decision D51). They are in no derived table; the run names them.
+    /// </summary>
+    public IReadOnlyList<string> ClosedSprintsWithoutAnEnd { get; init; } = [];
 }

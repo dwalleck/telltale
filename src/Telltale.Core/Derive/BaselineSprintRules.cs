@@ -56,13 +56,14 @@ public static class BaselineSprintRules
     }
 
     /// <summary>
-    /// Stops when a baseline sprint has no sprint window (GLOSSARY: Sprint window): Jira gives it no start
-    /// date. Such a sprint is in no figure, so a baseline could not be pooled from it.
+    /// Stops when a baseline sprint has no sprint window (<see cref="SprintWindows.Of"/>): Jira gives it no
+    /// start date, or it is closed with neither a completion time nor a planned end (owner decision D51).
+    /// Such a sprint is in no figure, so a baseline could not be pooled from it.
     /// </summary>
     public static void RequireWindow(IReadOnlyList<RawSprint> sprints, IReadOnlySet<string> baselineSprintIds)
     {
         var withoutWindow = sprints
-            .Where(sprint => baselineSprintIds.Contains(sprint.SprintId) && sprint.Start is null)
+            .Where(sprint => baselineSprintIds.Contains(sprint.SprintId) && SprintWindows.Of(sprint) is null)
             .Select(sprint => sprint.SprintId)
             .Order(StringComparer.Ordinal)
             .ToList();
