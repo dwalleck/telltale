@@ -15,7 +15,7 @@ A continuous period an issue spent in one status, identified by status ID.
 _Avoid_: Stage, phase
 
 **Sprint window**:
-The period a sprint counts for: from its start date to its completion date, or to now if not yet completed. A closed sprint with no completion date ends at its planned end.
+The period a sprint counts for: from its start date to its completion date, or to now if not yet completed. A closed sprint with no completion date ends at its planned end. A closed sprint with neither date has no window: no delivery is counted in it, and the run says so and carries on.
 _Avoid_: Sprint dates, iteration
 
 **Membership interval**:
@@ -98,7 +98,7 @@ A metric that shows whether gains came at a cost: reopen rate, revert rate, rewo
 A person's or group's own measurements from before the pilot, used as their comparison point. It is drawn from a list of sprints fixed before the pilot starts.
 
 **Minimum group size**:
-The smallest number of people (five) a result grouped by people may cover. A result grouped by issue attributes (sprint, point bucket) instead needs a team of at least five and at least three distinct assignees behind it. The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in its window. A result that fails either check is suppressed: its figures are withheld. When the team check fails, its issue counts are withheld too, because they add up to the withheld delivered count, and the sprint's tables show no per-bucket or per-status rows at all; when only the three-assignee check fails, the issue count is still shown. An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. A baseline sprint must itself pass the team check. A baseline figure pools every issue of the baseline sprints; it is shown only when the pooled group passes both checks and no baseline sprint has that row suppressed on its own, so that a pooled figure cannot give back a withheld one.
+The smallest number of people (five) a result grouped by people may cover. A result grouped by issue attributes (sprint, point bucket) instead needs a team of at least five and at least three distinct assignees behind it. The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in its window. A result that fails either check is suppressed: its figures are withheld. When the team check fails, its issue counts are withheld too, because they add up to the withheld delivered count, and the sprint's tables show no per-bucket or per-status rows at all; when only the three-assignee check fails, the issue count is still shown. An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. The delivered count of a sprint also needs at least three distinct assignees among the delivered issues. A baseline sprint must itself pass the team check; if one does not, every baseline figure is withheld and the report names the sprint. A baseline figure pools every issue of the baseline sprints; it is shown only when the pooled group passes both checks and no baseline sprint has that row suppressed on its own, so that a pooled figure cannot give back a withheld one.
 
 **Case study**:
 One of the two consented, named individual exceptions to the minimum group size: the project owner and one mid-level developer, each on a Pro seat.
