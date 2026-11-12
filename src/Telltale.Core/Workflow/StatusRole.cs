@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Telltale.Core.Workflow;
 
 /// <summary>
@@ -6,15 +8,27 @@ namespace Telltale.Core.Workflow;
 /// </summary>
 public closed record StatusRole
 {
-    /// <summary>Reads a role from its configuration label. Throws <see cref="FormatException"/> for anything else.</summary>
-    public static StatusRole Parse(string label) => label switch
+    /// <summary>
+    /// Reads a role from its configuration label. Throws <see cref="FormatException"/> for anything else. The
+    /// message does not repeat the label: it comes from the configuration file, and what is not a role could
+    /// be a secret pasted into the wrong place (owner decision D43).
+    /// </summary>
+    public static StatusRole Parse(string label) =>
+        TryParse(label, out var role) ? role : throw new FormatException("The label is not a status role. Use one of: not started, work, blocked, done.");
+
+    /// <summary>Reads a role from its configuration label. False for anything that is not one of the four labels.</summary>
+    public static bool TryParse(string? label, [NotNullWhen(true)] out StatusRole? role)
     {
-        "not started" => new NotStartedRole(),
-        "work" => new WorkRole(),
-        "blocked" => new BlockedRole(),
-        "done" => new DoneRole(),
-        _ => throw new FormatException($"'{label}' is not a status role. Use one of: not started, work, blocked, done."),
-    };
+        role = label switch
+        {
+            "not started" => new NotStartedRole(),
+            "work" => new WorkRole(),
+            "blocked" => new BlockedRole(),
+            "done" => new DoneRole(),
+            _ => null,
+        };
+        return role is not null;
+    }
 }
 
 /// <summary>Waiting to be picked up: development has not started.</summary>
@@ -51,9 +65,13 @@ public sealed class StatusRoles
     /// <summary>
     /// Builds the map from configuration labels, e.g. <c>{ "10001": "done" }</c>. The order of
     /// <paramref name="labelsInBoardOrder"/> is kept as board order, so pass a collection whose order is defined.
+    /// A label that is not a role is a <see cref="FormatException"/> that names the status, which is how the
+    /// owner finds it, and never the label (owner decision D43).
     /// </summary>
     public static StatusRoles Parse(IEnumerable<KeyValuePair<string, string>> labelsInBoardOrder) =>
-        new(labelsInBoardOrder.Select(pair => KeyValuePair.Create(pair.Key, StatusRole.Parse(pair.Value))));
+        new(labelsInBoardOrder.Select(pair => KeyValuePair.Create(pair.Key, StatusRole.TryParse(pair.Value, out var role)
+            ? role
+            : throw new FormatException($"the role of status {pair.Key} is not one of: not started, work, blocked, done."))));
 
     /// <summary>True when at least one status has the done role. Without one, nothing could ever be delivered.</summary>
     public bool HasDone => _byStatusId.Values.Any(role => role is DoneRole);

@@ -3,7 +3,7 @@ namespace Telltale.Core.Intervals;
 /// <summary>One change to the issue's Sprint field: the set of sprint IDs before and after.</summary>
 public sealed record SprintChange(string HistoryId, DateTimeOffset At, IReadOnlySet<string> FromSprintIds, IReadOnlySet<string> ToSprintIds)
 {
-    /// <summary>Builds a change from the changelog item's raw from/to values, e.g. "41, 42".</summary>
+    /// <summary>Builds a change from a stored Sprint change's from and to values, e.g. "41,42".</summary>
     public static SprintChange FromRaw(string historyId, DateTimeOffset at, string? from, string? to) =>
         new(historyId, at, SprintMembership.ParseSprintIds(from), SprintMembership.ParseSprintIds(to));
 }
@@ -32,10 +32,31 @@ public sealed record SprintMembership(IReadOnlyList<MembershipInterval> Interval
     public IEnumerable<MembershipInterval> ForSprint(string sprintId) =>
         Intervals.Where(interval => interval.SprintId == sprintId);
 
+    /// <summary>The sprint IDs in a Sprint value, stored (<c>41,42</c>) or as Jira writes it in a changelog (<c>41, 42</c>).</summary>
     public static IReadOnlySet<string> ParseSprintIds(string? raw) =>
-        string.IsNullOrWhiteSpace(raw)
-            ? NoSprints
-            : raw.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
+        SplitSprintIds(raw) is { Length: > 0 } sprintIds ? sprintIds.ToHashSet(StringComparer.Ordinal) : NoSprints;
+
+    /// <summary>
+    /// The one stored form of a list of sprint IDs: the IDs with a comma between them and nothing else
+    /// (<c>41,42</c>), and empty for no sprint. <c>issue.sprint_ids</c> and a Sprint change's values both use it.
+    /// </summary>
+    public static string StoredSprintIds(IEnumerable<string> sprintIds) => string.Join(',', sprintIds);
+
+    /// <summary>
+    /// Turns a Sprint value as Jira writes it in a changelog into the stored form (<see cref="StoredSprintIds"/>);
+    /// null stays null. False when an entry is not a sprint ID (digits only): the value is not the Sprint field's.
+    /// </summary>
+    public static bool TryNormalizeSprintIds(string? raw, out string? stored)
+    {
+        var sprintIds = SplitSprintIds(raw);
+        var valid = sprintIds.All(sprintId => sprintId.All(char.IsAsciiDigit));
+        stored = raw is null || !valid ? null : StoredSprintIds(sprintIds);
+        return valid;
+    }
+
+    /// <summary>The one place a Sprint value is taken apart: entries between commas, without the white space around them.</summary>
+    private static string[] SplitSprintIds(string? raw) =>
+        string.IsNullOrWhiteSpace(raw) ? [] : raw.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 
     public static SprintMembership Build(DateTimeOffset created, IReadOnlySet<string> currentSprintIds, IEnumerable<SprintChange> changes)
     {

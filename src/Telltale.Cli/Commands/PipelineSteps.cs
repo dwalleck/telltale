@@ -212,12 +212,23 @@ internal sealed class PipelineSteps : IDisposable
         }
     }
 
-    internal static StatusRoles ReadStatusRoles(TelltaleConfig config, string path)
+    /// <summary>
+    /// The status roles of the configuration. Every status ID must be digits, as Jira's are: anything else
+    /// could match no issue. Without <paramref name="requireDone"/>, a map in which no status has the done role
+    /// is returned and not refused; only <c>discover</c> asks for that (owner decision D40).
+    /// </summary>
+    internal static StatusRoles ReadStatusRoles(TelltaleConfig config, string path, bool requireDone = true)
     {
         try
         {
+            // The message does not repeat the ID: what is not a status ID could be a secret pasted into the wrong place.
+            if (config.StatusRoles.Keys.Any(statusId => statusId.Length == 0 || !statusId.All(char.IsAsciiDigit)))
+            {
+                throw new FormatException("every status ID must be a Jira status ID (digits only), and one is not.");
+            }
+
             var roles = StatusRoles.Parse(config.StatusRoles);
-            if (!roles.HasDone)
+            if (requireDone && !roles.HasDone)
             {
                 throw new FormatException("no status has the role 'done', so nothing could ever be delivered.");
             }

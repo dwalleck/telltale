@@ -24,7 +24,25 @@ public class ConfigurationAndSecretsTests
     }
 
     [Test]
-    public async Task A_status_role_outside_the_four_roles_is_refused()
+    [Arguments("description")]
+    [Arguments("customfield_")]
+    [Arguments("customfield_10016 ")]
+    public async Task A_story_point_field_id_that_is_not_a_custom_field_id_is_refused(string fieldId)
+    {
+        // The field is asked for by name: "description" would have Jira send free text.
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config["jira"]!["storyPointFieldId"] = fieldId;
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid: jira.storyPointFieldId must be a custom field ID such as customfield_10016.");
+        await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
+    }
+
+    [Test]
+    public async Task A_status_role_outside_the_four_roles_is_refused_and_the_status_is_named_not_the_role()
     {
         await using var pipeline = new PipelineHarness();
         AddOneSprint(pipeline.Jira);
@@ -33,7 +51,9 @@ public class ConfigurationAndSecretsTests
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid: statusRoles: 'finished' is not a status role.");
+        // What was written as the role could be a secret pasted into the wrong place (owner decision D43).
+        await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid: statusRoles: the role of status 600008 is not one of: not started, work, blocked, done.");
+        await Assert.That(pipeline.Error.ToString()).DoesNotContain("finished");
         await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
     }
 
@@ -138,8 +158,10 @@ public class ConfigurationAndSecretsTests
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString()).Contains(
-            $"telltale.json is not valid: jira.projectKeys: '{key}' is not a Jira project key (an upper-case letter followed by upper-case letters, digits or underscores).");
+        // The refused key is not repeated: it could be a secret pasted into the wrong place (owner decision D43).
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"The configuration file {pipeline.ConfigPath} is not valid: jira.projectKeys: every entry must be a Jira project key "
+            + "(an upper-case letter followed by upper-case letters, digits or underscores), and one is not.\n");
         await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
     }
 
@@ -238,6 +260,22 @@ public class ConfigurationAndSecretsTests
     }
 
     [Test]
+    public async Task A_status_id_that_is_not_digits_is_refused_and_not_shown()
+    {
+        // Jira's status IDs are digits. Anything else matches no issue, and could be a secret pasted in the wrong place.
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config["statusRoles"]!["synthetic-pasted-token"] = "work";
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid: statusRoles: every status ID must be a Jira status ID (digits only), and one is not.");
+        await Assert.That(pipeline.Error.ToString()).DoesNotContain("synthetic-pasted-token");
+        await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
+    }
+
+    [Test]
     public async Task A_status_role_map_with_no_done_status_is_refused()
     {
         await using var pipeline = new PipelineHarness();
@@ -272,6 +310,67 @@ public class ConfigurationAndSecretsTests
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
             "These statuses have no role in statusRoles in the configuration file: 600005, 600009. Give each one a role (not started, work, blocked or done) and run again.\n");
         await Assert.That(File.Exists(Path.Combine(pipeline.ReportDirectory, "sprint-41.md"))).IsFalse();
+    }
+
+    [Test]
+    public async Task A_status_with_no_role_that_an_issue_entered_and_left_at_the_same_instant_stops_the_run_and_is_named()
+    {
+        // The visit took no time, but it is a move: read as "not done", it would be a reopen and a later delivery.
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config["statusRoles"]!.AsObject().Remove(Workflow.Shipped.Id);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done)
+            .Moved(Local(2026, 1, 12, 9), Workflow.Shipped)
+            .Moved(Local(2026, 1, 12, 9), Workflow.Done);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "These statuses have no role in statusRoles in the configuration file: 600009. Give each one a role (not started, work, blocked or done) and run again.\n");
+        await Assert.That(File.Exists(Path.Combine(pipeline.ReportDirectory, "sprint-41.md"))).IsFalse();
+    }
+
+    [Test]
+    public async Task A_status_with_no_role_that_a_later_change_only_names_as_the_status_moved_from_does_not_stop_the_run()
+    {
+        // The changelog says the issue left Review, though no change ever put it there (history Jira lost).
+        // The timeline follows where each change went, so no rule reads Review: it is an anomaly, not a status the issue was in.
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41);
+        pipeline.Config["statusRoles"]!.AsObject().Remove(Workflow.Review.Id);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .NowIn(Workflow.Review)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
+    }
+
+    [Test]
+    public async Task A_status_with_no_role_that_an_issue_was_created_in_and_left_at_that_instant_stops_the_run_and_is_named()
+    {
+        // Only the first change's "from" says which status the issue was created in. It spent no time there,
+        // but it is the timeline's first entry, which the reopen rule reads.
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config["statusRoles"]!.AsObject().Remove(Workflow.Review.Id);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9), createdIn: Workflow.Review)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "These statuses have no role in statusRoles in the configuration file: 600005. Give each one a role (not started, work, blocked or done) and run again.\n");
     }
 
     [Test]

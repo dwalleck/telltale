@@ -26,7 +26,7 @@ public static class ConfigFile
     };
 
     /// <summary>True for <c>customfield_</c> followed by digits only, the form of every Jira custom field ID.</summary>
-    private static bool IsCustomFieldId(string fieldId)
+    internal static bool IsCustomFieldId(string fieldId)
     {
         const string prefix = "customfield_";
         return fieldId.Length > prefix.Length
@@ -76,6 +76,13 @@ public static class ConfigFile
             if (string.IsNullOrWhiteSpace(config.Jira.StoryPointFieldId))
             {
                 throw new UserFacingException($"The configuration file {path} is not valid: jira.storyPointFieldId must not be empty.");
+            }
+
+            // The search asks Jira for this field by name, so it must be a custom field: a system field
+            // such as "description" would bring free text over the wire.
+            if (!IsCustomFieldId(config.Jira.StoryPointFieldId))
+            {
+                throw new UserFacingException($"The configuration file {path} is not valid: jira.storyPointFieldId must be a custom field ID such as customfield_10016.");
             }
 
             if (string.IsNullOrWhiteSpace(config.Jira.SprintFieldId))

@@ -14,11 +14,11 @@ public class BaselineTests
     private const string CycleTimeHeader =
         "\n## Cycle time by point bucket\n\n"
         + "| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) | Baseline median (business days) | Baseline P85 (business days) |\n"
-        + "|---|---|---|---|---|---|---|---|\n";
+        + "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n";
 
     private const string TimeInStatusHeader =
         "\n## Time in status\n\n"
-        + "| Status | Issues | Median business days | Baseline median business days |\n| --- | ---: | ---: | ---: |\n";
+        + "| Status | Issues | Median (business days) | Baseline median (business days) |\n| --- | ---: | ---: | ---: |\n";
 
     [Test]
     public async Task With_baseline_sprints_configured_both_tables_show_figures_pooled_over_all_issues_of_those_sprints()
@@ -85,10 +85,10 @@ public class BaselineTests
         await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith(
             "\n## Cycle time by point bucket\n\n"
             + "| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |\n"
-            + "|---|---|---|---|---|---|\n"
+            + "| --- | ---: | ---: | ---: | ---: | ---: |\n"
             + "| 3 | 5 | 3.0 | 5.0 | 3.0 | 7.0 |\n"
             + "\n## Time in status\n\n"
-            + "| Status | Issues | Median business days |\n| --- | ---: | ---: |\n"
+            + "| Status | Issues | Median (business days) |\n| --- | ---: | ---: |\n"
             + "| Fake New | 5 | 1.0 |\n"
             + "| Fake Development | 5 | 3.0 |\n");
 

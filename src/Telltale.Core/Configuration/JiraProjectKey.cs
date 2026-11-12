@@ -11,15 +11,16 @@ public static partial class JiraProjectKey
 {
     public static bool IsValid(string? key) => key is not null && Form().IsMatch(key);
 
-    /// <summary>Throws <see cref="FormatException"/> naming the first value that is not a project key.</summary>
+    /// <summary>
+    /// Throws <see cref="FormatException"/> when a value is not a project key. The message does not repeat the
+    /// value: the keys come from the configuration file, and what is not a key could be a secret pasted into
+    /// the wrong place (owner decision D43).
+    /// </summary>
     public static void RequireValid(IEnumerable<string?> keys)
     {
-        foreach (var key in keys)
+        if (!keys.All(IsValid))
         {
-            if (!IsValid(key))
-            {
-                throw new FormatException($"'{key}' is not a Jira project key (an upper-case letter followed by upper-case letters, digits or underscores).");
-            }
+            throw new FormatException("every entry must be a Jira project key (an upper-case letter followed by upper-case letters, digits or underscores), and one is not.");
         }
     }
 

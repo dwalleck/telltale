@@ -10,7 +10,7 @@ namespace Telltale.Core.Derive;
 /// configured board, status roles, abandoned resolutions and business calendar, and the as-of time, so changing a definition means rerunning it (ADR-0002).
 /// </summary>
 /// <remarks>
-/// Throws <see cref="UserFacingException"/> when an issue has been in a status that has no configured role, when
+/// Throws <see cref="UserFacingException"/> when an issue is in, or its timeline entered, a status that has no configured role, when
 /// a closed sprint of the board has neither a completion time nor a planned end, or when an issue was stored
 /// before its Sprint field was fetched.
 /// </remarks>
@@ -47,8 +47,31 @@ public static class Derivation
         // a future sprint has no window yet, even when it carries planned dates.
         var windows = raw.Sprints
             .Where(sprint => sprint.BoardId == boardId && sprint.State != SprintStates.Future && sprint.Start is not null)
-            .Select(sprint => new SprintWindow(sprint.SprintId, sprint.Start!.Value, sprint.PlannedEnd, WindowEnd(sprint)))
+            .Select(sprint => new SprintWindow(sprint.SprintId, sprint.Start!.Value, WindowEnd(sprint)))
             .ToList();
+
+        // Every status has exactly one role. Guessing one for a status the configuration does not mention
+        // (a new status, a mistyped ID) would quietly move issues in or out of the delivered count. Checked
+        // before anything reads a role, over exactly what the rules read: the status each issue is in now and
+        // every entry of its timeline. The entries, not the intervals: a status entered and left at the same
+        // instant has no interval, and is still a move the delivery and reopen rules read. A later change's
+        // "from" that the timeline was not in is an anomaly, and no rule reads it.
+        var timelines = raw.Issues.ToDictionary(
+            issue => issue.IssueId,
+            issue => StatusTimeline.Build(issue.Created, issue.StatusId, statusChanges[issue.IssueId]),
+            StringComparer.Ordinal);
+        var withoutRole = raw.Issues
+            .SelectMany(issue => timelines[issue.IssueId].Entries.Select(entry => entry.StatusId).Append(issue.StatusId))
+            .Distinct(StringComparer.Ordinal)
+            .Where(statusId => roles.RoleOf(statusId) is null)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        if (withoutRole.Count > 0)
+        {
+            throw new UserFacingException(
+                $"These statuses have no role in statusRoles in the configuration file: {string.Join(", ", withoutRole)}. "
+                + "Give each one a role (not started, work, blocked or done) and run again.");
+        }
 
         var deliverySprints = new DeliverySprints(windows, asOf);
         var intervals = new List<IssueStatusInterval>();
@@ -58,7 +81,7 @@ public static class Derivation
 
         foreach (var issue in raw.Issues)
         {
-            var timeline = StatusTimeline.Build(issue.Created, issue.StatusId, statusChanges[issue.IssueId]);
+            var timeline = timelines[issue.IssueId];
             intervals.AddRange(timeline.Intervals.Select(interval => new IssueStatusInterval(issue.IssueId, interval.StatusId, interval.Start, interval.End)));
 
             var reopens = Cycles.ReopenCount(timeline.Entries, roles);
@@ -79,23 +102,15 @@ public static class Derivation
             var membership = SprintMembership.Build(issue.Created, SprintMembership.ParseSprintIds(issue.SprintIds), sprintChanges[issue.IssueId]);
             memberships.AddRange(membership.Intervals.Select(interval => new IssueMembershipInterval(issue.IssueId, interval.SprintId, interval.Start, interval.End)));
 
-            // Only sprints that count (the windows above) have time in status. A sprint the issue was never in gives nothing.
-            foreach (var window in windows)
+            // Only sprints that count (the windows above) have time in status. A sprint the issue was never in
+            // gives nothing, so it is not measured at all: most issues were in one or two of the board's sprints.
+            var memberOf = membership.Intervals.Select(interval => interval.SprintId).ToHashSet(StringComparer.Ordinal);
+            foreach (var window in windows.Where(counted => memberOf.Contains(counted.SprintId)))
             {
                 sprintStatusTimes.AddRange(TimeInStatus.ForSprint(window, timeline.Intervals, membership.Intervals, calendar, asOf)
                     .OrderBy(pair => pair.Key, StringComparer.Ordinal)
                     .Select(pair => new SprintStatusTime(issue.IssueId, window.SprintId, pair.Key, pair.Value.CalendarTime, pair.Value.BusinessTime, pair.Value.BusinessDays)));
             }
-        }
-
-        // Every status has exactly one role. Guessing one for a status the configuration does not mention
-        // (a new status, a mistyped ID) would quietly move issues in or out of the delivered count.
-        var withoutRole = intervals.Select(interval => interval.StatusId).Concat(raw.Issues.Select(issue => issue.StatusId)).Distinct().Where(statusId => roles.RoleOf(statusId) is null).Order(StringComparer.Ordinal).ToList();
-        if (withoutRole.Count > 0)
-        {
-            throw new UserFacingException(
-                $"These statuses have no role in statusRoles in the configuration file: {string.Join(", ", withoutRole)}. "
-                + "Give each one a role (not started, work, blocked or done) and run again.");
         }
 
         return new DerivedData(

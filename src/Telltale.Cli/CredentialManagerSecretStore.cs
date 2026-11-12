@@ -41,7 +41,7 @@ public sealed class CredentialManagerSecretStore(ICredentialVault vault) : IWrit
             var text = blob.Length % sizeof(char) == 0 ? Encoding.Unicode.GetString(blob).TrimEnd('\0').Trim() : null;
             if (text is null || text.Any(char.IsControl))
             {
-                throw new UserFacingException($"The secret {secret.Label} in Windows Credential Manager is not text this tool stored, so it cannot be used. Set it again. {secret.SetCommand}");
+                throw new StoredSecretUnusableException($"The secret {secret.Label} in Windows Credential Manager is not text this tool stored, so it cannot be used. Set it again. {secret.SetCommand}");
             }
 
             return text.Length == 0 ? null : text;

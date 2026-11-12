@@ -1,6 +1,7 @@
 using System.Data.Common;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Dapper;
 using Microsoft.Data.Sqlite;
 using SQLitePCL;
@@ -54,7 +55,7 @@ public sealed class SqliteStore : ITelltaleStore
         }.ToString();
 
         // Queries over the metric views cannot write to the file, whatever SQL they are given.
-        _readOnlyConnectionString = new SqliteConnectionStringBuilder(_connectionString) { Mode = SqliteOpenMode.ReadOnly }.ToString();
+        _readOnlyConnectionString = ReadOnlyConnectionString(databasePath);
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -86,15 +87,17 @@ public sealed class SqliteStore : ITelltaleStore
 
         // An issue that is out of scope now may have been stored while it was in scope (owner decision D13).
         // Its rows go in the same transaction as the batch, so the store never holds half of the change.
-        var outOfScope = batch.OutOfScopeIssueIds.Select(issueId => new { issueId });
-        await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM change WHERE issue_id = @issueId;", outOfScope, transaction));
-        await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM issue WHERE issue_id = @issueId;", outOfScope, transaction));
+        // One statement per table, however many issues: the IDs travel as one JSON array.
+        var outOfScope = new { issueIds = JsonSerializer.Serialize(batch.OutOfScopeIssueIds) };
+        await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM change WHERE issue_id IN (SELECT value FROM json_each(@issueIds));", outOfScope, transaction));
+        await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM issue WHERE issue_id IN (SELECT value FROM json_each(@issueIds));", outOfScope, transaction));
 
-        await connection.ExecuteAsync(Command(
-            cancellationToken,
+        await ExecuteForEachRowAsync(
+            connection,
+            transaction,
             """
             INSERT INTO issue (issue_id, issue_key, issue_type_id, created, status_id, resolution_id, story_points, assignee_hash, updated, sprint_ids)
-            VALUES (@IssueId, @Key, @IssueTypeId, @Created, @StatusId, @ResolutionId, @StoryPoints, @AssigneeHash, @Updated, @SprintIds)
+            VALUES (@issueId, @key, @issueTypeId, @created, @statusId, @resolutionId, @storyPoints, @assigneeHash, @updated, @sprintIds)
             ON CONFLICT (issue_id) DO UPDATE SET
                 issue_key = excluded.issue_key,
                 issue_type_id = excluded.issue_type_id,
@@ -106,45 +109,33 @@ public sealed class SqliteStore : ITelltaleStore
                 updated = excluded.updated,
                 sprint_ids = excluded.sprint_ids;
             """,
-            batch.Issues.Select(issue => new
+            ["@issueId", "@key", "@issueTypeId", "@created", "@statusId", "@resolutionId", "@storyPoints", "@assigneeHash", "@updated", "@sprintIds"],
+            batch.Issues.Select(issue => new object?[]
             {
-                issue.IssueId,
-                issue.Key,
-                issue.IssueTypeId,
-                Created = StoredTime.ToStored(issue.Created),
-                issue.StatusId,
-                issue.ResolutionId,
-                issue.StoryPoints,
-                issue.AssigneeHash,
-                Updated = StoredTime.ToStored(issue.Updated),
-                issue.SprintIds,
+                issue.IssueId, issue.Key, issue.IssueTypeId, StoredTime.ToStored(issue.Created), issue.StatusId, issue.ResolutionId,
+                issue.StoryPoints, issue.AssigneeHash, StoredTime.ToStored(issue.Updated), issue.SprintIds,
             }),
-            transaction));
+            cancellationToken);
 
         // A changelog entry never changes once written, so a repeat is ignored.
-        await connection.ExecuteAsync(Command(
-            cancellationToken,
+        await ExecuteForEachRowAsync(
+            connection,
+            transaction,
             """
             INSERT INTO change (history_id, field, issue_id, at, from_value, to_value)
-            VALUES (@HistoryId, @Field, @IssueId, @At, @From, @To)
+            VALUES (@historyId, @field, @issueId, @at, @from, @to)
             ON CONFLICT (history_id, field) DO NOTHING;
             """,
-            batch.Changes.Select(change => new
-            {
-                change.HistoryId,
-                change.Field,
-                change.IssueId,
-                At = StoredTime.ToStored(change.At),
-                change.From,
-                change.To,
-            }),
-            transaction));
+            ["@historyId", "@field", "@issueId", "@at", "@from", "@to"],
+            batch.Changes.Select(change => new object?[] { change.HistoryId, change.Field, change.IssueId, StoredTime.ToStored(change.At), change.From, change.To }),
+            cancellationToken);
 
-        await connection.ExecuteAsync(Command(
-            cancellationToken,
+        await ExecuteForEachRowAsync(
+            connection,
+            transaction,
             """
             INSERT INTO sprint (sprint_id, board_id, name, state, started, planned_end, completed)
-            VALUES (@SprintId, @BoardId, @Name, @State, @Started, @PlannedEnd, @Completed)
+            VALUES (@sprintId, @boardId, @name, @state, @started, @plannedEnd, @completed)
             ON CONFLICT (sprint_id) DO UPDATE SET
                 board_id = excluded.board_id,
                 name = excluded.name,
@@ -153,27 +144,25 @@ public sealed class SqliteStore : ITelltaleStore
                 planned_end = excluded.planned_end,
                 completed = excluded.completed;
             """,
-            batch.Sprints.Select(sprint => new
+            ["@sprintId", "@boardId", "@name", "@state", "@started", "@plannedEnd", "@completed"],
+            batch.Sprints.Select(sprint => new object?[]
             {
-                sprint.SprintId,
-                sprint.BoardId,
-                sprint.Name,
-                sprint.State,
-                Started = StoredTime.ToStored(sprint.Start),
-                PlannedEnd = StoredTime.ToStored(sprint.PlannedEnd),
-                Completed = StoredTime.ToStored(sprint.Completed),
+                sprint.SprintId, sprint.BoardId, sprint.Name, sprint.State,
+                StoredTime.ToStored(sprint.Start), StoredTime.ToStored(sprint.PlannedEnd), StoredTime.ToStored(sprint.Completed),
             }),
-            transaction));
+            cancellationToken);
 
-        await connection.ExecuteAsync(Command(
-            cancellationToken,
+        await ExecuteForEachRowAsync(
+            connection,
+            transaction,
             """
             INSERT INTO status (status_id, name, category)
-            VALUES (@StatusId, @Name, @Category)
+            VALUES (@statusId, @name, @category)
             ON CONFLICT (status_id) DO UPDATE SET name = excluded.name, category = excluded.category;
             """,
-            batch.Statuses,
-            transaction));
+            ["@statusId", "@name", "@category"],
+            batch.Statuses.Select(status => new object?[] { status.StatusId, status.Name, status.Category }),
+            cancellationToken);
 
         // Set, not raised: a batch that reaches less far (a backfill starting over) leaves a watermark that
         // makes the next sync fetch more, which is always safe.
@@ -281,7 +270,7 @@ public sealed class SqliteStore : ITelltaleStore
             await connection.ExecuteAsync(Command(cancellationToken, sql, transaction: transaction));
         }
 
-        await InsertRowsAsync(
+        await ExecuteForEachRowAsync(
             connection,
             transaction,
             "INSERT INTO sprint_window (sprint_id, started, ended) VALUES (@sprintId, @started, @ended);",
@@ -289,7 +278,7 @@ public sealed class SqliteStore : ITelltaleStore
             derived.SprintWindows.Select(window => new object?[] { window.SprintId, StoredTime.ToStored(window.Start), StoredTime.ToStored(window.End) }),
             cancellationToken);
 
-        await InsertRowsAsync(
+        await ExecuteForEachRowAsync(
             connection,
             transaction,
             "INSERT INTO status_interval (issue_id, status_id, started, ended) VALUES (@issueId, @statusId, @started, @ended);",
@@ -297,7 +286,7 @@ public sealed class SqliteStore : ITelltaleStore
             derived.StatusIntervals.Select(interval => new object?[] { interval.IssueId, interval.StatusId, StoredTime.ToStored(interval.Start), StoredTime.ToStored(interval.End) }),
             cancellationToken);
 
-        await InsertRowsAsync(
+        await ExecuteForEachRowAsync(
             connection,
             transaction,
             """
@@ -312,7 +301,7 @@ public sealed class SqliteStore : ITelltaleStore
             }),
             cancellationToken);
 
-        await InsertRowsAsync(
+        await ExecuteForEachRowAsync(
             connection,
             transaction,
             "INSERT INTO membership_interval (issue_id, sprint_id, started, ended) VALUES (@issueId, @sprintId, @started, @ended);",
@@ -320,7 +309,7 @@ public sealed class SqliteStore : ITelltaleStore
             derived.MembershipIntervals.Select(interval => new object?[] { interval.IssueId, interval.SprintId, StoredTime.ToStored(interval.Start), StoredTime.ToStored(interval.End) }),
             cancellationToken);
 
-        await InsertRowsAsync(
+        await ExecuteForEachRowAsync(
             connection,
             transaction,
             "INSERT INTO sprint_status_time (issue_id, sprint_id, status_id, calendar_seconds, business_seconds, business_days) VALUES (@issueId, @sprintId, @statusId, @calendarSeconds, @businessSeconds, @businessDays);",
@@ -328,7 +317,7 @@ public sealed class SqliteStore : ITelltaleStore
             derived.SprintStatusTimes.Select(time => new object?[] { time.IssueId, time.SprintId, time.StatusId, time.CalendarTime.TotalSeconds, time.BusinessTime.TotalSeconds, time.BusinessDays }),
             cancellationToken);
 
-        await InsertRowsAsync(
+        await ExecuteForEachRowAsync(
             connection,
             transaction,
             "INSERT INTO board_status (status_id, position, is_done) VALUES (@statusId, @position, @isDone);",
@@ -336,7 +325,7 @@ public sealed class SqliteStore : ITelltaleStore
             derived.BoardStatuses.Select(status => new object?[] { status.StatusId, (long)status.Position, status.IsDone ? 1L : 0L }),
             cancellationToken);
 
-        await InsertRowsAsync(
+        await ExecuteForEachRowAsync(
             connection,
             transaction,
             "INSERT INTO baseline_sprint (sprint_id) VALUES (@sprintId);",
@@ -489,21 +478,25 @@ public sealed class SqliteStore : ITelltaleStore
             return false;
         }
 
-        var readOnly = new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false, Mode = SqliteOpenMode.ReadOnly }.ToString();
-        await using var connection = await OpenAsync(readOnly, cancellationToken);
+        await using var connection = await OpenAsync(ReadOnlyConnectionString(databasePath), cancellationToken);
         var hasIssues = await connection.ExecuteScalarAsync<long>(Command(cancellationToken, "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'issue';"));
         return hasIssues > 0
             && await connection.ExecuteScalarAsync<long>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM issue WHERE assignee_hash IS NOT NULL);")) > 0;
     }
 
+    /// <summary>A connection that cannot write, whatever SQL it is given, and never creates the file.</summary>
+    private static string ReadOnlyConnectionString(string databasePath) =>
+        new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false, ForeignKeys = true, Mode = SqliteOpenMode.ReadOnly }.ToString();
+
     private static CommandDefinition Command(CancellationToken cancellationToken, string sql, object? parameters = null, DbTransaction? transaction = null) =>
         new(sql, parameters, transaction, cancellationToken: cancellationToken);
 
     /// <summary>
-    /// Inserts many rows through one command: the statement is prepared once and only the parameter
-    /// values change per row. The derived tables are rebuilt in full on every run, so this is the hot path.
+    /// Runs one statement once per row through one command: the statement is prepared once and only the
+    /// parameter values change per row. Every write of many rows goes through here: a batch of raw rows, and
+    /// the derived tables, which are rebuilt in full on every run.
     /// </summary>
-    private static async Task InsertRowsAsync(DbConnection connection, DbTransaction transaction, string sql, string[] parameterNames, IEnumerable<object?[]> rows, CancellationToken cancellationToken)
+    private static async Task ExecuteForEachRowAsync(DbConnection connection, DbTransaction transaction, string sql, string[] parameterNames, IEnumerable<object?[]> rows, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;

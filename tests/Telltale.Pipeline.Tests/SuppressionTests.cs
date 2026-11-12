@@ -14,7 +14,7 @@ public class SuppressionTests
     private const string CycleTimeHeader =
         "\n## Cycle time by point bucket\n\n"
         + "| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |\n"
-        + "|---|---|---|---|---|---|\n";
+        + "| --- | ---: | ---: | ---: | ---: | ---: |\n";
 
     private const string TimeInStatusHeading = "\n## Time in status\n";
 
@@ -88,7 +88,7 @@ public class SuppressionTests
             + CycleTimeHeader
             + "| 3 | suppressed | suppressed | suppressed | suppressed | suppressed |\n"
             + TimeInStatusHeading
-            + "\n| Status | Issues | Median business days |\n| --- | ---: | ---: |\n"
+            + "\n| Status | Issues | Median (business days) |\n| --- | ---: | ---: |\n"
             + "| Fake New | suppressed | suppressed |\n"
             + "| Fake Development | suppressed | suppressed |\n");
 
@@ -162,7 +162,7 @@ public class SuppressionTests
 
         await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith(
             TimeInStatusHeading
-            + "\n| Status | Issues | Median business days |\n| --- | ---: | ---: |\n"
+            + "\n| Status | Issues | Median (business days) |\n| --- | ---: | ---: |\n"
             + "| Fake New | 7 | 1.0 |\n"
             + "| Fake Development | 7 | 2.0 |\n"
             + "| Fake Review | 4 | suppressed |\n"
@@ -244,7 +244,7 @@ public class SuppressionTests
             DROP VIEW delivered_per_sprint;
             CREATE VIEW delivered_per_sprint AS
             SELECT '41' AS sprint_id, 'Fake Sprint 41' AS sprint_name, 'closed' AS state, '2026-01-05T15:00:00.000Z' AS started,
-                   '2026-01-19T15:00:00.000Z' AS planned_end, '2026-01-19T16:00:00.000Z' AS completed, 5 AS delivered_count, 1 AS suppressed;
+                   '2026-01-19T16:00:00.000Z' AS ended, '2026-01-19T15:00:00.000Z' AS planned_end, 5 AS delivered_count, 1 AS suppressed;
             """);
 
         await pipeline.RunAllAsync(["report", "--sprint", "41"]);
@@ -255,7 +255,7 @@ public class SuppressionTests
             + CycleTimeHeader
             + "| 3 | 5 | suppressed | suppressed | suppressed | suppressed |\n"
             + TimeInStatusHeading
-            + "\n| Status | Issues | Median business days |\n| --- | ---: | ---: |\n"
+            + "\n| Status | Issues | Median (business days) |\n| --- | ---: | ---: |\n"
             + "| Fake Development | 5 | suppressed |\n");
     }
 

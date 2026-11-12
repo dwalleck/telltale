@@ -179,6 +179,100 @@ public class CredentialManagerSecretStoreTests
         await Assert.That(vault.Entries[TokenEntry].Length).IsEqualTo(2560);
     }
 
+    private const string SaltEntry = "Telltale/HashingSalt";
+
+    // Three bytes: not UTF-16 text, so the store cannot read it.
+    private static readonly byte[] NotText = [0x61, 0x00, 0x62];
+
+    [Test]
+    public async Task A_stored_salt_that_cannot_be_read_does_not_stop_a_new_one_being_set()
+    {
+        // The message about an unreadable secret says to set it again, so setting it must work.
+        await using var pipeline = new PipelineHarness();
+        var vault = UseVault(pipeline);
+        vault.Entries[SaltEntry] = [.. NotText];
+        pipeline.Console.TypeLine("synthetic-salt-three");
+
+        var exit = await pipeline.RunAsync("secrets", "set", "hashing-salt");
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(System.Text.Encoding.Unicode.GetString(vault.Entries[SaltEntry])).IsEqualTo("synthetic-salt-three");
+    }
+
+    private const string UnreadableSaltOverHashedPeople =
+        "The stored hashing salt is not text this tool stored, so it cannot be used, and the database already holds people hashed with a salt. "
+        + "Only that salt keeps each of them one person: to restore it, run 'telltale secrets set hashing-salt --replace' and type the original salt. "
+        + "A new or generated salt stored with --replace makes every person count twice until a backfill.\n";
+
+    [Test]
+    public async Task A_typed_salt_replaces_a_stored_one_that_cannot_be_read_over_hashed_people_only_with_the_replace_option()
+    {
+        await using var pipeline = new PipelineHarness();
+        var vault = await RunOnceWithAnAssigneeThenMakeTheSaltUnreadableAsync(pipeline);
+
+        // Typed once: the refused command stops before it asks, so the line is still there for the second.
+        pipeline.Console.TypeLine("synthetic-salt-three");
+        var refused = await pipeline.RunAsync("secrets", "set", "hashing-salt");
+        var errorWhenRefused = pipeline.Error.ToString().ReplaceLineEndings("\n");
+        var entryWhenRefused = vault.Entries[SaltEntry];
+        var replaced = await pipeline.RunAsync("secrets", "set", "hashing-salt", "--replace");
+
+        await Assert.That(refused).IsEqualTo(1);
+        await Assert.That(errorWhenRefused).IsEqualTo(UnreadableSaltOverHashedPeople);
+        await Assert.That(entryWhenRefused).IsEquivalentTo(NotText);
+        await Assert.That(replaced).IsEqualTo(0);
+        await Assert.That(System.Text.Encoding.Unicode.GetString(vault.Entries[SaltEntry])).IsEqualTo("synthetic-salt-three");
+    }
+
+    [Test]
+    public async Task A_generated_salt_replaces_a_stored_one_that_cannot_be_read_over_hashed_people_only_with_the_replace_option()
+    {
+        await using var pipeline = new PipelineHarness();
+        var vault = await RunOnceWithAnAssigneeThenMakeTheSaltUnreadableAsync(pipeline);
+
+        var refused = await pipeline.RunAsync("secrets", "set", "hashing-salt", "--generate");
+        var errorWhenRefused = pipeline.Error.ToString().ReplaceLineEndings("\n");
+        var entryWhenRefused = vault.Entries[SaltEntry];
+        var replaced = await pipeline.RunAsync("secrets", "set", "hashing-salt", "--generate", "--replace");
+
+        await Assert.That(refused).IsEqualTo(1);
+        await Assert.That(errorWhenRefused).IsEqualTo(UnreadableSaltOverHashedPeople);
+        await Assert.That(entryWhenRefused).IsEquivalentTo(NotText);
+        await Assert.That(replaced).IsEqualTo(0);
+
+        // A generated salt is 256 random bits, stored as base64 text.
+        await Assert.That(Convert.FromBase64String(System.Text.Encoding.Unicode.GetString(vault.Entries[SaltEntry])).Length).IsEqualTo(32);
+    }
+
+    /// <summary>A store that holds one hashed person, and a salt entry Credential Manager can no longer give as text.</summary>
+    private static async Task<FakeCredentialVault> RunOnceWithAnAssigneeThenMakeTheSaltUnreadableAsync(PipelineHarness pipeline)
+    {
+        var vault = UseVault(pipeline, withAllSecrets: true);
+        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).AssignedTo(People.One)
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done);
+        await pipeline.RunAllAsync(["run", "--sprint", "41"]);
+        vault.Entries[SaltEntry] = [.. NotText];
+        return vault;
+    }
+
+    [Test]
+    public async Task A_failure_to_read_the_stored_salt_is_reported_as_that_and_nothing_is_stored()
+    {
+        // A read that failed says nothing about what is stored: the salt may be there and good.
+        await using var pipeline = new PipelineHarness();
+        var vault = UseVault(pipeline, withAllSecrets: true);
+        vault.ReadError = 5;
+        pipeline.Console.TypeLine("synthetic-salt-three");
+
+        var exit = await pipeline.RunAsync("secrets", "set", "hashing-salt");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("Windows Credential Manager could not read the secret 'hashing salt'").And.Contains("(error 5)");
+        await Assert.That(System.Text.Encoding.Unicode.GetString(vault.Entries[SaltEntry])).IsEqualTo(PipelineHarness.HashingSalt);
+    }
+
     /// <summary>Gives the commands the Credential Manager store over a stand-in vault, empty or holding the harness's three secrets.</summary>
     private static FakeCredentialVault UseVault(PipelineHarness pipeline, bool withAllSecrets = false)
     {
