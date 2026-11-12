@@ -78,7 +78,7 @@ public static class SprintReport
             return;
         }
 
-        report.Append("| Point bucket | Issues | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |\n");
+        report.Append("| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |\n");
         report.Append("|---|---|---|---|---|---|\n");
 
         foreach (var bucket in buckets)

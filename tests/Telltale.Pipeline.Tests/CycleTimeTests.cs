@@ -13,7 +13,7 @@ public class CycleTimeTests
 {
     private const string TableHeader =
         "\n## Cycle time by point bucket\n\n"
-        + "| Point bucket | Issues | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |\n"
+        + "| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |\n"
         + "|---|---|---|---|---|---|\n";
 
     [Test]
