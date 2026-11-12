@@ -2,7 +2,7 @@
 
 **What to build:** The owner runs the tool against the real Jira for the first time, on the managed Windows laptop. This is where the assumptions made off the laptop are confirmed. Any difference from the documented Jira shapes is fixed by adding a synthetic fixture that reproduces it; no real Jira data is copied into the repo or off company systems.
 
-**Blocked by:** 11, 12
+**Blocked by:** 10, 11, 12 (10 added 2026-11-12: without paging the run stops on a board with more than about 100 issues)
 
 **Status:** ready-for-human
 
