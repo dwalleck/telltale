@@ -10,11 +10,20 @@ public sealed record TelltaleConfig
 {
     public required JiraConfig Jira { get; init; }
 
-    /// <summary>The role of each workflow status by status ID: "not started", "work", "blocked" or "done".</summary>
+    /// <summary>
+    /// The role of each workflow status by status ID: "not started", "work", "blocked" or "done".
+    /// The order the statuses are listed in is board order: reports list statuses in it.
+    /// </summary>
     public required IReadOnlyDictionary<string, string> StatusRoles { get; init; }
 
     /// <summary>The team's time zone as an IANA ID, e.g. "America/Chicago".</summary>
     public required string TimeZone { get; init; }
+
+    /// <summary>
+    /// The company holidays, as dates in the team's time zone, e.g. <c>"2026-01-19"</c>. A holiday is not a
+    /// business day. The list is required, and may be empty (ADR-0001).
+    /// </summary>
+    public required IReadOnlyList<DateOnly> Holidays { get; init; }
 }
 
 /// <summary>Where the team's work lives in Jira.</summary>

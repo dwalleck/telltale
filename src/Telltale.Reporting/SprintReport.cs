@@ -69,7 +69,7 @@ public static class SprintReport
         report.Append("\n## Time in status\n\n");
         if (rows.Count == 0)
         {
-            report.Append("No issue spent time in this sprint.\n");
+            report.Append("No issue of this sprint spent time in a status that is not done.\n");
             return;
         }
 

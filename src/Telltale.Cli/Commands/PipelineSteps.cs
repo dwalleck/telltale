@@ -65,7 +65,7 @@ internal sealed class PipelineSteps
     public async Task DeriveAsync(CancellationToken cancellationToken)
     {
         var raw = await _store.ReadRawAsync(cancellationToken);
-        await _store.ReplaceDerivedAsync(Derivation.Derive(raw, _config.Jira.BoardId, _roles, new BusinessCalendar(_timeZone), AsOf(raw)), cancellationToken);
+        await _store.ReplaceDerivedAsync(Derivation.Derive(raw, _config.Jira.BoardId, _roles, new BusinessCalendar(_timeZone, _config.Holidays), AsOf(raw)), cancellationToken);
     }
 
     /// <summary>
