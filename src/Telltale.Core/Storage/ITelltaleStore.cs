@@ -9,7 +9,10 @@ public interface ITelltaleStore
     /// <summary>Creates or upgrades the raw tables. Safe to call on every start.</summary>
     Task InitializeAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Writes a batch of raw rows in one transaction, replacing rows with the same Jira IDs.</summary>
+    /// <summary>
+    /// Writes a batch of raw rows in one transaction, replacing rows with the same Jira IDs, and deletes the
+    /// issue row and the change rows of every issue in <see cref="RawData.OutOfScopeIssueIds"/>.
+    /// </summary>
     Task WriteRawAsync(RawData batch, CancellationToken cancellationToken = default);
 
     /// <summary>Reads every raw row.</summary>

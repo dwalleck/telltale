@@ -49,4 +49,12 @@ public sealed record RawData(
     IReadOnlyList<RawIssue> Issues,
     IReadOnlyList<RawChange> Changes,
     IReadOnlyList<RawSprint> Sprints,
-    IReadOnlyList<RawStatus> Statuses);
+    IReadOnlyList<RawStatus> Statuses)
+{
+    /// <summary>
+    /// In a batch: the IDs of issues the collector saw and found out of scope (epics, sub-tasks, types above
+    /// epic level). Writing the batch deletes whatever the store holds of them, since an issue stored while it
+    /// was in scope can be converted later (owner decision D13). Always empty in what the store reads back.
+    /// </summary>
+    public IReadOnlyList<string> OutOfScopeIssueIds { get; init; } = [];
+}

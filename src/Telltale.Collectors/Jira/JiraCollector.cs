@@ -43,10 +43,10 @@ public sealed class JiraCollector
 
         var statuses = await FetchStatusesAsync(jira, cancellationToken);
         var sprints = await FetchSprintsAsync(jira, cancellationToken);
-        var issues = await FetchIssuesAsync(jira, salt, cancellationToken);
+        var (issues, outOfScopeIssueIds) = await FetchIssuesAsync(jira, salt, cancellationToken);
         var changes = await FetchChangesAsync(jira, issues, cancellationToken);
 
-        await store.WriteRawAsync(new RawData(issues, changes, sprints, statuses), cancellationToken);
+        await store.WriteRawAsync(new RawData(issues, changes, sprints, statuses) { OutOfScopeIssueIds = outOfScopeIssueIds }, cancellationToken);
     }
 
     private static async Task<List<RawStatus>> FetchStatusesAsync(JiraClient jira, CancellationToken cancellationToken)
@@ -84,7 +84,7 @@ public sealed class JiraCollector
             OptionalTime(sprint, "completeDate")))];
     }
 
-    private async Task<List<RawIssue>> FetchIssuesAsync(JiraClient jira, string salt, CancellationToken cancellationToken)
+    private async Task<(List<RawIssue> InScope, List<string> OutOfScopeIssueIds)> FetchIssuesAsync(JiraClient jira, string salt, CancellationToken cancellationToken)
     {
         // A JQL date is read in the calling user's time zone, so the bound is a whole day, not an instant.
         // The project keys come from the configuration, not from Jira (owner decision D2). They are checked
@@ -115,19 +115,21 @@ public sealed class JiraCollector
 
     /// <summary>
     /// The page's issues that are in scope: every issue type except epics and sub-tasks (system design, "Scope").
-    /// The others are dropped here, before anything else of them is read, so nothing of them is stored, no
-    /// history is fetched for them, they can appear in no figure, and a field of theirs in an unknown shape
-    /// cannot stop the run.
+    /// The others are dropped here, so nothing of them is stored, no history is fetched for them, they can
+    /// appear in no figure, and a field of theirs in an unknown shape cannot stop the run. Only their ID is
+    /// read, so the store can delete an issue it holds from the time before it was converted (owner decision D13).
     /// </summary>
-    private List<RawIssue> ParseIssues(JsonElement page, string salt)
+    private (List<RawIssue> InScope, List<string> OutOfScopeIssueIds) ParseIssues(JsonElement page, string salt)
     {
         var issues = new List<RawIssue>();
+        var outOfScopeIssueIds = new List<string>();
         foreach (var issue in page.GetProperty("issues").EnumerateArray())
         {
             var fields = issue.GetProperty("fields");
             var issueType = fields.GetProperty("issuetype");
             if (!IsInScope(issueType))
             {
+                outOfScopeIssueIds.Add(Text(issue, "id"));
                 continue;
             }
 
@@ -143,7 +145,7 @@ public sealed class JiraCollector
                 JiraTime.Parse(fields.GetProperty("updated"))));
         }
 
-        return issues;
+        return (issues, outOfScopeIssueIds);
     }
 
     /// <summary>

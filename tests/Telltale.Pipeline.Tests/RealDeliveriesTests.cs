@@ -217,6 +217,36 @@ public class RealDeliveriesTests
     }
 
     [Test]
+    [Arguments(true, -1)]
+    [Arguments(false, 1)]
+    [Arguments(false, 2)]
+    public async Task A_stored_issue_that_became_an_epic_or_a_sub_task_leaves_the_store_and_the_figures_at_the_next_sync(bool subtask, int hierarchyLevel)
+    {
+        // Owner decision D13. Both issues were stories at the first sync; FAKE-2 is then converted in Jira.
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+        FinishedInSprint(pipeline.Jira, "FAKE-1");
+        var converted = FinishedInSprint(pipeline.Jira, "FAKE-2");
+        await pipeline.RunAsync("run", "--sprint", "41");
+        var before = await DeliveredPerSprintAsync(pipeline);
+        converted.OfType(new FakeIssueType("800009", "Fake Converted Type", subtask, hierarchyLevel));
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(before).IsEquivalentTo(new[] { ("41", 2L) }, CollectionOrdering.Matching);
+        await Assert.That(await DeliveredPerSprintAsync(pipeline)).IsEquivalentTo(new[] { ("41", 1L) }, CollectionOrdering.Matching);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
+
+        // Its raw rows are gone, the issue and its history; the other issue keeps both of its changes.
+        var issueKeys = await pipeline.QueryAsync<string>("SELECT issue_key FROM issue ORDER BY issue_key;");
+        await Assert.That(issueKeys).IsEquivalentTo(new[] { "FAKE-1" }, CollectionOrdering.Matching);
+        var changes = await pipeline.QueryAsync<(string IssueId, long Changes)>("SELECT issue_id, COUNT(*) FROM change GROUP BY issue_id ORDER BY issue_id;");
+        await Assert.That(changes).IsEquivalentTo(new[] { (pipeline.Jira.Issues[0].Id, 2L) }, CollectionOrdering.Matching);
+    }
+
+    [Test]
     public async Task An_epic_whose_other_fields_have_an_unknown_shape_does_not_stop_the_run()
     {
         // The epic is out of scope, so nothing else of it is read: not its status, its dates or its assignee.
