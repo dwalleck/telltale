@@ -324,6 +324,38 @@ public class BackfillRebuildTests
     }
 
     [Test]
+    public async Task Run_without_a_sprint_when_the_last_completed_one_started_before_the_start_date_updates_the_store_says_why_and_succeeds()
+    {
+        // B11 of the final review, as owner decision D28 has it for "no sprint has completed": the owner asked
+        // for no particular sprint, the store was brought up to date, and why there is no report is said, not failed.
+        // Sprint 41 started on 5 January and the store is filled from the 15th.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
+        pipeline.Jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 16, 9));
+        pipeline.Jira.AddTeam(41, 42);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
+            .Moved(Local(2026, 1, 21, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 22, 9), Workflow.Done);
+        pipeline.Config["jira"]!["backfillStart"] = "2026-01-15";
+
+        var run = await pipeline.RunAsync("run");
+        var outputOfRun = pipeline.Out.ToString().ReplaceLineEndings("\n");
+        var report = await pipeline.RunAsync("report");
+
+        const string Why =
+            "Sprint 41 started before 2026-01-15, the jira.backfillStart the store was last filled from, so issues delivered in it can be missing and its figures would be too low. "
+            + "No report was written. To report on it, set jira.backfillStart to a date before the sprint started and run backfill.\n";
+        await Assert.That(run).IsEqualTo(0);
+        await Assert.That(outputOfRun).IsEqualTo("The store is up to date. " + Why);
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT delivered FROM issue_cycle WHERE issue_id = @id;", new { id = pipeline.Jira.IdOf("FAKE-1") })).IsEquivalentTo(new[] { 1L });
+        await Assert.That(Directory.Exists(pipeline.ReportDirectory)).IsFalse();
+
+        // A command whose only job is the report still fails.
+        await Assert.That(report).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(Why);
+    }
+
+    [Test]
     public async Task A_backfill_from_a_later_start_date_clears_an_issue_last_updated_before_it()
     {
         // Such an issue is never fetched again, so nothing else can remove it: not a sync, and not the rule for

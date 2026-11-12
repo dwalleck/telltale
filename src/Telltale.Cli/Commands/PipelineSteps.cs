@@ -273,7 +273,18 @@ internal sealed class PipelineSteps : IDisposable
         // Asked at every report, not only when the list or the raw data changed: a backfill from a later
         // start date can leave both as they were and still make a sprint one the store no longer covers.
         var completeFrom = await CompleteFromAsync(cancellationToken);
-        FetchedRange.RequireReportable(sprint, starts, completeFrom);
+        try
+        {
+            FetchedRange.RequireReportable(sprint, starts, completeFrom);
+        }
+        catch (UserFacingException refusal) when (sprintId is null && !needsSprint)
+        {
+            // The owner named no sprint and the store was updated: that the last completed sprint cannot be
+            // reported is said, like "no sprint has completed" (owner decision D28), and is not a failure.
+            await _services.Out.WriteLineAsync($"The store is up to date. {refusal.Message}");
+            return;
+        }
+
         BaselineSprintRules.RequireWithinWhatWasFetched(starts, _baselineSprintIds, completeFrom);
         var path = await SprintReport.WriteAsync(_store, sprint, _timeZone, [.. _baselineSprintIds.Order(StringComparer.Ordinal)], _services.ReportDirectory, cancellationToken);
         await _services.Out.WriteLineAsync($"Wrote {path}");
