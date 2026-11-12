@@ -3,7 +3,11 @@ using Telltale.Core.Intervals;
 namespace Telltale.Core.Workflow;
 
 /// <summary>The issue is in a done-role status. <paramref name="At"/> is its last move from a status that is not done into one that is.</summary>
-public sealed record Delivered(DateTimeOffset At);
+public sealed record Delivered(DateTimeOffset At)
+{
+    /// <summary>The changelog entry of that move. It places the delivery among other changes made at the same instant.</summary>
+    public string? HistoryId { get; init; }
+}
 
 /// <summary>
 /// The issue is in a done-role status, but its resolution is one of the configured abandoned resolutions:
@@ -65,6 +69,6 @@ public static class Delivery
 
         return currentResolutionId is not null && abandonedResolutionIds.Contains(currentResolutionId)
             ? new Abandoned(entries[first].At)
-            : new Delivered(entries[first].At);
+            : new Delivered(entries[first].At) { HistoryId = entries[first].HistoryId };
     }
 }

@@ -65,7 +65,7 @@ public static class Derivation
                 {
                     Cycle = Cycles.Measure(timeline.Entries, roles, delivered.At, calendar),
                     PointBucket = issue.StoryPoints,
-                }.WithBucketAtCycleStart(pointChanges[issue.IssueId]),
+                }.WithBucketFromHistory(delivered, pointChanges[issue.IssueId]),
 
                 // An abandoned issue reached done, so it has a cycle end, but it is not a delivery: it belongs to
                 // no delivery sprint and has no cycle time.
@@ -106,13 +106,17 @@ public static class Derivation
 
     /// <summary>
     /// Puts a delivered issue in the bucket of its estimate at the start of its cycle, so a later re-estimate
-    /// does not move it (ADR-0006). An issue with no cycle has no cycle start to read the estimate at and keeps
-    /// the bucket it came with.
+    /// does not move it (ADR-0006). An issue that never entered a work status has no cycle start; its bucket
+    /// is its estimate at the delivery moment (owner decision D35). <paramref name="cycle"/> comes with the
+    /// current estimate as its bucket.
     /// </summary>
-    private static IssueCycle WithBucketAtCycleStart(this IssueCycle delivered, IEnumerable<PointChange> pointChanges) =>
-        delivered.Cycle is { } cycle
-            ? delivered with { PointBucket = PointHistory.EstimateAt(cycle.Start, cycle.StartHistoryId, delivered.PointBucket, pointChanges) }
-            : delivered;
+    private static IssueCycle WithBucketFromHistory(this IssueCycle cycle, Delivered delivered, IEnumerable<PointChange> pointChanges) =>
+        cycle with
+        {
+            PointBucket = cycle.Cycle is { } measured
+                ? PointHistory.EstimateAt(measured.Start, measured.StartHistoryId, cycle.PointBucket, pointChanges)
+                : PointHistory.EstimateAt(delivered.At, delivered.HistoryId, cycle.PointBucket, pointChanges),
+        };
 
     /// <summary>
     /// When a sprint's window ends: at its completion; for a closed sprint Jira gives no completion time,

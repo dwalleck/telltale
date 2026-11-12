@@ -338,6 +338,77 @@ public class PointBucketTests
         await Assert.That(found).IsEmpty();
     }
 
+    [Test]
+    public async Task A_delivered_issue_that_never_entered_a_work_status_is_in_the_bucket_of_its_estimate_at_the_delivery_moment()
+    {
+        // Owner decision D35. Such an issue is in no row of the cycle time table, so its bucket is read from derived data.
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+
+        // Straight to done on Thursday. Raised from 3 to 5 on Tuesday, before that, and to 8 on Friday, after it.
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
+            .Reestimated(Local(2026, 1, 6, 9), 5)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done)
+            .Reestimated(Local(2026, 1, 9, 9), 8);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await BucketsOfDeliveredIssuesWithoutACycleAsync(pipeline)).IsEquivalentTo(new double?[] { 5 });
+    }
+
+    [Test]
+    public async Task A_delivered_issue_that_never_entered_a_work_status_and_had_no_estimate_when_delivered_is_unestimated()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+
+        // Straight to done on Thursday with no estimate; estimated 5 on Friday.
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9))
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done)
+            .Reestimated(Local(2026, 1, 9, 9), 5);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await BucketsOfDeliveredIssuesWithoutACycleAsync(pipeline)).IsEquivalentTo(new double?[] { null });
+    }
+
+    [Test]
+    public async Task For_an_issue_that_never_entered_a_work_status_a_re_estimate_recorded_after_the_move_into_done_at_the_same_instant_does_not_count()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+
+        // Thursday 09:00: moved straight to done, and then, in a later changelog entry with the same time, raised from 3 to 8.
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done)
+            .Reestimated(Local(2026, 1, 8, 9), 8);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await BucketsOfDeliveredIssuesWithoutACycleAsync(pipeline)).IsEquivalentTo(new double?[] { 3 });
+    }
+
+    [Test]
+    public async Task For_an_issue_that_never_entered_a_work_status_a_re_estimate_recorded_before_the_move_into_done_at_the_same_instant_counts()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+
+        // Thursday 09:00: raised from 3 to 5, and then, in a later changelog entry with the same time, moved straight to done. Raised to 8 on Friday.
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
+            .Reestimated(Local(2026, 1, 8, 9), 5)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done)
+            .Reestimated(Local(2026, 1, 9, 9), 8);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await BucketsOfDeliveredIssuesWithoutACycleAsync(pipeline)).IsEquivalentTo(new double?[] { 5 });
+    }
+
+    /// <summary>The bucket of every delivered issue that has no cycle. No metric view shows these issues' buckets.</summary>
+    private static Task<IReadOnlyList<double?>> BucketsOfDeliveredIssuesWithoutACycleAsync(PipelineHarness pipeline) =>
+        pipeline.QueryAsync<double?>("SELECT point_bucket FROM issue_cycle WHERE delivered = 1 AND cycle_start IS NULL;");
+
     private static void AddSprint(FakeJira jira) =>
         jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 20), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
 }
