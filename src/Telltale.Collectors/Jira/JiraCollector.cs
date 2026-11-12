@@ -300,16 +300,18 @@ public sealed class JiraCollector
                 continue;
             }
 
-            seen[issueId] = new RawIssue(
-                issueId,
-                Text(issueType, "id"),
-                JiraTime.Parse(fields.GetProperty("created")),
-                Text(fields.GetProperty("status"), "id"),
-                Optional(fields, "resolution") is { } resolution ? Text(resolution, "id") : null,
-                Optional(fields, _config.StoryPointFieldId) is { } points ? WithoutSign(points.GetDouble()) : null,
-                Optional(fields, "assignee") is { } assignee ? IdentityHash.Of(Text(assignee, "accountId"), salt) : null,
-                JiraTime.Parse(fields.GetProperty("updated")),
-                Optional(fields, _config.SprintFieldId) is { } sprints ? SprintIds(sprints) : "");
+            seen[issueId] = new RawIssue
+            {
+                IssueId = issueId,
+                IssueTypeId = Text(issueType, "id"),
+                Created = JiraTime.Parse(fields.GetProperty("created")),
+                StatusId = Text(fields.GetProperty("status"), "id"),
+                ResolutionId = Optional(fields, "resolution") is { } resolution ? Text(resolution, "id") : null,
+                StoryPoints = Optional(fields, _config.StoryPointFieldId) is { } points ? WithoutSign(points.GetDouble()) : null,
+                AssigneeHash = Optional(fields, "assignee") is { } assignee ? IdentityHash.Of(Text(assignee, "accountId"), salt) : null,
+                Updated = JiraTime.Parse(fields.GetProperty("updated")),
+                SprintIds = Optional(fields, _config.SprintFieldId) is { } sprints ? SprintIds(sprints) : "",
+            };
         }
 
         return issues.GetArrayLength();

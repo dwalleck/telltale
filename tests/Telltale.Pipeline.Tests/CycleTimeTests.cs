@@ -424,7 +424,7 @@ public class CycleTimeTests
         var people = Enumerable.Range(1, 5).ToList();
         await store.WriteRawAsync(new RawBatch(
             new RawData(
-                Issues: [.. Enumerable.Range(1, 10).Select(id => new RawIssue($"{id}", FakeJira.IssueTypeStoryId, start, Workflow.Done.Id, ResolutionId: null, StoryPoints: 3, AssigneeHash: $"synthetic-hash-{((id - 1) % 5) + 1}", Updated: end, SprintIds: ""))],
+                Issues: [.. Enumerable.Range(1, 10).Select(id => new RawIssue { IssueId = $"{id}", IssueTypeId = FakeJira.IssueTypeStoryId, Created = start, StatusId = Workflow.Done.Id, ResolutionId = null, StoryPoints = 3, AssigneeHash = $"synthetic-hash-{((id - 1) % 5) + 1}", Updated = end, SprintIds = "" })],
                 Changes: [],
                 Sprints: [],
                 Statuses: []),
@@ -436,8 +436,8 @@ public class CycleTimeTests
             StatusIntervals: [],
             IssueCycles:
             [
-                .. people.Select(id => new IssueCycle($"{id}", end, Delivered: true, DeliverySprintId: "41", ReopenCount: 0) { Cycle = new Cycle(start, 2, 2), PointBucket = 3 }),
-                .. people.Select(id => new IssueCycle($"{id + 5}", end, Delivered: false, DeliverySprintId: "41", ReopenCount: 0) { Cycle = new Cycle(start, 6, 4), PointBucket = 3 }),
+                .. people.Select(id => IssueCycle.OfDelivered($"{id}", end, deliverySprintId: "41", new Cycle(start, 2, 2), pointBucket: 3, reopenCount: 0)),
+                .. people.Select(id => IssueCycle.OfAbandoned($"{id + 5}", end, reopenCount: 0)),
             ],
             MembershipIntervals: [],
             SprintStatusTimes: [],
@@ -446,6 +446,11 @@ public class CycleTimeTests
             AsOf = end,
             Anomalies = [],
         }, new DerivedSource("synthetic-digest", ZoneId, Holidays: "", BaselineSprintIds: "[]", StatusRoles: "", AbandonedResolutionIds: ""));
+
+        // Derive cannot make such a row (IssueCycle holds no sprint, cycle time or bucket for an issue that is
+        // not delivered), so it is put in the table by hand.
+        await pipeline.ExecuteAsync(
+            "UPDATE issue_cycle SET delivery_sprint_id = '41', cycle_start = '2026-01-06T15:00:00.000Z', calendar_days = 6, business_days = 4, point_bucket = 3 WHERE delivered = 0;");
 
         var rows = await CycleTimeRowsAsync(pipeline, 41);
         await Assert.That(rows.Select(row => (row.PointBucket, row.IssueCount, row.P85BusinessDays, row.P85CalendarDays)))

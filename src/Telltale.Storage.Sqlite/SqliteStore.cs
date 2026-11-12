@@ -309,7 +309,18 @@ public sealed class SqliteStore : ITelltaleStore
         var statuses = await connection.QueryAsync<StatusRow>(Command(cancellationToken, "SELECT * FROM status ORDER BY status_id;", transaction: transaction));
 
         return new RawData(
-            [.. issues.Select(row => new RawIssue(row.IssueId, row.IssueTypeId, StoredTime.FromStored(row.Created), row.StatusId, row.ResolutionId, row.StoryPoints, row.AssigneeHash, StoredTime.FromStored(row.Updated), row.SprintIds))],
+            [.. issues.Select(row => new RawIssue
+            {
+                IssueId = row.IssueId,
+                IssueTypeId = row.IssueTypeId,
+                Created = StoredTime.FromStored(row.Created),
+                StatusId = row.StatusId,
+                ResolutionId = row.ResolutionId,
+                StoryPoints = row.StoryPoints,
+                AssigneeHash = row.AssigneeHash,
+                Updated = StoredTime.FromStored(row.Updated),
+                SprintIds = row.SprintIds,
+            })],
             [.. changes.Select(row => new RawChange(row.HistoryId, row.IssueId, StoredTime.FromStored(row.At), row.Field, row.FromValue, row.ToValue))],
             [.. sprints.Select(row => new RawSprint(row.SprintId, row.BoardId, row.Name, row.State, StoredTime.FromStoredOrNull(row.Started), StoredTime.FromStoredOrNull(row.PlannedEnd), StoredTime.FromStoredOrNull(row.Completed)))],
             [.. statuses.Select(row => new RawStatus(row.StatusId, row.Name, row.Category))]);

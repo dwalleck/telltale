@@ -208,7 +208,7 @@ public class CyclesTests
     private static Cycle? CycleOf(string currentStatusId, params StatusChange[] changes)
     {
         var timeline = StatusTimeline.Build(Created, currentStatusId, changes);
-        var delivered = (Delivered)Delivery.Of(currentStatusId, currentResolutionId: null, timeline.Entries, Roles, NoAbandonedResolutions).Value!;
+        var delivered = (Delivered)Delivery.Of(currentStatusId, currentResolutionId: null, timeline.Entries, new DeliveryRules(Roles, NoAbandonedResolutions)).Value!;
         return Cycles.Measure(timeline.Entries, Roles, delivered.At, TeamCalendar());
     }
 

@@ -7,16 +7,32 @@ namespace Telltale.Core.Storage;
 /// sprint IDs with a comma between them (<c>41,42</c>), the form a Sprint change has, and empty when the issue is in no sprint. It is
 /// null only for an issue stored before the field was fetched, whose sprints are therefore unknown.
 /// </summary>
-public sealed record RawIssue(
-    string IssueId,
-    string IssueTypeId,
-    DateTimeOffset Created,
-    string StatusId,
-    string? ResolutionId,
-    double? StoryPoints,
-    string? AssigneeHash,
-    DateTimeOffset Updated,
-    string? SprintIds);
+/// <remarks>Every member is named where an issue is built, so a field added later cannot slip into another's place.</remarks>
+public sealed record RawIssue
+{
+    /// <summary>Jira's ID of the issue: digits.</summary>
+    public required string IssueId { get; init; }
+
+    public required string IssueTypeId { get; init; }
+
+    public required DateTimeOffset Created { get; init; }
+
+    /// <summary>The status the issue is in now.</summary>
+    public required string StatusId { get; init; }
+
+    public required string? ResolutionId { get; init; }
+
+    /// <summary>The current estimate. Null when the issue has none.</summary>
+    public required double? StoryPoints { get; init; }
+
+    /// <summary>The assignee as a salted hash (ADR-0003). Null when the issue is unassigned.</summary>
+    public required string? AssigneeHash { get; init; }
+
+    public required DateTimeOffset Updated { get; init; }
+
+    /// <summary>What the Sprint field lists now; see the summary.</summary>
+    public required string? SprintIds { get; init; }
+}
 
 /// <summary>
 /// One field change from an issue's changelog. <see cref="Field"/> is one of <see cref="ChangeFields"/>.

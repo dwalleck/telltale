@@ -15,8 +15,11 @@ namespace Telltale.Core.Derive;
 /// </remarks>
 public static class Derivation
 {
-    public static DerivedData Derive(RawData raw, StatusRoles roles, IReadOnlySet<string> abandonedResolutionIds, BusinessCalendar calendar, DateTimeOffset asOf)
+    public static DerivedData Derive(RawData raw, DerivationSettings settings, DateTimeOffset asOf)
     {
+        var (delivery, calendar) = settings;
+        var roles = delivery.Roles;
+
         // Unknown is not "in no sprint": deriving anyway would leave these issues out of every sprint's time in status.
         var sprintsUnknown = raw.Issues.Count(issue => issue.SprintIds is null);
         if (sprintsUnknown > 0)
@@ -79,19 +82,17 @@ public static class Derivation
             intervals.AddRange(timeline.Intervals.Select(interval => new IssueStatusInterval(issue.IssueId, interval.StatusId, interval.Start, interval.End)));
 
             var reopens = Cycles.ReopenCount(timeline.Entries, roles);
-            var outcome = Delivery.Of(issue.StatusId, issue.ResolutionId, timeline.Entries, roles, abandonedResolutionIds);
+            var outcome = Delivery.Of(issue.StatusId, issue.ResolutionId, timeline.Entries, delivery);
+
+            // The one place an issue's cycle is built from its outcome.
             cycles.Add(outcome switch
             {
-                Delivered delivered => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At), reopens)
-                {
-                    Cycle = Cycles.Measure(timeline.Entries, roles, delivered.At, calendar),
-                    PointBucket = issue.StoryPoints,
-                }.WithBucketFromHistory(delivered, pointChanges[issue.IssueId]),
+                Delivered delivered => DeliveredCycle(issue, delivered, deliverySprints.For(delivered.At), Cycles.Measure(timeline.Entries, roles, delivered.At, calendar), pointChanges[issue.IssueId], reopens),
 
                 // An abandoned issue reached done, so it has a cycle end, but it is not a delivery: it belongs to
                 // no delivery sprint and has no cycle time.
-                Abandoned abandoned => new IssueCycle(issue.IssueId, abandoned.At, Delivered: false, DeliverySprintId: null, reopens),
-                NotDelivered => new IssueCycle(issue.IssueId, CycleEnd: null, Delivered: false, DeliverySprintId: null, reopens),
+                Abandoned abandoned => IssueCycle.OfAbandoned(issue.IssueId, abandoned.At, reopens),
+                NotDelivered => IssueCycle.OfNotDelivered(issue.IssueId, reopens),
             });
 
             var membership = SprintMembership.Build(issue.Created, SprintMembership.ParseSprintIds(issue.SprintIds), sprintChanges[issue.IssueId]);
@@ -124,16 +125,21 @@ public static class Derivation
     }
 
     /// <summary>
-    /// Puts a delivered issue in the bucket of its estimate at the start of its cycle, so a later re-estimate
-    /// does not move it (ADR-0006). An issue that never entered a work status has no cycle start; its bucket
-    /// is its estimate at the delivery moment (owner decision D35). <paramref name="cycle"/> comes with the
-    /// current estimate as its bucket.
+    /// A delivered issue's cycle, in the bucket of its estimate at the start of its cycle, so a later
+    /// re-estimate does not move it (ADR-0006). An issue that never entered a work status has no cycle start;
+    /// its bucket is its estimate at the delivery moment (owner decision D35).
     /// </summary>
-    private static IssueCycle WithBucketFromHistory(this IssueCycle cycle, Delivered delivered, IEnumerable<PointChange> pointChanges) =>
-        cycle with
-        {
-            PointBucket = cycle.Cycle is { } measured
-                ? PointHistory.EstimateAt(measured.Start, measured.StartHistoryId, cycle.PointBucket, pointChanges)
-                : PointHistory.EstimateAt(delivered.At, delivered.HistoryId, cycle.PointBucket, pointChanges),
-        };
+    private static IssueCycle DeliveredCycle(RawIssue issue, Delivered delivered, string? deliverySprintId, Cycle? cycle, IEnumerable<PointChange> pointChanges, int reopens) =>
+        IssueCycle.OfDelivered(
+            issue.IssueId,
+            delivered.At,
+            deliverySprintId,
+            cycle,
+            cycle is { } measured
+                ? PointHistory.EstimateAt(measured.Start, measured.StartHistoryId, issue.StoryPoints, pointChanges)
+                : PointHistory.EstimateAt(delivered.At, delivered.HistoryId, issue.StoryPoints, pointChanges),
+            reopens);
 }
+
+/// <summary>Everything a rebuild is decided with besides the raw data and the as-of time: how a delivery is decided, and the business calendar.</summary>
+public sealed record DerivationSettings(DeliveryRules Delivery, BusinessCalendar Calendar);

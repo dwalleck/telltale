@@ -246,7 +246,7 @@ public class StoreTests
         var reached = new Watermark("synthetic-collector", new CollectionScope("https://example.invalid/", FakeJira.BoardId, FakeJira.ProjectKey, new DateOnly(2025, 1, 1), "status"), UpdatedThrough: at);
         RawBatch Batch(string issueId, string salt, bool replacesEverything = false) => new(
             new RawData(
-                Issues: [new RawIssue(issueId, FakeJira.IssueTypeStoryId, at, Workflow.New.Id, ResolutionId: null, StoryPoints: null, AssigneeHash: IdentityHash.Of("fake-account-0001", salt), Updated: at, SprintIds: "")],
+                Issues: [new RawIssue { IssueId = issueId, IssueTypeId = FakeJira.IssueTypeStoryId, Created = at, StatusId = Workflow.New.Id, ResolutionId = null, StoryPoints = null, AssigneeHash = IdentityHash.Of("fake-account-0001", salt), Updated = at, SprintIds = "" }],
                 Changes: [],
                 Sprints: [],
                 Statuses: []),

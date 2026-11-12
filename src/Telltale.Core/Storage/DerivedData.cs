@@ -14,16 +14,52 @@ public sealed record IssueStatusInterval(string IssueId, string StatusId, DateTi
 /// sprints, and for every issue that is not delivered).
 /// <see cref="ReopenCount"/> is how many times the issue moved out of a done-role status, delivered or not.
 /// </summary>
-public sealed record IssueCycle(string IssueId, DateTimeOffset? CycleEnd, bool Delivered, string? DeliverySprintId, int ReopenCount)
+/// <remarks>
+/// Built only by <see cref="OfDelivered"/>, <see cref="OfAbandoned"/> and <see cref="OfNotDelivered"/>, one for each
+/// outcome, so the members cannot contradict each other: only a delivered issue has a delivery sprint, a cycle
+/// time or a point bucket, and only an issue that reached done has a cycle end.
+/// </remarks>
+public sealed record IssueCycle
 {
+    private IssueCycle(string issueId, int reopenCount)
+    {
+        IssueId = issueId;
+        ReopenCount = reopenCount;
+    }
+
+    public string IssueId { get; }
+
+    public DateTimeOffset? CycleEnd { get; private init; }
+
+    public bool Delivered { get; private init; }
+
+    public string? DeliverySprintId { get; private init; }
+
+    public int ReopenCount { get; }
+
     /// <summary>The issue's cycle time. Null when it has none: it is not delivered, or it never entered a work-role status.</summary>
-    public Cycle? Cycle { get; init; }
+    public Cycle? Cycle { get; private init; }
 
     /// <summary>
     /// The story point estimate the issue is grouped by. Set for delivered issues only: null for one that is
     /// unestimated, and for every issue that is not delivered, whatever its estimate.
     /// </summary>
-    public double? PointBucket { get; init; }
+    public double? PointBucket { get; private init; }
+
+    /// <summary>
+    /// A delivered issue. <paramref name="deliverySprintId"/> is null when the delivery fell between sprints,
+    /// <paramref name="cycle"/> when the issue never entered a work-role status, and
+    /// <paramref name="pointBucket"/> when it is unestimated.
+    /// </summary>
+    public static IssueCycle OfDelivered(string issueId, DateTimeOffset deliveredAt, string? deliverySprintId, Cycle? cycle, double? pointBucket, int reopenCount) =>
+        new(issueId, reopenCount) { CycleEnd = deliveredAt, Delivered = true, DeliverySprintId = deliverySprintId, Cycle = cycle, PointBucket = pointBucket };
+
+    /// <summary>An abandoned issue: it reached done at <paramref name="closedAt"/>, which is its cycle end, and that is not a delivery.</summary>
+    public static IssueCycle OfAbandoned(string issueId, DateTimeOffset closedAt, int reopenCount) =>
+        new(issueId, reopenCount) { CycleEnd = closedAt };
+
+    /// <summary>An issue that is not done, or whose history gives no delivery moment.</summary>
+    public static IssueCycle OfNotDelivered(string issueId, int reopenCount) => new(issueId, reopenCount);
 }
 
 /// <summary>

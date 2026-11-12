@@ -192,5 +192,5 @@ public class DeliveryTests
         Outcome(currentStatusId, resolutionId: null, changes);
 
     private static IssueOutcome Outcome(string currentStatusId, string? resolutionId, params StatusChange[] changes) =>
-        Delivery.Of(currentStatusId, resolutionId, StatusTimeline.Build(Created, currentStatusId, changes).Entries, Roles, AbandonedResolutions);
+        Delivery.Of(currentStatusId, resolutionId, StatusTimeline.Build(Created, currentStatusId, changes).Entries, new DeliveryRules(Roles, AbandonedResolutions));
 }

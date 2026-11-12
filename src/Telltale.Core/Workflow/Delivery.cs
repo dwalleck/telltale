@@ -24,6 +24,9 @@ public sealed record NotDelivered;
 /// </summary>
 public union IssueOutcome(Delivered, Abandoned, NotDelivered);
 
+/// <summary>The configuration a delivery is decided with: the role of every status, and the resolutions that mean abandoned.</summary>
+public sealed record DeliveryRules(StatusRoles Roles, IReadOnlySet<string> AbandonedResolutionIds);
+
 public static class Delivery
 {
     /// <summary>
@@ -40,13 +43,9 @@ public static class Delivery
     /// The resolution only tells an abandoned issue from a delivered one. An issue with no resolution, or with
     /// one that is not in the abandoned list, is delivered.
     /// </remarks>
-    public static IssueOutcome Of(
-        string currentStatusId,
-        string? currentResolutionId,
-        IReadOnlyList<StatusEntry> entries,
-        StatusRoles roles,
-        IReadOnlySet<string> abandonedResolutionIds)
+    public static IssueOutcome Of(string currentStatusId, string? currentResolutionId, IReadOnlyList<StatusEntry> entries, DeliveryRules rules)
     {
+        var (roles, abandonedResolutionIds) = rules;
         if (!roles.IsDone(currentStatusId) || entries.Count == 0 || !roles.IsDone(entries[^1].StatusId))
         {
             return new NotDelivered();

@@ -116,7 +116,7 @@ internal sealed class PipelineSteps : IDisposable
         await RequireStoredSaltAsync(cancellationToken);
         var raw = await _store.ReadRawAsync(cancellationToken);
         await RequireBaselineSprintsAsync(raw, cancellationToken);
-        var derived = Derivation.Derive(raw, _roles, _abandonedResolutionIds, new BusinessCalendar(_timeZone, _config.Holidays), AsOf(raw));
+        var derived = Derivation.Derive(raw, new DerivationSettings(new DeliveryRules(_roles, _abandonedResolutionIds), new BusinessCalendar(_timeZone, _config.Holidays)), AsOf(raw));
         var previous = await _store.ReadAnomaliesAsync(cancellationToken);
         await _store.ReplaceDerivedAsync(derived, await SourceAsync(cancellationToken), cancellationToken);
 
