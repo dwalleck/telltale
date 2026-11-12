@@ -122,30 +122,6 @@ public class BaselineTests
     }
 
     [Test]
-    public async Task A_baseline_sprint_with_no_issue_at_all_changes_no_baseline_figure_and_withholds_none()
-    {
-        // Sprint 42 completed with nothing in it. It has no team, so its own report shows nothing; it has no
-        // issue in any row either, so it suppresses none (owner decision D44).
-        await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
-        pipeline.Config["baselineSprintIds"] = new JsonArray("41", "42");
-        foreach (var (person, days) in People.Team.Select((person, index) => (person, index + 1)))
-        {
-            Delivered(pipeline.Jira, 41, $"FAKE-{days}", points: 3, person, days);
-        }
-
-        await pipeline.RunAllAsync(["run", "--sprint", "41"]);
-
-        await Assert.That(await pipeline.QueryAsync<long>("SELECT suppressed FROM delivered_per_sprint WHERE sprint_id = '42';")).IsEquivalentTo(new[] { 1L });
-        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith(
-            CycleTimeHeader
-            + "| 3 | 5 | 3.0 | 5.0 | 3.0 | 7.0 | 3.0 | 5.0 |\n"
-            + TimeInStatusHeader
-            + "| Fake New | 5 | 1.0 | 1.0 |\n"
-            + "| Fake Development | 5 | 3.0 | 3.0 |\n");
-    }
-
-    [Test]
     public async Task A_query_over_the_views_reads_the_three_baseline_views()
     {
         await using var pipeline = new PipelineHarness();
@@ -299,57 +275,72 @@ public class BaselineTests
             CollectionOrdering.Matching);
     }
 
+    // Replaced (owner decision D47): a test here asserted that a baseline sprint short of five assignees
+    // withheld the baseline rows it had an issue in. The review showed that the pattern of withheld, shown
+    // and absent rows gave back which buckets and statuses of that sprint were not empty, which the sprint's
+    // own report withholds. Such a sprint is now refused as a baseline sprint.
     [Test]
-    public async Task A_baseline_sprint_short_of_five_assignees_withholds_every_baseline_row_it_has_an_issue_in_though_the_pooled_team_has_five()
+    [Arguments("41,42", "lists 41, which has fewer than five assignees. A sprint with fewer than five assignees cannot be a baseline sprint: take it out of the list and run again.")]
+    [Arguments("41", "lists 41, which has fewer than five assignees. A sprint with fewer than five assignees cannot be a baseline sprint: take it out of the list and run again.")]
+    [Arguments("41,42,43", "lists 41, 43, which each have fewer than five assignees. A sprint with fewer than five assignees cannot be a baseline sprint: take them out of the list and run again.")]
+    public async Task A_sprint_short_of_five_assignees_cannot_be_a_baseline_sprint_and_derive_refuses_the_list_naming_it(string listed, string refusal)
     {
-        // Sprint 41 shows nothing of its own, counts included (owner decision D41). Pooled with sprint 42 the
-        // team is six, and without D44 every pooled figure would be shown and say something about sprint 41.
+        // Sprint 41 has four people, sprint 42 six, and sprint 43 completed with no issue at all. Pooled, 41
+        // and 42 have a team of six.
+        await using var pipeline = new PipelineHarness(Local(2026, 2, 17, 12));
+        AddSprints(pipeline.Jira);
+        pipeline.Jira.AddSprint(43, "Fake Sprint 43", Local(2026, 2, 2, 9), plannedEnd: Local(2026, 2, 13, 17), completed: Local(2026, 2, 13, 17));
+        AddSprintFortyOneWithFourAssignees(pipeline.Jira);
+        AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+        var before = await pipeline.ReadStoreContentAsync();
+        pipeline.Config["baselineSprintIds"] = new JsonArray([.. listed.Split(',').Select(id => (JsonNode)id)]);
+
+        var exit = await pipeline.RunAsync("derive");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo($"baselineSprintIds in the configuration file {refusal}\n");
+
+        // Nothing was rebuilt: the store is as the derive without a baseline left it.
+        await Assert.That(await pipeline.ReadStoreContentAsync()).IsEqualTo(before);
+    }
+
+    [Test]
+    public async Task A_run_whose_baseline_holds_a_sprint_short_of_five_assignees_writes_no_report()
+    {
         await using var pipeline = new PipelineHarness();
         AddSprints(pipeline.Jira);
+        AddSprintFortyOneWithFourAssignees(pipeline.Jira);
+        AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("41", "42");
 
-        // Sprint 41: four people, all in bucket 3, 1 to 4 days.
-        foreach (var (person, days) in People.Team.Take(4).Select((person, index) => (person, index + 1)))
-        {
-            Delivered(pipeline.Jira, 41, $"FAKE-{days}", points: 3, person, days);
-        }
+        var exit = await pipeline.RunAsync("run", "--sprint", "42");
 
-        // Sprint 42: six people. Its 5-point issues spend a day in Review, a status no issue of sprint 41 was in.
-        foreach (var (person, number) in new[] { (People.One, 11), (People.Two, 12), (People.Three, 13) })
-        {
-            Delivered(pipeline.Jira, 42, $"FAKE-{number}", points: 3, person, days: 1);
-        }
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "baselineSprintIds in the configuration file lists 41, which has fewer than five assignees. "
+            + "A sprint with fewer than five assignees cannot be a baseline sprint: take it out of the list and run again.\n");
+        await Assert.That(Directory.Exists(pipeline.ReportDirectory)).IsFalse();
+    }
 
-        foreach (var (person, number) in new[] { (People.Four, 21), (People.Five, 22), (People.Six, 23) })
-        {
-            Delivered(pipeline.Jira, 42, $"FAKE-{number}", points: 5, person, days: 1, reviewDays: 1);
-        }
+    [Test]
+    public async Task A_report_refuses_a_baseline_list_that_gained_a_sprint_short_of_five_assignees_naming_it()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprints(pipeline.Jira);
+        AddSprintFortyOneWithFourAssignees(pipeline.Jira);
+        AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
+        pipeline.Config["baselineSprintIds"] = new JsonArray("42");
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+        pipeline.Config["baselineSprintIds"] = new JsonArray("41", "42");
 
-        await pipeline.RunAsync("run", "--sprint", "42");
+        var exit = await pipeline.RunAsync("report", "--sprint", "42");
 
-        // Sprint 41 has no 5-point issue and none in Review, so those baseline rows are not withheld.
-        await Assert.That(await pipeline.ReadReportAsync(42)).EndsWith(
-            CycleTimeHeader
-            + "| 3 | 3 | 1.0 | 1.0 | 1.0 | 1.0 | suppressed | suppressed |\n"
-            + "| 5 | 3 | 2.0 | 2.0 | 2.0 | 2.0 | 2.0 | 2.0 |\n"
-            + TimeInStatusHeader
-            + "| Fake New | 6 | 1.0 | suppressed |\n"
-            + "| Fake Development | 6 | 1.0 | suppressed |\n"
-            + "| Fake Review | 3 | 1.0 | 1.0 |\n");
-
-        var cycleTime = await pipeline.QueryAsync<BaselineCycleTimeRow>("SELECT * FROM baseline_cycle_time_per_bucket ORDER BY point_bucket;");
-        await Assert.That(cycleTime.Select(row => (row.PointBucket, row.Suppressed, row.MedianBusinessDays, row.P85BusinessDays, row.MedianCalendarDays, row.P85CalendarDays)))
-            .IsEquivalentTo(
-                new (double?, long, double?, double?, double?, double?)[]
-                {
-                    (3, 1, null, null, null, null),
-                    (5, 0, 2, 2, 2, 2),
-                },
-                CollectionOrdering.Matching);
-
-        await Assert.That(await ReadBaselineTimeInStatusAsync(pipeline)).IsEquivalentTo(
-            new (string, long, double?)[] { ("Fake New", 1, null), ("Fake Development", 1, null), ("Fake Review", 0, 1) },
-            CollectionOrdering.Matching);
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "baselineSprintIds in the configuration file lists 41, which has fewer than five assignees. "
+            + "A sprint with fewer than five assignees cannot be a baseline sprint: take it out of the list and run again.\n");
+        await Assert.That(Directory.Exists(pipeline.ReportDirectory)).IsFalse();
     }
 
     [Test]
@@ -509,6 +500,15 @@ public class BaselineTests
         foreach (var (person, number) in new[] { (People.One, 2), (People.Two, 3), (People.Three, 4), (People.Five, 5), (People.Six, 6) })
         {
             Delivered(jira, 41, $"FAKE-{number}", points: 5, person, days: 3);
+        }
+    }
+
+    /// <summary>Sprint 41 with four people, each with a 3-point issue, 1 to 4 days: enough for the bucket, not for the sprint.</summary>
+    private static void AddSprintFortyOneWithFourAssignees(FakeJira jira)
+    {
+        foreach (var (person, days) in People.Team.Take(4).Select((person, index) => (person, index + 1)))
+        {
+            Delivered(jira, 41, $"FAKE-{days}", points: 3, person, days);
         }
     }
 

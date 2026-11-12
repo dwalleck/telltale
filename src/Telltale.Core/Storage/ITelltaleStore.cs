@@ -36,6 +36,8 @@ public interface ITelltaleStore
     /// <summary>
     /// Drops the derived tables and the metric views, and rebuilds them around <paramref name="derived"/>.
     /// <paramref name="rawDigest"/> identifies the raw data it was derived from (see <see cref="ReadDerivedSourceAsync"/>).
+    /// When a baseline sprint has fewer than five distinct assignees, nothing is replaced and
+    /// <see cref="UserFacingException"/> is thrown (owner decision D47).
     /// </summary>
     Task ReplaceDerivedAsync(DerivedData derived, string rawDigest, CancellationToken cancellationToken = default);
 

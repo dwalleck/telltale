@@ -166,6 +166,13 @@ internal sealed class PipelineSteps : IDisposable
         {
             // Deriving again is the remedy only for a list derive would accept; otherwise say what derive would.
             Derivation.RequireCompletedBaselineSprints(raw.Sprints, _config.Jira.BoardId, _baselineSprintIds);
+            var teamsOfFive = await _store.QueryViewsAsync<string>("SELECT sprint_id FROM sprint_team WHERE suppressed = 0;", cancellationToken: cancellationToken);
+            var shortOfFive = _baselineSprintIds.Except(teamsOfFive, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+            if (shortOfFive.Count > 0)
+            {
+                throw BaselineSprintRules.ShortOfFiveAssignees(shortOfFive);
+            }
+
             throw new UserFacingException("baselineSprintIds in the configuration file changed since the derived data was built. Run derive first.");
         }
 

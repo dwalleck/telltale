@@ -6,6 +6,7 @@ using Dapper;
 using Microsoft.Data.Sqlite;
 using SQLitePCL;
 using Telltale.Core;
+using Telltale.Core.Derive;
 using Telltale.Core.Storage;
 
 namespace Telltale.Storage.Sqlite;
@@ -338,6 +339,17 @@ public sealed class SqliteStore : ITelltaleStore
         foreach (var (_, sql) in Scripts.InFolder("Views"))
         {
             await connection.ExecuteAsync(Command(cancellationToken, sql, transaction: transaction));
+        }
+
+        // The team check is the views' (sprint_team), so it can only be asked now. Nothing has been committed:
+        // a refused list leaves the previous derived data as it was.
+        var shortOfFive = (await connection.QueryAsync<string>(Command(
+            cancellationToken,
+            "SELECT b.sprint_id FROM baseline_sprint b LEFT JOIN sprint_team t ON t.sprint_id = b.sprint_id WHERE COALESCE(t.suppressed, 1) <> 0 ORDER BY b.sprint_id;",
+            transaction: transaction))).AsList();
+        if (shortOfFive.Count > 0)
+        {
+            throw BaselineSprintRules.ShortOfFiveAssignees(shortOfFive);
         }
 
         // Whatever the scripts created is the tool's, and is what the next rebuild drops.
