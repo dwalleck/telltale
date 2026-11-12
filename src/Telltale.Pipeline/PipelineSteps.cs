@@ -1,79 +1,56 @@
 using System.Globalization;
 using Telltale.Collectors.Jira;
 using Telltale.Core;
-using Telltale.Core.Calendar;
 using Telltale.Core.Configuration;
 using Telltale.Core.Derive;
 using Telltale.Core.Identity;
 using Telltale.Core.Secrets;
 using Telltale.Core.Storage;
-using Telltale.Core.Workflow;
 using Telltale.Reporting;
-using Telltale.Storage.Sqlite;
 
-namespace Telltale.Cli.Commands;
+namespace Telltale.Pipeline;
 
 /// <summary>
-/// The steps commands are made of, over one loaded configuration and one opened store.
-/// <c>run</c> is sync, derive, report; a command for a single step calls just that one.
+/// What a host gives the pipeline from the outside world, besides the settings and the store: the command
+/// line builds it from its services, and another host (a scheduled job, a service) would build its own.
 /// </summary>
-internal sealed class PipelineSteps : IDisposable
+/// <param name="HttpHandler">Carries every call to Jira.</param>
+/// <param name="Clock">The source of "now": the as-of time of a rebuild, and the waits Jira asks for.</param>
+/// <param name="Secrets">Where the hashing salt is read from by a command that does not fetch.</param>
+/// <param name="Out">Where a step says what it did: the report it wrote, what a backfill replaced, a query's rows.</param>
+/// <param name="Notices">Where a step says what the operator should know and no result depends on: changelog anomalies, a wait, a sprint without a window.</param>
+/// <param name="ReportDirectory">Where reports are written, one file per sprint.</param>
+public sealed record PipelineEnvironment(HttpMessageHandler HttpHandler, TimeProvider Clock, ISecretStore Secrets, TextWriter Out, TextWriter Notices, string ReportDirectory);
+
+/// <summary>
+/// The pipeline's steps and every rule about when one may run, over checked settings and an opened store:
+/// collect (backfill or sync), derive, report, query. A host only chooses the steps: <c>run</c> is sync,
+/// derive, report. The rules are here and not in a host: the as-of time, when derived data is stale, when
+/// a store was filled under other settings or another salt, and which sprints the store covers. A refusal is
+/// a <see cref="UserFacingException"/> that names what repairs it.
+/// </summary>
+public sealed class PipelineSteps
 {
-    private readonly AppServices _services;
+    private readonly PipelineEnvironment _environment;
     private readonly TelltaleSettings _settings;
     private readonly ITelltaleStore _store;
-    private readonly IDisposable _storeLock;
     private readonly CollectionSecrets? _secrets;
     private readonly Lazy<string?> _saltAtHand;
 
-    private PipelineSteps(AppServices services, TelltaleSettings settings, CollectionSecrets? secrets, ITelltaleStore store, IDisposable storeLock)
+    /// <param name="environment">The outside world.</param>
+    /// <param name="settings">The checked configuration.</param>
+    /// <param name="store">The store, initialised, and this pipeline's alone for as long as it is used.</param>
+    /// <param name="secrets">The secrets a collection needs; null for a host that will only derive, report or query.</param>
+    public PipelineSteps(PipelineEnvironment environment, TelltaleSettings settings, ITelltaleStore store, CollectionSecrets? secrets)
     {
-        _secrets = secrets;
-
-        // Read at most once in a command, whichever steps ask for it: a command that fetches has read it already.
-        _saltAtHand = new Lazy<string?>(() => secrets?.HashingSalt ?? (services.Secrets.Get(SecretName.HashingSalt) is { } salt && !string.IsNullOrWhiteSpace(salt) ? salt.Trim() : null));
-        _storeLock = storeLock;
-        _services = services;
+        _environment = environment;
         _settings = settings;
         _store = store;
+        _secrets = secrets;
+
+        // Read at most once, whichever steps ask for it: a host that fetches has read it already.
+        _saltAtHand = new Lazy<string?>(() => secrets?.HashingSalt ?? (environment.Secrets.Get(SecretName.HashingSalt) is { } salt && !string.IsNullOrWhiteSpace(salt) ? salt.Trim() : null));
     }
-
-    /// <summary>
-    /// Loads and checks the configuration, takes the store for this command alone (<see cref="StoreLock"/>) and
-    /// opens it. With <paramref name="needsJira"/> (the command will fetch), the secrets are checked first, so a
-    /// run that cannot start leaves no empty database behind, and the database is created if it is missing.
-    /// Without it the command only works on what the store holds, so a missing database is refused, not created.
-    /// Dispose the result to release the store.
-    /// </summary>
-    public static async Task<PipelineSteps> StartAsync(AppServices services, bool needsJira, CancellationToken cancellationToken)
-    {
-        var settings = await ConfigFile.LoadAsync(services.ConfigPath, cancellationToken);
-
-        CollectionSecrets? secrets = null;
-        if (needsJira)
-        {
-            secrets = await CollectionSecrets.ReadAsync(services.Secrets, services.StoreHoldsHashedPeopleAsync, cancellationToken);
-        }
-        else if (!File.Exists(services.DatabasePath))
-        {
-            throw new UserFacingException($"There is no database at {services.DatabasePath} yet. Run backfill first.");
-        }
-
-        var storeLock = StoreLock.Acquire(services.DatabasePath);
-        try
-        {
-            var store = new SqliteStore(services.DatabasePath);
-            await store.InitializeAsync(cancellationToken);
-            return new PipelineSteps(services, settings, secrets, store, storeLock);
-        }
-        catch
-        {
-            storeLock.Dispose();
-            throw;
-        }
-    }
-
-    public void Dispose() => _storeLock.Dispose();
 
     /// <summary>
     /// Fetches everything from the configured start date and replaces the store's issues, changes and sprints
@@ -83,20 +60,32 @@ internal sealed class PipelineSteps : IDisposable
     /// <param name="allowEmpty">Lets the backfill replace stored issues or sprints with none (<c>--allow-empty</c>).</param>
     public async Task BackfillAsync(bool allowEmpty, CancellationToken cancellationToken)
     {
-        // The store is this command's alone (StoreLock), so nothing changes it between the counts and the write.
+        // The store is this pipeline's alone (the host sees to it), so nothing changes it between the counts and the write.
         var before = await _store.CountRawAsync(cancellationToken);
         await CollectAsync(CollectionMode.Backfill, allowEmpty, cancellationToken);
         var now = await _store.CountRawAsync(cancellationToken);
-        await _services.Out.WriteLineAsync(string.Create(
+        await _environment.Out.WriteLineAsync(string.Create(
             CultureInfo.InvariantCulture,
             $"The store now holds what Jira returned. Issues: {before.Issues} before, {now.Issues} now. Sprints: {before.Sprints} before, {now.Sprints} now. Changes: {before.Changes} before, {now.Changes} now."));
+    }
+
+    /// <summary>
+    /// The whole pipeline: sync, derive, and the report of <paramref name="sprintId"/> or, without one, of the
+    /// most recently completed sprint. When there is no sprint to report, the store has still been brought up
+    /// to date, and that is said, not failed (owner decision D28).
+    /// </summary>
+    public async Task RunAsync(long? sprintId, CancellationToken cancellationToken)
+    {
+        await SyncAsync(cancellationToken);
+        await DeriveAsync(cancellationToken);
+        await ReportAsync(sprintId, needsSprint: false, cancellationToken);
     }
 
     /// <summary>Brings the raw tables up to date with what changed in Jira since the last sync or backfill.</summary>
     public Task SyncAsync(CancellationToken cancellationToken) => CollectAsync(CollectionMode.Incremental, allowEmpty: false, cancellationToken);
 
     private Task CollectAsync(CollectionMode mode, bool allowEmpty, CancellationToken cancellationToken) =>
-        new JiraCollector(_services.HttpHandler, _settings.Jira, _secrets ?? throw new InvalidOperationException("This command was started without the secrets a collection needs."), _services.Clock, _services.Error)
+        new JiraCollector(_environment.HttpHandler, _settings.Jira, _secrets ?? throw new InvalidOperationException("This command was started without the secrets a collection needs."), _environment.Clock, _environment.Notices)
             .BringUpToDateAsync(_store, mode, allowEmpty, cancellationToken);
 
     /// <summary>
@@ -119,7 +108,7 @@ internal sealed class PipelineSteps : IDisposable
         // Owner decision D51: such a sprint stops nothing. It is in no figure, and the console says so.
         foreach (var sprintId in derived.ClosedSprintsWithoutAnEnd)
         {
-            await _services.Error.WriteLineAsync($"{SprintWindows.ClosedWithoutAnEnd(sprintId)}: no delivery is counted in it, and it cannot be reported or be a baseline sprint.");
+            await _environment.Notices.WriteLineAsync($"{SprintWindows.ClosedWithoutAnEnd(sprintId)}: no delivery is counted in it, and it cannot be reported or be a baseline sprint.");
         }
 
         // Owner decision D50: a baseline sprint short of five assignees stops nothing. The views withhold
@@ -127,7 +116,7 @@ internal sealed class PipelineSteps : IDisposable
         var shortOfFive = await _store.QueryViewsAsync<string>("SELECT sprint_id FROM baseline_sprint WHERE suppressed <> 0 ORDER BY sprint_id;", cancellationToken: cancellationToken);
         if (shortOfFive.Count > 0)
         {
-            await _services.Error.WriteLineAsync(BaselineSprintRules.ShortOfFiveAssignees(shortOfFive));
+            await _environment.Notices.WriteLineAsync(BaselineSprintRules.ShortOfFiveAssignees(shortOfFive));
         }
 
         if (derived.Anomalies.Count == 0)
@@ -141,11 +130,11 @@ internal sealed class PipelineSteps : IDisposable
 
         var unseen = derived.Anomalies.Where(anomaly => !previous.Contains((anomaly.IssueId, anomaly.Message))).ToList();
         var issues = derived.Anomalies.Select(anomaly => anomaly.IssueId).Distinct(StringComparer.Ordinal).Count();
-        await _services.Error.WriteLineAsync(
+        await _environment.Notices.WriteLineAsync(
             $"Changelog anomalies: {derived.Anomalies.Count} across {issues} {(issues == 1 ? "issue" : "issues")}, {unseen.Count} new since the previous derive.");
         foreach (var anomaly in unseen)
         {
-            await _services.Error.WriteLineAsync($"Changelog anomaly: issue {anomaly.IssueId}: {anomaly.Message}.");
+            await _environment.Notices.WriteLineAsync($"Changelog anomaly: issue {anomaly.IssueId}: {anomaly.Message}.");
         }
     }
 
@@ -186,7 +175,7 @@ internal sealed class PipelineSteps : IDisposable
     /// </summary>
     private DateTimeOffset AsOf(RawData raw)
     {
-        var now = _services.Clock.GetUtcNow();
+        var now = _environment.Clock.GetUtcNow();
         var newest = raw.Changes.Select(change => change.At)
             .Concat(raw.Issues.Select(issue => issue.Updated))
             .DefaultIfEmpty(DateTimeOffset.MinValue)
@@ -216,7 +205,7 @@ internal sealed class PipelineSteps : IDisposable
                 throw new UserFacingException("No sprint in the store has completed yet. Name a sprint with --sprint.");
             }
 
-            await _services.Out.WriteLineAsync("The store is up to date. No sprint has completed yet, so no report was written.");
+            await _environment.Out.WriteLineAsync("The store is up to date. No sprint has completed yet, so no report was written.");
             return;
         }
 
@@ -243,13 +232,13 @@ internal sealed class PipelineSteps : IDisposable
         {
             // The owner named no sprint and the store was updated: that the last completed sprint cannot be
             // reported is said, like "no sprint has completed" (owner decision D28), and is not a failure.
-            await _services.Out.WriteLineAsync($"The store is up to date. {refusal.Message}");
+            await _environment.Out.WriteLineAsync($"The store is up to date. {refusal.Message}");
             return;
         }
 
         BaselineSprintRules.RequireWithinWhatWasFetched(starts, _settings.BaselineSprintIds, completeFrom);
-        var path = await SprintReport.WriteAsync(_store, sprint, _settings.TimeZone, [.. _settings.BaselineSprintIds.Order(StringComparer.Ordinal)], _services.ReportDirectory, cancellationToken);
-        await _services.Out.WriteLineAsync($"Wrote {path}");
+        var path = await SprintReport.WriteAsync(_store, sprint, _settings.TimeZone, [.. _settings.BaselineSprintIds.Order(StringComparer.Ordinal)], _environment.ReportDirectory, cancellationToken);
+        await _environment.Out.WriteLineAsync($"Wrote {path}");
     }
 
     /// <summary>
@@ -262,7 +251,7 @@ internal sealed class PipelineSteps : IDisposable
         await RequireCurrentDerivedDataAsync(cancellationToken);
         try
         {
-            await _services.Out.WriteAsync(Markdown.Table(await _store.QueryViewRowsAsync(sql, cancellationToken)));
+            await _environment.Out.WriteAsync(Markdown.Table(await _store.QueryViewRowsAsync(sql, cancellationToken)));
         }
         catch (InvalidOperationException refusal) when (refusal.InnerException is System.Data.Common.DbException)
         {

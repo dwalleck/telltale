@@ -13,12 +13,7 @@ internal static class RunCommand
             "run",
             "Sync from Jira, rebuild the derived data and write a sprint's report.",
             fetches: true,
-            async (pipeline, parse, cancellationToken) =>
-            {
-                await pipeline.SyncAsync(cancellationToken);
-                await pipeline.DeriveAsync(cancellationToken);
-                await pipeline.ReportAsync(parse.GetValue(sprint), needsSprint: false, cancellationToken);
-            },
+            (pipeline, parse, cancellationToken) => pipeline.RunAsync(parse.GetValue(sprint), cancellationToken),
             sprint);
     }
 }

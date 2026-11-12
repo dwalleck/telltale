@@ -32,6 +32,8 @@ src/
   Telltale.Storage.Sqlite/  migrations (raw, derived, views), upserts, watermarks,
                            derived rebuild, metric views with minimum group size
   Telltale.Reporting/       queries over views, charts (PNG), Confluence page builder + publisher
+  Telltale.Pipeline/        the steps (collect, derive, report, query) and every rule about when one may
+                           run: staleness, foreign settings, the salt, the range the store covers
   Telltale.Contracts/       session summary JSON schema, versioned
   Telltale.Cli/             composition root; the only laptop-specific project
 tools/

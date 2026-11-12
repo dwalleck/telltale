@@ -1,4 +1,5 @@
 using System.CommandLine;
+using Telltale.Pipeline;
 
 namespace Telltale.Cli.Commands;
 
@@ -8,7 +9,7 @@ namespace Telltale.Cli.Commands;
 /// </summary>
 internal static class PipelineCommand
 {
-    /// <param name="fetches">Whether the command calls Jira (see <see cref="PipelineSteps.StartAsync"/>).</param>
+    /// <param name="fetches">Whether the command calls Jira (see <see cref="PipelineSession.StartAsync"/>).</param>
     /// <param name="steps">The command's work, given the parsed command line for its option values.</param>
     public static Command Create(
         AppServices services,
@@ -36,8 +37,8 @@ internal static class PipelineCommand
 
         command.SetAction((parse, cancellationToken) => CliApp.GuardAsync(services, async () =>
         {
-            using var pipeline = await PipelineSteps.StartAsync(services, needsJira: fetches, cancellationToken);
-            await steps(pipeline, parse, cancellationToken);
+            using var session = await PipelineSession.StartAsync(services, needsJira: fetches, cancellationToken);
+            await steps(session.Steps, parse, cancellationToken);
         }));
 
         return command;
