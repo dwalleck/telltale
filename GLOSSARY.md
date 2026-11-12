@@ -1,6 +1,6 @@
-# Delivery Metrics
+# Telltale
 
-Measures how a software team's work flows from ticket to merge, and how AI use changes that, at the level of the team's work, never individuals.
+A delivery metrics tool: it measures how a software team's work flows from ticket to merge, and how AI use changes that, at the level of the team's work, never individuals.
 
 ## Language
 
@@ -33,6 +33,10 @@ _Avoid_: Working day, workday, working hours
 Business days from an issue entering an in-progress status category to entering a done status category.
 _Avoid_: Lead time, turnaround
 
+**Delivered**:
+An issue that is in a done status category and was not abandoned (closed as won't-do, cancelled or similar).
+_Avoid_: Completed, closed, resolved
+
 **Point bucket**:
 A group of issues with the same story point estimate, used to compare like with like.
 _Avoid_: Size class, issue type
@@ -40,7 +44,7 @@ _Avoid_: Size class, issue type
 ### AI use
 
 **Structured AI use**:
-Work on an issue where at least one agent session invoked a skill from the pilot workflow.
+Work on an issue where at least one agent session explicitly invoked a skill from the pilot workflow by name. A skill the agent activated on its own does not count.
 _Avoid_: AI-assisted (too vague), skills group (that is people, not work)
 
 **Ad hoc AI use**:
@@ -66,7 +70,7 @@ _Avoid_: ROI, cost per token
 ### Review
 
 **Review round**:
-One cycle of a reviewer leaving a review with comments, followed by the author pushing changes.
+One or more reviews with comments, from any reviewers, followed by the author pushing changes. Reviews stacked up before a push are one round; a final review with no push after it is not a round.
 _Avoid_: Iteration, pass
 
 **Not-fixed thread**:
@@ -76,7 +80,7 @@ A review thread where the reviewer comments again after the author pushed a chan
 Time a pull request spends waiting on a reviewer, as opposed to waiting on its author.
 
 **Rework**:
-Lines changed again within three weeks of being merged.
+Lines changed again, in a different pull request and by anyone including the original author, within three weeks of being merged. Reverts are counted separately.
 _Avoid_: Churn (ambiguous)
 
 ### Measurement
@@ -88,13 +92,17 @@ One of the three metrics that carry the story to leadership: review rounds per p
 A metric that shows whether gains came at a cost: reopen rate, revert rate, rework, linked bugs, pull request size, reviews per active reviewer.
 
 **Baseline**:
-A person's or group's own measurements from before the pilot, used as their comparison point.
+A person's or group's own measurements from before the pilot, used as their comparison point. It is drawn from a list of sprints fixed before the pilot starts.
 
 **Minimum group size**:
-The smallest number of people (five) a reported result may cover.
+The smallest number of people (five) a result grouped by people may cover. A result grouped by issue attributes (sprint, point bucket) instead needs a team of at least five and at least three distinct assignees behind it.
 
 **Case study**:
-One of the two consented, named exceptions to the minimum group size: the project owner and one mid-level developer, each on a Pro seat.
+One of the two consented, named individual exceptions to the minimum group size: the project owner and one mid-level developer, each on a Pro seat.
+
+**Volunteer cohort**:
+The pilot volunteers as a group, fewer than five, who consented to results being reported for the group as a whole and never per person.
+_Avoid_: Skills group, pilot group, treatment group
 
 **Replay benchmark**:
 Rerunning past issues from the commit before their merge, under controlled conditions (model tier × with/without skills), and scoring the results.

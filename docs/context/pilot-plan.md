@@ -46,7 +46,7 @@ Worklog reliability checks: gap between worklog `started` and `created` (logged 
 ## How the comparison stays fair
 
 - Structured vs. ad hoc is labeled per piece of work, so the same person's work is compared with and without skills.
-- Each participant is compared with their own baseline, and their change is compared with everyone else's change over the same period.
+- Each participant is compared with their own baseline, and their change is compared with the whole-team trend over the same period (the non-volunteers are too few to report as a group, ADR-0003).
 - Group only by attributes fixed before work starts (ADR-0006).
 - Privacy rules: ADR-0003, ADR-0005.
 
