@@ -12,6 +12,9 @@ namespace Telltale.Pipeline.Tests;
 /// The report's time in status table: per status, how many issues spent time in it during the sprint
 /// and the median business days they spent, counting only time inside the sprint window and while
 /// the issue was a member of the sprint (GLOSSARY: Time in status).
+/// A figure is shown only for a team of five with three assignees behind it (SuppressionTests), so most tests
+/// here have the fake serve each issue once per team member: a count is five times the issues the test adds,
+/// and a median is what it is for those issues alone.
 /// </summary>
 public class TimeInStatusTableTests
 {
@@ -20,6 +23,7 @@ public class TimeInStatusTableTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // In the sprint from before it started. New until Tuesday 09:00, Development until Thursday 09:00.
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9)).InSprints(41)
@@ -37,10 +41,10 @@ public class TimeInStatusTableTests
 
             ## Time in status
 
-            | Status | Issues | Median business days |
+            | Status | Issues | Median (business days) |
             | --- | ---: | ---: |
-            | Fake New | 1 | 1.0 |
-            | Fake Development | 1 | 2.0 |
+            | Fake New | 5 | 1.0 |
+            | Fake Development | 5 | 2.0 |
 
             """.ReplaceLineEndings("\n"));
     }
@@ -50,6 +54,7 @@ public class TimeInStatusTableTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // In Development since the Friday before the sprint; added to the sprint on Wednesday 09:00; Done on Friday 09:00.
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development)
@@ -60,7 +65,7 @@ public class TimeInStatusTableTests
 
         // Wednesday 09:00 to Friday 09:00. From the sprint's start it would be 4.0.
         await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(
-            new[] { "| Fake Development | 1 | 2.0 |" }, CollectionOrdering.Matching);
+            new[] { "| Fake Development | 5 | 2.0 |" }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -68,6 +73,7 @@ public class TimeInStatusTableTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // In the sprint and in Development from creation; taken out of the sprint on Thursday 09:00; Done the next Wednesday.
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41)
@@ -78,7 +84,7 @@ public class TimeInStatusTableTests
 
         // Monday 09:00 (the sprint's start) to Thursday 09:00. Up to the move to Done it would be 7.0.
         await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(
-            new[] { "| Fake Development | 1 | 3.0 |" }, CollectionOrdering.Matching);
+            new[] { "| Fake Development | 5 | 3.0 |" }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -86,6 +92,7 @@ public class TimeInStatusTableTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Development from Thursday 15 January 09:00. Sprint 41 completes on Monday 19 January 09:00 and Jira carries
         // the issue over: the Sprint field then lists both sprints. Sprint 42 starts at 12:00 the same day.
@@ -102,11 +109,11 @@ public class TimeInStatusTableTests
         // Sprint 41: New from Monday 5 January 09:00 to Thursday 15 January 09:00 (8 business days), then Development
         // to the sprint's completion (Thursday 09:00 to Monday 09:00, over a weekend).
         await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(
-            new[] { "| Fake New | 1 | 8.0 |", "| Fake Development | 1 | 2.0 |" }, CollectionOrdering.Matching);
+            new[] { "| Fake New | 5 | 8.0 |", "| Fake Development | 5 | 2.0 |" }, CollectionOrdering.Matching);
 
         // Sprint 42: Development from the sprint's start (Monday 12:00) to Wednesday 12:00, then Review to Friday 00:00.
         await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(42))).IsEquivalentTo(
-            new[] { "| Fake Development | 1 | 2.0 |", "| Fake Review | 1 | 1.5 |" }, CollectionOrdering.Matching);
+            new[] { "| Fake Development | 5 | 2.0 |", "| Fake Review | 5 | 1.5 |" }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -120,63 +127,87 @@ public class TimeInStatusTableTests
         FakeStatus[] boardOrder = [Workflow.New, Workflow.Approved, Workflow.Committed, Workflow.Blocked, Workflow.Development, Workflow.Review, Workflow.QE, Workflow.Done, Workflow.Shipped];
         pipeline.Config["statusRoles"] = new JsonObject(boardOrder.Select(status => KeyValuePair.Create(status.Id, (JsonNode?)status.Role)));
 
+        // Five issues, one per person, so each row's median is over exactly the values listed here.
         // Committed 1 day; Development 1 day, Blocked 1 day, Development 1 more day.
-        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Committed).InSprints(41)
+        InCommitted(People.One)
             .Moved(Local(2026, 1, 6, 9), Workflow.Development)
             .Moved(Local(2026, 1, 7, 9), Workflow.Blocked)
             .Moved(Local(2026, 1, 8, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 9), Workflow.Done);
 
         // Committed 2 days; Development 1 day.
-        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 2, 9), createdIn: Workflow.Committed).InSprints(41)
+        InCommitted(People.Two)
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 8, 9), Workflow.Done);
 
         // Left Committed the moment the sprint started, so no time in it; Development 4 days.
-        pipeline.Jira.AddIssue("FAKE-3", Local(2026, 1, 2, 9), createdIn: Workflow.Committed).InSprints(41)
+        InCommitted(People.Three)
             .Moved(Local(2026, 1, 5, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 9), Workflow.Done);
 
+        // Committed 3 days; Blocked 1 day; Development Friday 09:00 to Monday 09:00, 1 business day.
+        InCommitted(People.Four)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Blocked)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 12, 9), Workflow.Done);
+
+        // Committed 4 days; Blocked Friday 09:00 to Tuesday 09:00, 2 business days; Development 3 days.
+        InCommitted(People.Five)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Blocked)
+            .Moved(Local(2026, 1, 13, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 16, 9), Workflow.Done);
+
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        // Committed: 1 and 2, median 1.5. Blocked: 1. Development: 2, 1 and 4, median 2. Nobody was in New, Approved, Review or QE.
+        // Committed: 1, 2, 3 and 4, median 2.5. Blocked: 1, 1 and 2, median 1. Development: 2, 1, 4, 1 and 3, median 2.
+        // Nobody was in New, Approved, Review or QE.
         await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(
-            new[] { "| Fake Committed | 2 | 1.5 |", "| Fake Blocked | 1 | 1.0 |", "| Fake Development | 3 | 2.0 |" }, CollectionOrdering.Matching);
+            new[] { "| Fake Committed | 4 | 2.5 |", "| Fake Blocked | 3 | 1.0 |", "| Fake Development | 5 | 2.0 |" }, CollectionOrdering.Matching);
 
         // The same figures from the metric view with ad hoc SQL.
         var rows = await pipeline.QueryAsync<(string StatusId, long IssueCount, double MedianBusinessDays)>(
             "SELECT status_id, issue_count, ROUND(median_business_days, 6) FROM time_in_status_per_sprint WHERE sprint_id = '41' ORDER BY board_position;");
         await Assert.That(rows).IsEquivalentTo(
-            new[] { (Workflow.Committed.Id, 2L, 1.5), (Workflow.Blocked.Id, 1L, 1.0), (Workflow.Development.Id, 3L, 2.0) }, CollectionOrdering.Matching);
+            new[] { (Workflow.Committed.Id, 4L, 2.5), (Workflow.Blocked.Id, 3L, 1.0), (Workflow.Development.Id, 5L, 2.0) }, CollectionOrdering.Matching);
+
+        FakeIssue InCommitted(FakePerson person) =>
+            pipeline.Jira.AddIssue($"FAKE-{person.AccountId[^1]}", Local(2026, 1, 2, 9), createdIn: Workflow.Committed).InSprints(41).AssignedTo(person);
     }
 
     [Test]
     public async Task An_issue_that_spent_no_business_time_in_a_status_does_not_count_toward_it()
     {
-        // Owner decision D21. Without it the weekend-only issue would make the Review row "2 issues, median 0.5".
+        // Owner decision D21. Without it the weekend-only issue would make the Review row "4 issues".
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
 
         // In Review only from Saturday 09:00 to Sunday 09:00: a calendar day, and no business time.
         // Development before that: 15 hours of Monday and Tuesday to Friday, 4.625 business days.
-        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41)
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41).AssignedTo(People.One)
             .Moved(Local(2026, 1, 10, 9), Workflow.Review)
             .Moved(Local(2026, 1, 11, 9), Workflow.Done);
 
-        // Development from the sprint's start to Tuesday 09:00 (1 day), Review to Wednesday 09:00 (1 day).
-        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41)
-            .Moved(Local(2026, 1, 6, 9), Workflow.Review)
+        // Three people's issues: Development from the sprint's start to Tuesday 09:00 (1 day), Review to Wednesday 09:00 (1 day).
+        foreach (var (key, person) in new[] { ("FAKE-2", People.Two), ("FAKE-3", People.Three), ("FAKE-4", People.Four) })
+        {
+            pipeline.Jira.AddIssue(key, Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41).AssignedTo(person)
+                .Moved(Local(2026, 1, 6, 9), Workflow.Review)
+                .Moved(Local(2026, 1, 7, 9), Workflow.Done);
+        }
+
+        // The fifth person: Development to Wednesday 09:00 (2 days), never in Review.
+        pipeline.Jira.AddIssue("FAKE-5", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41).AssignedTo(People.Five)
             .Moved(Local(2026, 1, 7, 9), Workflow.Done);
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        // Development: 4.625 and 1, median 2.8125. Review: FAKE-2 alone.
+        // Development: 4.625, 1, 1, 1 and 2, median 1. Review: the three issues that were there on a business day.
         await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(
-            new[] { "| Fake Development | 2 | 2.8 |", "| Fake Review | 1 | 1.0 |" }, CollectionOrdering.Matching);
+            new[] { "| Fake Development | 5 | 1.0 |", "| Fake Review | 3 | 1.0 |" }, CollectionOrdering.Matching);
         var rows = await pipeline.QueryAsync<(string StatusId, long IssueCount, double MedianBusinessDays)>(
             "SELECT status_id, issue_count, ROUND(median_business_days, 6) FROM time_in_status_per_sprint WHERE sprint_id = '41' ORDER BY board_position;");
         await Assert.That(rows).IsEquivalentTo(
-            new[] { (Workflow.Development.Id, 2L, 2.8125), (Workflow.Review.Id, 1L, 1.0) }, CollectionOrdering.Matching);
+            new[] { (Workflow.Development.Id, 5L, 1.0), (Workflow.Review.Id, 3L, 1.0) }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -184,7 +215,8 @@ public class TimeInStatusTableTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9)).InSprints(41)
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
+        var issue = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9)).InSprints(41)
             .Moved(Local(2026, 1, 6, 9), Workflow.Development)
             .Moved(Local(2026, 1, 7, 9), Workflow.Done)
             .Moved(Local(2026, 1, 8, 9), Workflow.Shipped);
@@ -193,8 +225,8 @@ public class TimeInStatusTableTests
 
         // Stored times are UTC; the team's zone is six hours behind it in January.
         var intervals = await pipeline.QueryAsync<(string StatusId, string Started, string? Ended)>(
-            "SELECT status_id, started, ended FROM status_interval WHERE status_id IN @done ORDER BY started;",
-            new { done = new[] { Workflow.Done.Id, Workflow.Shipped.Id } });
+            "SELECT status_id, started, ended FROM status_interval WHERE issue_id = @issueId AND status_id IN @done ORDER BY started;",
+            new { issueId = issue.Id, done = new[] { Workflow.Done.Id, Workflow.Shipped.Id } });
         await Assert.That(intervals).IsEquivalentTo(
             new (string, string, string?)[]
             {
@@ -205,7 +237,7 @@ public class TimeInStatusTableTests
 
         // Done and Shipped are not waiting on the team, so the table leaves them out.
         await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(
-            new[] { "| Fake New | 1 | 1.0 |", "| Fake Development | 1 | 1.0 |" }, CollectionOrdering.Matching);
+            new[] { "| Fake New | 5 | 1.0 |", "| Fake Development | 5 | 1.0 |" }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -216,6 +248,14 @@ public class TimeInStatusTableTests
 
         // In sprint 41 only: sprint 42 has no member.
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41);
+
+        // Sprint 42 still has a team of five, or its table would read "suppressed" (owner decision D45): five
+        // issues delivered in its window that were never members of it, so none spent time in it.
+        foreach (var (person, number) in People.Team.Select((person, index) => (person, index + 2)))
+        {
+            pipeline.Jira.AddIssue($"FAKE-{number}", Local(2026, 1, 20, 9)).AssignedTo(person)
+                .Moved(Local(2026, 1, 21, 9), Workflow.Done);
+        }
 
         await pipeline.RunAsync("run", "--sprint", "42");
 
@@ -229,6 +269,7 @@ public class TimeInStatusTableTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
         pipeline.Config["holidays"] = new JsonArray("2026-01-12");
 
         // In Development from before the sprint until Tuesday 13 January 09:00, then Done to the end of the sprint.
@@ -240,7 +281,8 @@ public class TimeInStatusTableTests
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
         var rows = await pipeline.QueryAsync<(string IssueId, string SprintId, string StatusId, double CalendarSeconds, double BusinessSeconds, double BusinessDays)>(
-            "SELECT issue_id, sprint_id, status_id, calendar_seconds, business_seconds, ROUND(business_days, 6) FROM sprint_status_time ORDER BY status_id;");
+            "SELECT issue_id, sprint_id, status_id, calendar_seconds, business_seconds, ROUND(business_days, 6) FROM sprint_status_time WHERE issue_id = @issueId ORDER BY status_id;",
+            new { issueId = issue.Id });
 
         const double hour = 3600;
         await Assert.That(rows).IsEquivalentTo(
@@ -256,7 +298,7 @@ public class TimeInStatusTableTests
             },
             CollectionOrdering.Matching);
         await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(
-            new[] { "| Fake Development | 1 | 5.0 |" }, CollectionOrdering.Matching);
+            new[] { "| Fake Development | 5 | 5.0 |" }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -345,6 +387,82 @@ public class TimeInStatusTableTests
     }
 
     [Test]
+    public async Task A_sprint_change_is_stored_in_the_form_the_sprint_field_is_stored_in()
+    {
+        // Jira writes a Sprint change as "41, 42". The store holds one form, "41,42", so the two columns compare.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development)
+            .InSprints(41)
+            .SprintsChanged(Local(2026, 1, 19, 10), 41, 42);
+
+        await pipeline.RunAllAsync(["backfill"]);
+
+        var changes = await pipeline.QueryAsync<(string From, string To)>("SELECT from_value, to_value FROM change WHERE field = 'sprint';");
+        await Assert.That(changes).IsEquivalentTo(new[] { ("41", "41,42") });
+        await Assert.That(await pipeline.QueryAsync<string>("SELECT sprint_ids FROM issue;")).IsEquivalentTo(new[] { "41,42" });
+    }
+
+    [Test]
+    public async Task Sprint_changes_stored_as_jira_wrote_them_are_rewritten_in_the_stored_form_by_the_next_command()
+    {
+        // A store filled before Sprint changes were normalised holds "41, 42". A change is never written twice,
+        // so nothing but a migration would ever correct it.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development)
+            .InSprints(41)
+            .SprintsChanged(Local(2026, 1, 19, 10), 41, 42);
+        await pipeline.RunAllAsync(["backfill"]);
+        await pipeline.ExecuteAsync(
+            """
+            UPDATE change SET from_value = ' 41', to_value = '41, 42' WHERE field = 'sprint';
+            DELETE FROM schema_migration WHERE name = '0005_sprint_change_form.sql';
+            """);
+
+        await pipeline.RunAllAsync(["derive"]);
+
+        var changes = await pipeline.QueryAsync<(string From, string To)>("SELECT from_value, to_value FROM change WHERE field = 'sprint';");
+        await Assert.That(changes).IsEquivalentTo(new[] { ("41", "41,42") });
+    }
+
+    [Test]
+    public async Task The_migration_of_sprint_changes_leaves_status_changes_and_empty_values_as_they_are()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9))
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .SprintsChanged(Local(2026, 1, 7, 9), 41)
+            .SprintsChanged(Local(2026, 1, 8, 9));
+        await pipeline.RunAllAsync(["backfill"]);
+        var before = await pipeline.QueryAsync<(string Field, string From, string To)>("SELECT field, from_value, to_value FROM change ORDER BY history_id;");
+        await pipeline.ExecuteAsync("DELETE FROM schema_migration WHERE name = '0005_sprint_change_form.sql';");
+
+        await pipeline.RunAllAsync(["derive"]);
+
+        var after = await pipeline.QueryAsync<(string Field, string From, string To)>("SELECT field, from_value, to_value FROM change ORDER BY history_id;");
+        await Assert.That(before).IsEquivalentTo(new[] { ("status", Workflow.New.Id, Workflow.Development.Id), ("sprint", "", "41"), ("sprint", "41", "") }, CollectionOrdering.Matching);
+        await Assert.That(after).IsEquivalentTo(before, CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task White_space_of_any_kind_in_a_sprint_change_is_not_stored()
+    {
+        // A no-break space and a tab around the IDs: accepted as before, and gone from what is stored.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development)
+            .AddHistory(Local(2026, 1, 7, 9), FakeJira.SprintFieldId, "Sprint", "", "", "41,\u00A042\t", "Fake Sprint 41, Fake Sprint 42")
+            .InSprints(41, 42);
+
+        await pipeline.RunAllAsync(["backfill"]);
+
+        var changes = await pipeline.QueryAsync<(string From, string To)>("SELECT from_value, to_value FROM change WHERE field = 'sprint';");
+        await Assert.That(changes).IsEquivalentTo(new[] { ("", "41,42") });
+    }
+
+    [Test]
     public async Task An_issue_stored_before_the_sprint_field_was_kept_stops_derive_with_a_message_to_backfill()
     {
         await using var pipeline = new PipelineHarness();
@@ -371,6 +489,7 @@ public class TimeInStatusTableTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
         pipeline.Jira.RenameStatus(Workflow.Development, "Fake Dev | Build");
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41)
             .Moved(Local(2026, 1, 7, 9), Workflow.Done);
@@ -378,7 +497,7 @@ public class TimeInStatusTableTests
         await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(
-            new[] { @"| Fake Dev \| Build | 1 | 2.0 |" }, CollectionOrdering.Matching);
+            new[] { @"| Fake Dev \| Build | 5 | 2.0 |" }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -392,7 +511,7 @@ public class TimeInStatusTableTests
 
         // The store as an earlier version of the tool derived it: no time in status view, and no record of
         // the raw data the derived tables were built from.
-        await pipeline.ExecuteAsync("DROP VIEW time_in_status_per_sprint; DROP TABLE derived_source; DELETE FROM derived_object WHERE name IN ('time_in_status_per_sprint', 'derived_source');");
+        await pipeline.ExecuteAsync("DROP VIEW time_in_status_per_sprint; DROP TABLE run; DELETE FROM derived_object WHERE name IN ('time_in_status_per_sprint', 'run');");
 
         var exit = await pipeline.RunAsync("report", "--sprint", "41");
 
@@ -406,6 +525,7 @@ public class TimeInStatusTableTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41);
         var issue = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).AssignedTo(People.One);
         issue.AddHistory(Local(2026, 1, 7, 9), FakeJira.SprintFieldId, "Sprint", "", "", "41", "Fake Sprint 41", author: People.Two);
         issue.InSprints(41);
@@ -415,8 +535,10 @@ public class TimeInStatusTableTests
         await Assert.That(exit).IsEqualTo(0);
         var files = await pipeline.ReadAllFilesAsync();
 
-        // The scan means something only if the sprint data went through: the report has the issue's row.
-        await Assert.That(files[Path.Combine("reports", "sprint-41.md")]).Contains("| Fake Development | 1 | ");
+        // The scan means something only if the sprint data went through: the report has the status's row.
+        // The sprint has a team, so its rows are shown (owner decision D45); one person's row keeps its count
+        // and withholds its figure.
+        await Assert.That(files[Path.Combine("reports", "sprint-41.md")]).Contains("| Fake Development | 1 | suppressed |");
         await Assert.That(pipeline.Jira.ForbiddenText).Contains(People.Two.AccountId).And.Contains("Synthetic goal of sprint 41 that must never be stored");
         var found = pipeline.Jira.ForbiddenText.Where(text => files.Values.Any(content => content.Contains(text, StringComparison.Ordinal))).ToList();
         await Assert.That(found).IsEmpty();

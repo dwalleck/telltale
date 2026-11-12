@@ -28,14 +28,15 @@ public class SeparateCommandsTests
         await using var pipeline = new PipelineHarness();
         AddBoard(pipeline.Jira);
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "42"]);
-        var first = await pipeline.ReadReportBytesAsync(42);
+        var first = await pipeline.ReadReportBytesAsync(42, withoutAsOf: true);
 
-        // A day later, with the derived data rebuilt as well: nothing in a completed sprint's report depends on when it was made.
+        // A day later, with the derived data rebuilt as well: nothing in a completed sprint's report depends on when
+        // it was made, apart from the as-of time it prints (owner decision D33).
         pipeline.Clock.Advance(TimeSpan.FromDays(1));
         await pipeline.RunAllAsync(["derive"], ["report", "--sprint", "42"]);
 
         await Assert.That(first).IsNotEmpty();
-        await Assert.That(await pipeline.ReadReportBytesAsync(42)).IsEqualTo(first);
+        await Assert.That(await pipeline.ReadReportBytesAsync(42, withoutAsOf: true)).IsEqualTo(first);
     }
 
     [Test]
@@ -119,6 +120,7 @@ public class SeparateCommandsTests
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 2, 2, 11))
             .Moved(Local(2026, 2, 2, 12), Workflow.Development)
             .Moved(Local(2026, 2, 3, 9), Workflow.Done);
+        pipeline.Jira.AddIdleTeam(43);
 
         var exit = await pipeline.RunAsync("run");
 
@@ -275,5 +277,7 @@ public class SeparateCommandsTests
             .Moved(Local(2026, 1, 22, 9), Workflow.Done);
         jira.AddIssue("FAKE-3", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 2, 2, 11), Workflow.Development);
+        // A team of five in each sprint, so its delivered count is shown (SuppressionTests).
+        jira.AddIdleTeam(41, 42, 43);
     }
 }

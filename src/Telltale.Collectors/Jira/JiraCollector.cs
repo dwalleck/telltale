@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using Telltale.Core;
 using Telltale.Core.Configuration;
 using Telltale.Core.Identity;
+using Telltale.Core.Intervals;
 using Telltale.Core.Secrets;
 using Telltale.Core.Storage;
 using static Telltale.Collectors.Jira.JiraJson;
@@ -98,6 +99,14 @@ public sealed class JiraCollector
 
         // All three secrets are checked before the first call, so a missing salt cannot surface after a long fetch.
         var salt = _secrets.Require(SecretName.HashingSalt);
+
+        // A sync adds to what the store holds, so it must hash with the salt the stored people were hashed with.
+        // A backfill fetches everyone again, and the store checks that it did (ITelltaleStore.WriteRawAsync).
+        if (mode == CollectionMode.Incremental)
+        {
+            IdentityHash.RequireSaltOf(await store.ReadSaltFingerprintAsync(cancellationToken), salt);
+        }
+
         using var jira = new JiraClient(_handler, _config.SiteUrl, _secrets.Require(SecretName.JiraEmail), _secrets.Require(SecretName.JiraApiToken), _clock, _notices);
 
         var statuses = await FetchStatusesAsync(jira, cancellationToken);
@@ -117,7 +126,7 @@ public sealed class JiraCollector
         // does not move it: the overlap brings that issue back, and deleting it again changes nothing.
         var reached = new Watermark(WatermarkName, covers, issues.Count > 0 ? issues.Max(issue => issue.Updated) : since);
         // A backfill asked for everything, so its batch replaces what the store holds; a sync's is added to it.
-        var batch = new RawData(issues, changes, sprints, statuses) { OutOfScopeIssueIds = outOfScopeIssueIds };
+        var batch = new RawData(issues, changes, sprints, statuses) { OutOfScopeIssueIds = outOfScopeIssueIds, SaltFingerprint = IdentityHash.SaltFingerprint(salt) };
         await (mode == CollectionMode.Backfill ? store.ReplaceRawAsync(batch, reached, cancellationToken) : store.WriteRawAsync(batch, reached, cancellationToken));
     }
 
@@ -269,7 +278,7 @@ public sealed class JiraCollector
         {
             var fields = issue.GetProperty("fields");
             var issueType = fields.GetProperty("issuetype");
-            var issueId = Text(issue, "id");
+            var issueId = IssueId(issue);
             if (!IsInScope(issueType))
             {
                 seen[issueId] = null;
@@ -304,20 +313,13 @@ public sealed class JiraCollector
         && issueType.GetProperty("hierarchyLevel").GetInt32() == 0;
 
     /// <summary>
-    /// The Sprint field's value as the comma-separated IDs a Sprint change carries. The field is an array with
+    /// The Sprint field's value in the stored form of sprint IDs (<see cref="SprintMembership.StoredSprintIds"/>),
+    /// which a stored Sprint change has too. The field is an array with
     /// one object per sprint; only the IDs are kept. An issue in no sprint (no value, or an empty array) gives
     /// an empty text, never null: null is kept for issues stored before the field was fetched.
     /// </summary>
     private static string SprintIds(JsonElement sprints) =>
-        string.Join(",", sprints.EnumerateArray().Select(sprint => sprint.GetProperty("id").GetInt64().ToString(CultureInfo.InvariantCulture)));
-
-    /// <summary>
-    /// True when a Sprint change's value is what the Sprint field's history holds: nothing, or sprint IDs
-    /// (digits) separated by commas. Anything else means the configured field is another field, whose
-    /// history may hold account IDs or free text.
-    /// </summary>
-    private static bool IsSprintIdList(string? value) =>
-        value is null || value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).All(id => id.All(char.IsAsciiDigit));
+        SprintMembership.StoredSprintIds(sprints.EnumerateArray().Select(sprint => sprint.GetProperty("id").GetInt64().ToString(CultureInfo.InvariantCulture)));
 
     /// <summary>True when a status change's value is what the status field's history holds: nothing, or a status ID (digits).</summary>
     private static bool IsStatusId(string? value) => string.IsNullOrEmpty(value) || value.All(char.IsAsciiDigit);
@@ -436,7 +438,11 @@ public sealed class JiraCollector
                         throw new FormatException("A status change holds a value that is not a status ID.");
                     }
 
-                    if (field == ChangeFields.Sprint && !(IsSprintIdList(from) && IsSprintIdList(to)))
+                    // A Sprint change's value is what the Sprint field's history holds: nothing, or sprint IDs
+                    // (digits) separated by commas, which Jira writes as "41, 42" and the store keeps as "41,42".
+                    // Anything else means the configured field is another field, whose history may hold account
+                    // IDs or free text.
+                    if (field == ChangeFields.Sprint && !(SprintMembership.TryNormalizeSprintIds(from, out from) && SprintMembership.TryNormalizeSprintIds(to, out to)))
                     {
                         throw new UserFacingException(
                             "The history of the field named by jira.sprintFieldId in the configuration file holds values that are not sprint IDs, so it is not the Sprint field. Nothing was stored.");
@@ -493,6 +499,16 @@ public sealed class JiraCollector
         {
             throw new UserFacingException($"Jira's {what} answered in a shape this tool does not understand ({exception.GetType().Name}). Nothing was stored.", exception);
         }
+    }
+
+    /// <summary>
+    /// An issue's ID. Jira's issue IDs are digits; anything else is an answer in an unknown shape. The ID is
+    /// stored and written to the anomaly log as it is, so no other text may travel in it.
+    /// </summary>
+    private static string IssueId(JsonElement issue)
+    {
+        var id = Text(issue, "id");
+        return id.Length > 0 && id.All(char.IsAsciiDigit) ? id : throw new FormatException("The issue ID is not digits.");
     }
 
     private static DateTimeOffset? OptionalTime(JsonElement parent, string name) =>

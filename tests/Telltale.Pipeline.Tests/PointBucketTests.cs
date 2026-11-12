@@ -6,13 +6,16 @@ namespace Telltale.Pipeline.Tests;
 /// <summary>
 /// The point bucket is the estimate at the moment the cycle started (GLOSSARY: Point bucket; ADR-0006).
 /// January 2026 for reading the dates: the 5th and 12th are Mondays.
+/// A figure is shown only for a team of five with three assignees behind it (SuppressionTests), so the tests
+/// that read the table have the fake serve each issue once per team member: a count is five times the issues
+/// the test adds.
 /// </summary>
 public class PointBucketTests
 {
     private const string TableHeader =
         "\n## Cycle time by point bucket\n\n"
         + "| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |\n"
-        + "|---|---|---|---|---|---|\n";
+        + "| --- | ---: | ---: | ---: | ---: | ---: |\n";
 
     /// <summary>What follows the cycle time section. Asserting it after the last expected row shows the table has no further row.</summary>
     private const string NextSection = "\n## Time in status\n";
@@ -30,6 +33,7 @@ public class PointBucketTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Estimated 3 when development started on Tuesday; raised to 8 on Wednesday; done Thursday.
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
@@ -41,7 +45,7 @@ public class PointBucketTests
 
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 3 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 3 | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
     }
 
     [Test]
@@ -49,6 +53,7 @@ public class PointBucketTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Estimated 3 at creation; raised to 5 on Tuesday; development from Wednesday; done Friday.
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
@@ -58,7 +63,7 @@ public class PointBucketTests
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 5 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 5 | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
     }
 
     [Test]
@@ -66,6 +71,7 @@ public class PointBucketTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // No estimate when development started on Tuesday; estimated 5 on Wednesday; done Thursday.
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9))
@@ -75,7 +81,7 @@ public class PointBucketTests
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| unestimated | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| unestimated | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
     }
 
     [Test]
@@ -83,13 +89,14 @@ public class PointBucketTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(2)
             .Moved(Local(2026, 1, 6, 9), Workflow.Development)
             .Moved(Local(2026, 1, 8, 9), Workflow.Done);
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 2 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 2 | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
     }
 
     [Test]
@@ -97,6 +104,7 @@ public class PointBucketTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Both are estimated 8 now. FAKE-1 was 3 when it started on Tuesday; FAKE-2 was already 8 when it started on Thursday.
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
@@ -112,8 +120,8 @@ public class PointBucketTests
 
         await Assert.That(await pipeline.ReadReportAsync(41)).Contains(
             TableHeader
-            + "| 3 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n"
-            + "| 8 | 1 | 1.0 | 1.0 | 1.0 | 1.0 |\n"
+            + "| 3 | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n"
+            + "| 8 | 5 | 1.0 | 1.0 | 1.0 | 1.0 |\n"
             + NextSection);
     }
 
@@ -122,6 +130,7 @@ public class PointBucketTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // The other shape the documentation allows: the numbers are in from and to, and nowhere else. Raised from 3 to 5 before development started.
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(5)
@@ -132,7 +141,7 @@ public class PointBucketTests
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 5 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 5 | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
     }
 
     [Test]
@@ -140,6 +149,7 @@ public class PointBucketTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
         var issue = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
             .Moved(Local(2026, 1, 6, 9), Workflow.Development)
             .Moved(Local(2026, 1, 8, 9), Workflow.Done);
@@ -149,7 +159,7 @@ public class PointBucketTests
         issue.Reestimated(Local(2026, 1, 9, 9), 8);
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 3 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 3 | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
     }
 
     [Test]
@@ -191,6 +201,7 @@ public class PointBucketTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Raised from 3 to 5 before development started; each number is in from or to and again, written another way, in the text beside it.
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(5)
@@ -201,7 +212,7 @@ public class PointBucketTests
         await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 5 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 5 | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
     }
 
     [Test]
@@ -209,6 +220,7 @@ public class PointBucketTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
         pipeline.Jira.PointHistoryAsNumbers = true;
 
         // Estimated 0.5 when development started on Tuesday; raised to 8 on Wednesday; done Thursday.
@@ -220,7 +232,7 @@ public class PointBucketTests
         await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 0.5 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 0.5 | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
     }
 
     [Test]
@@ -228,6 +240,7 @@ public class PointBucketTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Tuesday 09:00: moved into development, and then, in a later changelog entry with the same time, raised from 3 to 8.
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
@@ -237,7 +250,7 @@ public class PointBucketTests
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 3 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 3 | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
     }
 
     [Test]
@@ -245,6 +258,7 @@ public class PointBucketTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Tuesday 09:00: raised from 3 to 8, and then, in a later changelog entry with the same time, moved into development.
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
@@ -254,7 +268,7 @@ public class PointBucketTests
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 8 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 8 | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
     }
 
     [Test]
@@ -305,6 +319,7 @@ public class PointBucketTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
         var issue = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
             .Moved(Local(2026, 1, 6, 9), Workflow.Development);
         await pipeline.RunAllAsync(["backfill"]);
@@ -314,7 +329,7 @@ public class PointBucketTests
         issue.Moved(Local(2026, 1, 8, 9), Workflow.Done);
         await pipeline.RunAllAsync(["sync"], ["derive"], ["report", "--sprint", "41"]);
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 3 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 3 | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
     }
 
     [Test]

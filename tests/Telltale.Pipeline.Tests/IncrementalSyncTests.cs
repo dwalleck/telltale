@@ -13,6 +13,7 @@ public class IncrementalSyncTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development)
             .Moved(Local(2026, 1, 22, 9), Workflow.Done);
@@ -78,6 +79,7 @@ public class IncrementalSyncTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development)
             .Moved(Local(2026, 1, 29, 9), Workflow.Done);
@@ -107,8 +109,9 @@ public class IncrementalSyncTests
         pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 23, 9), Workflow.Development);
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "42"]);
-        var storeBefore = await pipeline.ReadStoreContentAsync();
-        var reportBefore = await pipeline.ReadReportBytesAsync(42);
+        // Identical apart from the as-of time, which is a day later the second time (owner decision D33).
+        var storeBefore = await pipeline.ReadStoreContentAsync(withoutAsOf: true);
+        var reportBefore = await pipeline.ReadReportBytesAsync(42, withoutAsOf: true);
 
         pipeline.Clock.Advance(TimeSpan.FromDays(1));
         await pipeline.RunAllAsync(["sync"], ["derive"], ["report", "--sprint", "42"]);
@@ -116,8 +119,8 @@ public class IncrementalSyncTests
         // The second fetch was not empty: the overlap brings the newest issues back, and they are written again.
         await Assert.That(pipeline.Jira.SearchAnswers[1]).IsEquivalentTo(new[] { "FAKE-1", "FAKE-2" });
         await Assert.That(storeBefore).Contains("FAKE-2");
-        await Assert.That(await pipeline.ReadStoreContentAsync()).IsEqualTo(storeBefore);
-        await Assert.That(await pipeline.ReadReportBytesAsync(42)).IsEqualTo(reportBefore);
+        await Assert.That(await pipeline.ReadStoreContentAsync(withoutAsOf: true)).IsEqualTo(storeBefore);
+        await Assert.That(await pipeline.ReadReportBytesAsync(42, withoutAsOf: true)).IsEqualTo(reportBefore);
     }
 
     [Test]
@@ -125,6 +128,7 @@ public class IncrementalSyncTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41, 42);
         var first = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development);
         var second = pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 20, 9))
@@ -153,6 +157,7 @@ public class IncrementalSyncTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41, 42);
         var first = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development);
         var second = pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 20, 9))
@@ -214,6 +219,7 @@ public class IncrementalSyncTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41, 42);
         var issue = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development);
         await pipeline.RunAllAsync(["backfill"]);

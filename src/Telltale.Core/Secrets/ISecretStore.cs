@@ -16,12 +16,23 @@ public enum SecretName
 /// <summary>Where secrets are kept: Windows Credential Manager on the work laptop, environment variables in development, memory in tests.</summary>
 public interface ISecretStore
 {
-    /// <summary>The secret's value, or null when it has not been set.</summary>
+    /// <summary>
+    /// The secret's value, or null when it has not been set. Throws <see cref="StoredSecretUnusableException"/>
+    /// when something is stored under the secret's name that was read and is not a value this tool stores,
+    /// and another <see cref="UserFacingException"/> when the store could not be read at all.
+    /// </summary>
     string? Get(SecretName name);
 
     /// <summary>One sentence telling the person running the tool how to set this secret in this store. It ends the message about a missing secret.</summary>
     string HowToSet(SecretName name);
 }
+
+/// <summary>
+/// Something is stored under a secret's name, it was read, and it is not a value this tool stores (not one
+/// line of text). Setting the secret again cures it. A read that failed is not this: it says nothing about
+/// what is stored.
+/// </summary>
+public sealed class StoredSecretUnusableException(string message) : UserFacingException(message);
 
 /// <summary>A secret store <c>secrets set</c> can write to. The environment-variable store is not one.</summary>
 public interface IWritableSecretStore : ISecretStore

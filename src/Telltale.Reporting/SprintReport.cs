@@ -12,17 +12,23 @@ namespace Telltale.Reporting;
 /// </summary>
 public static class SprintReport
 {
+    /// <summary>
+    /// What a cell says when the view withholds its figure (ADR-0003): its row has suppressed = 1 and the
+    /// figure is null. Such a cell never prints as a blank or a zero.
+    /// </summary>
+    private const string Suppressed = "suppressed";
+
     /// <summary>The report's file name for a sprint: reports are named by sprint ID.</summary>
     public static string FileName(string sprintId) => $"sprint-{sprintId}.md";
 
     /// <summary>
-    /// The ID of the sprint that completed last, or null when none has. A closed sprint Jira gives no
-    /// completion time ended at its planned end (owner decision D7).
+    /// The ID of the sprint that completed last, or null when none has. When a sprint ended is its
+    /// sprint window's end, which derive decides.
     /// </summary>
     public static async Task<string?> MostRecentlyCompletedSprintAsync(ITelltaleStore store, CancellationToken cancellationToken = default)
     {
         var sprints = await store.QueryViewsAsync<string>(
-            "SELECT sprint_id FROM delivered_per_sprint WHERE state = @closed ORDER BY COALESCE(completed, planned_end) DESC, started DESC, sprint_id DESC LIMIT 1;",
+            "SELECT sprint_id FROM delivered_per_sprint WHERE state = @closed ORDER BY ended DESC, started DESC, sprint_id DESC LIMIT 1;",
             new { closed = SprintStates.Closed },
             cancellationToken);
 
@@ -33,7 +39,7 @@ public static class SprintReport
     public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, CancellationToken cancellationToken = default)
     {
         var rows = await store.QueryViewsAsync<DeliveredRow>(
-            "SELECT sprint_name, started, planned_end, completed, delivered_count FROM delivered_per_sprint WHERE sprint_id = @sprintId;",
+            "SELECT sprint_name, started, ended, planned_end, delivered_count, suppressed FROM delivered_per_sprint WHERE sprint_id = @sprintId;",
             new { sprintId },
             cancellationToken);
 
@@ -46,26 +52,32 @@ public static class SprintReport
         var report = new StringBuilder();
         AppendTitle(report, sprint, teamTimeZone);
         AppendDeliveredCount(report, sprint);
-        AppendCycleTime(report, await store.QueryViewsAsync<CycleTimeRow>(
+        AppendCycleTime(report, sprint, await store.QueryViewsAsync<CycleTimeRow>(
             """
-            SELECT point_bucket, issue_count, median_business_days, p85_business_days, median_calendar_days, p85_calendar_days
+            SELECT point_bucket, issue_count, median_business_days, p85_business_days, median_calendar_days, p85_calendar_days, suppressed
             FROM cycle_time_per_sprint_and_bucket
             WHERE sprint_id = @sprintId
             ORDER BY point_bucket IS NULL, point_bucket;
             """,
             new { sprintId },
             cancellationToken));
-        AppendTimeInStatus(report, await ReadTimeInStatusAsync(store, sprintId, cancellationToken));
+        AppendTimeInStatus(report, sprint, await ReadTimeInStatusAsync(store, sprintId, cancellationToken));
+        var quality = await ReadDataQualityAsync(store, cancellationToken);
+        AppendMethodNote(report, quality);
+        AppendFooter(report, quality);
         return report.ToString();
     }
 
-    // Derived data an earlier version of the tool built, without this view, never gets here: the report
-    // command refuses derived data that does not say which raw data it was built from (PipelineSteps.ReportAsync).
     private static Task<IReadOnlyList<TimeInStatusRow>> ReadTimeInStatusAsync(ITelltaleStore store, string sprintId, CancellationToken cancellationToken) =>
         store.QueryViewsAsync<TimeInStatusRow>(
-            "SELECT status_name, issue_count, median_business_days FROM time_in_status_per_sprint WHERE sprint_id = @sprintId ORDER BY board_position;",
+            "SELECT status_name, issue_count, median_business_days, suppressed FROM time_in_status_per_sprint WHERE sprint_id = @sprintId ORDER BY board_position;",
             new { sprintId },
             cancellationToken);
+
+    // A store without this view never gets here: the view-query path refuses derived data another version
+    // of the tool built, or a set of views that is not complete (SqliteStore.QueryViewsAsync).
+    private static async Task<DataQualityRow> ReadDataQualityAsync(ITelltaleStore store, CancellationToken cancellationToken) =>
+        (await store.QueryViewsAsync<DataQualityRow>("SELECT as_of, time_zone, anomaly_issue_count, delivered_between_sprints_count, suppressed FROM data_quality;", cancellationToken: cancellationToken)).Single();
 
     /// <summary>Renders the report and writes it into <paramref name="directory"/>. Returns the file's path.</summary>
     public static async Task<string> WriteAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, string directory, CancellationToken cancellationToken = default)
@@ -80,63 +92,139 @@ public static class SprintReport
 
     private static void AppendTitle(StringBuilder report, DeliveredRow sprint, TimeZoneInfo teamTimeZone)
     {
-        // A sprint ends when it was completed; one still running shows its planned end.
-        var end = sprint.Completed ?? sprint.PlannedEnd;
-        var dates = end is null
-            ? $"from {LocalDate(sprint.Started, teamTimeZone)}"
-            : $"{LocalDate(sprint.Started, teamTimeZone)} to {LocalDate(end, teamTimeZone)}";
+        // The dates are the sprint window's, which the figures were counted in. A sprint that is not
+        // completed has no end yet: its window runs to the as-of time. Its planned end is shown as a plan,
+        // in words that stay true once that day has passed.
+        var start = LocalDate(sprint.Started, teamTimeZone);
+        var dates = sprint.Ended is not null ? $"{start} to {LocalDate(sprint.Ended, teamTimeZone)}"
+            : sprint.PlannedEnd is null ? $"from {start}, still running"
+            : $"from {start}, still running; planned end {LocalDate(sprint.PlannedEnd, teamTimeZone)}";
 
         report.Append("# ").Append(sprint.SprintName).Append(" (").Append(dates).Append(")\n\n");
     }
 
     private static void AppendDeliveredCount(StringBuilder report, DeliveredRow sprint) =>
-        report.Append("Delivered issues: ").Append(sprint.DeliveredCount.ToString(CultureInfo.InvariantCulture)).Append('\n');
+        report.Append("Delivered issues: ").Append(Figure(sprint.Suppressed, sprint.DeliveredCount?.ToString(CultureInfo.InvariantCulture))).Append('\n');
 
     /// <summary>The cycle time table: one row per point bucket, smallest estimate first and unestimated issues last.</summary>
-    private static void AppendCycleTime(StringBuilder report, IReadOnlyList<CycleTimeRow> buckets)
+    private static void AppendCycleTime(StringBuilder report, DeliveredRow sprint, IReadOnlyList<CycleTimeRow> buckets)
     {
         report.Append("\n## Cycle time by point bucket\n\n");
+        if (AppendSuppressedTable(report, sprint))
+        {
+            return;
+        }
+
         if (buckets.Count == 0)
         {
             report.Append("No issue delivered in this sprint has a cycle time.\n");
             return;
         }
 
-        report.Append("| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |\n");
-        report.Append("|---|---|---|---|---|---|\n");
-
+        AppendTableHead(report, "Point bucket", "Issues with a cycle time", "Median (business days)", "P85 (business days)", "Median (calendar days)", "P85 (calendar days)");
         foreach (var bucket in buckets)
         {
-            report.Append("| ").Append(BucketLabel(bucket.PointBucket))
-                .Append(" | ").Append(bucket.IssueCount.ToString(CultureInfo.InvariantCulture))
-                .Append(" | ").Append(Days(bucket.MedianBusinessDays))
-                .Append(" | ").Append(Days(bucket.P85BusinessDays))
-                .Append(" | ").Append(Days(bucket.MedianCalendarDays))
-                .Append(" | ").Append(Days(bucket.P85CalendarDays))
-                .Append(" |\n");
+            AppendTableRow(report, BucketLabel(bucket.PointBucket), Count(bucket.IssueCount), Days(bucket.Suppressed, bucket.MedianBusinessDays), Days(bucket.Suppressed, bucket.P85BusinessDays), Days(bucket.Suppressed, bucket.MedianCalendarDays), Days(bucket.Suppressed, bucket.P85CalendarDays));
         }
     }
 
     /// <summary>One row per status issues spent time in during the sprint, in board order. A status nobody was in has no row.</summary>
-    private static void AppendTimeInStatus(StringBuilder report, IReadOnlyList<TimeInStatusRow> rows)
+    private static void AppendTimeInStatus(StringBuilder report, DeliveredRow sprint, IReadOnlyList<TimeInStatusRow> rows)
     {
         report.Append("\n## Time in status\n\n");
+        if (AppendSuppressedTable(report, sprint))
+        {
+            return;
+        }
+
         if (rows.Count == 0)
         {
             report.Append("No issue of this sprint spent time in a status that is not done.\n");
             return;
         }
 
-        report.Append("| Status | Issues | Median business days |\n| --- | ---: | ---: |\n");
+        AppendTableHead(report, "Status", "Issues", "Median (business days)");
         foreach (var row in rows)
         {
-            // A status name is Jira's text: a "|" in it would otherwise end the cell.
-            report.Append("| ").Append(row.StatusName.Replace("|", "\\|", StringComparison.Ordinal))
-                .Append(" | ").Append(row.IssueCount.ToString(CultureInfo.InvariantCulture))
-                .Append(" | ").Append(row.MedianBusinessDays.ToString("0.0", CultureInfo.InvariantCulture))
-                .Append(" |\n");
+            AppendTableRow(report, row.StatusName, Count(row.IssueCount), Days(row.Suppressed, row.MedianBusinessDays));
         }
     }
+
+    /// <summary>
+    /// For a sprint that fails the team check, writes the one line that stands for a whole table and returns
+    /// true (owner decision D45): no row, and no sentence about an empty table either, because which buckets
+    /// or statuses have rows says what the sprint's few people worked on.
+    /// </summary>
+    private static bool AppendSuppressedTable(StringBuilder report, DeliveredRow sprint)
+    {
+        if (sprint.Suppressed == 0)
+        {
+            return false;
+        }
+
+        report.Append(Suppressed).Append('\n');
+        return true;
+    }
+
+    /// <summary>
+    /// What the figures mean, with each rule as the glossary and the owner's decisions state it. The suppression
+    /// rule is ADR-0003's for results grouped by issue attributes. The time zone is the one derive stored.
+    /// </summary>
+    private static void AppendMethodNote(StringBuilder report, DataQualityRow quality) =>
+        report.Append("\n## Method\n\n")
+            .Append("- Durations are in business days: days that are neither a weekend nor a company holiday, each counted in full (24 hours) in the team's time zone (").Append(quality.TimeZone).Append("). Calendar days are shown alongside: elapsed time divided by 24 hours.\n")
+            .Append("- Cycle time runs from an issue's first entry into a work status to its last entry into a done status, for delivered issues only. It belongs to the sprint in which the issue was delivered.\n")
+            .Append("- Figures are medians and P85s. The median is the middle value, or the mean of the two middle values. The P85 is the smallest value with at least 85% of the values at or below it.\n")
+            .Append("- Time in status covers the statuses before done. An issue counts toward a status only if it spent more than zero business days there.\n")
+            .Append("- A figure is shown only where it cannot show one person's work. The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in it. When the team is smaller than five, the delivered count and both tables read \"suppressed\", with no rows. With a team of five or more, a row with fewer than three distinct assignees behind it keeps its issue count and reads \"suppressed\" for its figures. The footer's two counts read \"suppressed\" when the issues in the whole store have fewer than five distinct assignees.\n")
+            .Append("- An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. An unassigned issue counts toward nobody.\n")
+            .Append("- An interval that is still open (an issue still in a status, a sprint not yet completed) ends at the as-of time below.\n")
+            .Append("- Work that has since been removed from Jira stays in the figures until the next backfill.\n");
+
+    /// <summary>
+    /// The data-quality footer. Its two counts cover the whole store, not the sprint: an issue delivered
+    /// between sprints belongs to no sprint. They are counts only: no issue is named. The view withholds
+    /// them when the whole store has fewer than five distinct assignees.
+    /// </summary>
+    private static void AppendFooter(StringBuilder report, DataQualityRow quality)
+    {
+        // In the zone derive counted business days in, which is the one the note names.
+        var asOf = TimeZoneInfo.ConvertTime(StoredTime.FromStored(quality.AsOf), TimeZoneInfo.FindSystemTimeZoneById(quality.TimeZone));
+        report.Append("\n---\n\n")
+            .Append("- As-of time: ").Append(asOf.ToString("yyyy-MM-dd HH:mm zzz", CultureInfo.InvariantCulture)).Append(" (").Append(quality.TimeZone).Append(")\n")
+            .Append("- Issues with changelog anomalies, in the whole store: ").Append(Figure(quality.Suppressed, quality.AnomalyIssueCount?.ToString(CultureInfo.InvariantCulture))).Append('\n')
+            .Append("- Issues delivered between sprints, in the whole store: ").Append(Figure(quality.Suppressed, quality.DeliveredBetweenSprintsCount?.ToString(CultureInfo.InvariantCulture))).Append('\n');
+    }
+
+    /// <summary>
+    /// The head of a table. Every table of the report has this layout: what a row is about in the first
+    /// column, and figures in the others, aligned right.
+    /// </summary>
+    private static void AppendTableHead(StringBuilder report, params ReadOnlySpan<string> columns)
+    {
+        AppendTableRow(report, columns);
+        report.Append("| ---");
+        for (var column = 1; column < columns.Length; column++)
+        {
+            report.Append(" | ---:");
+        }
+
+        report.Append(" |\n");
+    }
+
+    private static void AppendTableRow(StringBuilder report, params ReadOnlySpan<string> cells)
+    {
+        foreach (var cell in cells)
+        {
+            // A cell can hold Jira's text (a status name): a "|" in it would otherwise end the cell.
+            report.Append("| ").Append(cell.Replace("|", "\\|", StringComparison.Ordinal)).Append(' ');
+        }
+
+        report.Append("|\n");
+    }
+
+    /// <summary>A number of issues, or <see cref="Suppressed"/> when the view withholds it.</summary>
+    private static string Count(long? issues) => issues?.ToString(CultureInfo.InvariantCulture) ?? Suppressed;
 
     /// <summary>
     /// A point bucket's label: the estimate in full (3, 0.5, 2.001), so two buckets the view keeps apart
@@ -145,8 +233,15 @@ public static class SprintReport
     private static string BucketLabel(double? pointBucket) =>
         pointBucket?.ToString("R", CultureInfo.InvariantCulture) ?? "unestimated";
 
-    /// <summary>A duration in days to one decimal place, e.g. 2.5.</summary>
-    private static string Days(double days) => days.ToString("F1", CultureInfo.InvariantCulture);
+    /// <summary>A duration in days to one decimal place, e.g. 2.5, or <see cref="Suppressed"/> (see <see cref="Figure"/>). Every figure in days is written by this.</summary>
+    private static string Days(long suppressed, double? days) => Figure(suppressed, days?.ToString("F1", CultureInfo.InvariantCulture));
+
+    /// <summary>
+    /// A cell's text. The figure is printed only when its row says it is not suppressed (0) and carries it;
+    /// in every other case the cell reads <see cref="Suppressed"/>, so a figure can be withheld by mistake
+    /// but not shown by mistake.
+    /// </summary>
+    private static string Figure(long suppressed, string? figure) => suppressed == 0 && figure is not null ? figure : Suppressed;
 
     /// <summary>A stored time as a date in the team's zone, e.g. 2026-01-05.</summary>
     private static string LocalDate(string storedUtc, TimeZoneInfo teamTimeZone)
@@ -158,26 +253,40 @@ public static class SprintReport
     private sealed class TimeInStatusRow
     {
         public string StatusName { get; init; } = "";
-        public long IssueCount { get; init; }
-        public double MedianBusinessDays { get; init; }
+        /// <summary>Null when the sprint is short of five assignees: its counts are withheld with its figures (owner decision D41).</summary>
+        public long? IssueCount { get; init; }
+        public double? MedianBusinessDays { get; init; }
+        public long Suppressed { get; init; } = 1;
+    }
+
+    private sealed class DataQualityRow
+    {
+        public string AsOf { get; init; } = "";
+        public string TimeZone { get; init; } = "";
+        public long? AnomalyIssueCount { get; init; }
+        public long? DeliveredBetweenSprintsCount { get; init; }
+        public long Suppressed { get; init; } = 1;
     }
 
     private sealed class DeliveredRow
     {
         public string SprintName { get; init; } = "";
         public string Started { get; init; } = "";
+        public string? Ended { get; init; }
         public string? PlannedEnd { get; init; }
-        public string? Completed { get; init; }
-        public long DeliveredCount { get; init; }
+        public long? DeliveredCount { get; init; }
+        public long Suppressed { get; init; } = 1;
     }
 
     private sealed class CycleTimeRow
     {
         public double? PointBucket { get; init; }
-        public long IssueCount { get; init; }
-        public double MedianBusinessDays { get; init; }
-        public double P85BusinessDays { get; init; }
-        public double MedianCalendarDays { get; init; }
-        public double P85CalendarDays { get; init; }
+        /// <summary>Null when the sprint is short of five assignees: its counts are withheld with its figures (owner decision D41).</summary>
+        public long? IssueCount { get; init; }
+        public double? MedianBusinessDays { get; init; }
+        public double? P85BusinessDays { get; init; }
+        public double? MedianCalendarDays { get; init; }
+        public double? P85CalendarDays { get; init; }
+        public long Suppressed { get; init; } = 1;
     }
 }

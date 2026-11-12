@@ -16,6 +16,7 @@ public class BackfillRebuildTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development)
             .Moved(Local(2026, 1, 22, 9), Workflow.Done);
@@ -107,6 +108,7 @@ public class BackfillRebuildTests
         // and the report needs its name. A rebuild does not clear them.
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9)).InSprints(41)
             .Moved(Local(2026, 1, 6, 9), Workflow.Review)
             .Moved(Local(2026, 1, 8, 9), Workflow.Done);
@@ -115,7 +117,7 @@ public class BackfillRebuildTests
         pipeline.Jira.DeleteStatus(Workflow.Review);
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\n| Fake Review | 1 | 2.0 |\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\n| Fake Review | 5 | 2.0 |\n");
     }
 
     [Test]
@@ -162,6 +164,7 @@ public class BackfillRebuildTests
         await Assert.That(failed).IsEqualTo(1);
         await Assert.That(interrupted.Error.ToString()).Contains(failure);
         await Assert.That(storeBefore).Contains("FAKE-2");
+        await Assert.That(await interrupted.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
         await Assert.That(storeAfterFailure).IsEqualTo(storeBefore);
         await Assert.That(reportAfterFailure).IsEqualTo(reportBefore);
         var store = await interrupted.ReadStoreContentAsync();
@@ -176,6 +179,9 @@ public class BackfillRebuildTests
             jira.AddIssue("FAKE-2", Local(2026, 1, 20, 9)).AssignedTo(People.Two)
                 .Moved(Local(2026, 1, 21, 9), Workflow.Development)
                 .Moved(Local(2026, 1, 23, 9), Workflow.Done);
+
+            // A team of five, so the report compared shows its figures.
+            jira.AddIdleTeam(41, 42);
         }
 
         static void ChangeBoard(FakeJira jira)
@@ -310,6 +316,7 @@ public class BackfillRebuildTests
         // sub-task before the new start date and not touched since).
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 8, 9), Workflow.Done);
@@ -333,9 +340,9 @@ public class BackfillRebuildTests
         await Assert.That(report).IsEqualTo(1);
         await Assert.That(run).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(Refusal + Refusal);
-        await Assert.That(before).Contains("\nDelivered issues: 1\n");
+        await Assert.That(before).Contains("\nDelivered issues: 5\n");
         await Assert.That(await pipeline.ReadReportAsync(41)).IsEqualTo(before);
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 5\n");
         await Assert.That(storeBefore).Contains("FAKE-1");
         await Assert.That(await pipeline.ReadStoreContentAsync()).DoesNotContain("FAKE-1");
     }

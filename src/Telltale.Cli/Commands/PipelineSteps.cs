@@ -6,6 +6,7 @@ using Telltale.Core;
 using Telltale.Core.Calendar;
 using Telltale.Core.Configuration;
 using Telltale.Core.Derive;
+using Telltale.Core.Identity;
 using Telltale.Core.Secrets;
 using Telltale.Core.Storage;
 using Telltale.Core.Workflow;
@@ -101,11 +102,51 @@ internal sealed class PipelineSteps : IDisposable
     private Task CollectAsync(CollectionMode mode, bool allowEmpty, CancellationToken cancellationToken) =>
         new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets, _services.Clock, _services.Error).BringUpToDateAsync(_store, mode, allowEmpty, cancellationToken);
 
-    /// <summary>Rebuilds every derived table and metric view from the raw tables.</summary>
+    /// <summary>
+    /// Rebuilds every derived table and metric view from the raw tables, and logs the changelog anomalies it
+    /// found to standard error: one line with the totals, then one line for each anomaly (an issue and a kind)
+    /// the previous rebuild did not have. The store's <c>anomaly</c> table holds the full list. A line holds the
+    /// Jira issue ID and the kind's fixed message, never the key. Derive is the step that builds the timelines,
+    /// so it is the one that logs.
+    /// </summary>
     public async Task DeriveAsync(CancellationToken cancellationToken)
     {
+        await RequireStoredSaltAsync(cancellationToken);
         var raw = await _store.ReadRawAsync(cancellationToken);
-        await _store.ReplaceDerivedAsync(Derivation.Derive(raw, _config.Jira.BoardId, _roles, _abandonedResolutionIds, new BusinessCalendar(_timeZone, _config.Holidays), AsOf(raw)), DigestOf(raw), cancellationToken);
+        var derived = Derivation.Derive(raw, _config.Jira.BoardId, _roles, _abandonedResolutionIds, new BusinessCalendar(_timeZone, _config.Holidays), AsOf(raw));
+        var previous = await _store.ReadAnomaliesAsync(cancellationToken);
+        await _store.ReplaceDerivedAsync(derived, SourceOf(raw), cancellationToken);
+
+        if (derived.Anomalies.Count == 0)
+        {
+            return;
+        }
+
+        var unseen = derived.Anomalies.Where(anomaly => !previous.Contains((anomaly.IssueId, anomaly.Message))).ToList();
+        var issues = derived.Anomalies.Select(anomaly => anomaly.IssueId).Distinct(StringComparer.Ordinal).Count();
+        await _services.Error.WriteLineAsync(
+            $"Changelog anomalies: {derived.Anomalies.Count} across {issues} {(issues == 1 ? "issue" : "issues")}, {unseen.Count} new since the previous derive.");
+        foreach (var anomaly in unseen)
+        {
+            await _services.Error.WriteLineAsync($"Changelog anomaly: issue {anomaly.IssueId}: {anomaly.Message}.");
+        }
+    }
+
+    /// <summary>What a rebuild from <paramref name="raw"/> under the current configuration is built from.</summary>
+    private DerivedSource SourceOf(RawData raw) =>
+        new(DigestOf(raw), _config.TimeZone, string.Join(",", _config.Holidays.Order().Select(day => day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))));
+
+    /// <summary>
+    /// Derive and report need no secret. But when the salt is at hand and is not the one the stored people
+    /// were hashed with, the store is about to be filled under two salts, and the figures' distinct-assignee
+    /// counts are not to be relied on until a backfill settles it: the command stops, as a sync would.
+    /// </summary>
+    private async Task RequireStoredSaltAsync(CancellationToken cancellationToken)
+    {
+        if (_services.Secrets.Get(SecretName.HashingSalt) is { } salt && !string.IsNullOrWhiteSpace(salt))
+        {
+            IdentityHash.RequireSaltOf(await _store.ReadSaltFingerprintAsync(cancellationToken), salt.Trim());
+        }
     }
 
     /// <summary>
@@ -143,14 +184,22 @@ internal sealed class PipelineSteps : IDisposable
     /// </summary>
     public async Task ReportAsync(long? sprintId, bool needsSprint, CancellationToken cancellationToken)
     {
+        await RequireStoredSaltAsync(cancellationToken);
         var derivedFrom = await _store.ReadDerivedSourceAsync(cancellationToken)
             ?? throw new UserFacingException("The store has no derived data yet. Run derive first.");
 
         // The views would answer from the old derived tables without a sign, so the report checks first.
         var raw = await _store.ReadRawAsync(cancellationToken);
-        if (derivedFrom != DigestOf(raw))
+        var current = SourceOf(raw);
+        if (derivedFrom.RawDigest != current.RawDigest)
         {
             throw new UserFacingException("The raw data changed since the derived data was built. Run derive first.");
+        }
+
+        // The stored business days were counted in the old time zone, around the old holidays.
+        if (derivedFrom.TimeZone != current.TimeZone || derivedFrom.Holidays != current.Holidays)
+        {
+            throw new UserFacingException("The time zone or the holidays in the configuration changed since the derived data was built. Run derive first.");
         }
 
         var sprint = sprintId?.ToString(CultureInfo.InvariantCulture)
@@ -219,12 +268,23 @@ internal sealed class PipelineSteps : IDisposable
         }
     }
 
-    internal static StatusRoles ReadStatusRoles(TelltaleConfig config, string path)
+    /// <summary>
+    /// The status roles of the configuration. Every status ID must be digits, as Jira's are: anything else
+    /// could match no issue. Without <paramref name="requireDone"/>, a map in which no status has the done role
+    /// is returned and not refused; only <c>discover</c> asks for that (owner decision D40).
+    /// </summary>
+    internal static StatusRoles ReadStatusRoles(TelltaleConfig config, string path, bool requireDone = true)
     {
         try
         {
+            // The message does not repeat the ID: what is not a status ID could be a secret pasted into the wrong place.
+            if (config.StatusRoles.Keys.Any(statusId => statusId.Length == 0 || !statusId.All(char.IsAsciiDigit)))
+            {
+                throw new FormatException("every status ID must be a Jira status ID (digits only), and one is not.");
+            }
+
             var roles = StatusRoles.Parse(config.StatusRoles);
-            if (!roles.HasDone)
+            if (requireDone && !roles.HasDone)
             {
                 throw new FormatException("no status has the role 'done', so nothing could ever be delivered.");
             }
