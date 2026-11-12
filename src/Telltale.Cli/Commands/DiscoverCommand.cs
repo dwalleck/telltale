@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Telltale.Collectors.Jira;
 using Telltale.Core;
+using Telltale.Core.Configuration;
 
 namespace Telltale.Cli.Commands;
 
@@ -31,21 +32,22 @@ internal static class DiscoverCommand
         var board = new Option<long?>("--board") { Description = "The ID of the team's Scrum board. Needed the first time." };
         var timeZone = new Option<string?>("--time-zone") { Description = "The team's time zone as an IANA ID, e.g. America/Chicago. Needed the first time." };
         var backfillStart = new Option<string?>("--backfill-start") { Description = "The backfill fetches issues updated on or after this date (yyyy-MM-dd). Needed the first time." };
+        var storyPointField = new Option<string?>("--story-point-field") { Description = "The ID of the board's story point field, e.g. customfield_10016. Needed when Jira lists none or several." };
 
         var command = new Command("discover", "Read the Jira site and write the configuration file. A rerun keeps what the file already says.")
         {
-            siteUrl, board, timeZone, backfillStart,
+            siteUrl, board, timeZone, backfillStart, storyPointField,
         };
         command.SetAction((parse, cancellationToken) => CliApp.GuardAsync(services, () => DiscoverAsync(
             services,
-            new Given(parse.GetValue(siteUrl), parse.GetValue(board), parse.GetValue(timeZone), parse.GetValue(backfillStart)),
+            new Given(parse.GetValue(siteUrl), parse.GetValue(board), parse.GetValue(timeZone), parse.GetValue(backfillStart), parse.GetValue(storyPointField)),
             cancellationToken)));
 
         return command;
     }
 
     /// <summary>What the command line gave. Null means "take it from the file".</summary>
-    private sealed record Given(string? SiteUrl, long? Board, string? TimeZone, string? BackfillStart);
+    private sealed record Given(string? SiteUrl, long? Board, string? TimeZone, string? BackfillStart, string? StoryPointField);
 
     private static async Task DiscoverAsync(AppServices services, Given given, CancellationToken cancellationToken)
     {
@@ -81,6 +83,15 @@ internal static class DiscoverCommand
 
         var facts = await new JiraDiscovery(services.HttpHandler, site, boardId!.Value, services.Secrets).ReadAsync(cancellationToken);
 
+        // Whatever would make the file useless stops the command here, before anything is printed or written.
+        var (storyPointFieldId, storyPointSource) = ChooseStoryPointField(given.StoryPointField, TextOf(jira["storyPointFieldId"]), facts.StoryPointFields);
+        if (facts.SprintFields.Count == 0)
+        {
+            throw new UserFacingException("Jira's field list has no Sprint field. Check that the site has Jira Software and that this account may see the field. Nothing was written.");
+        }
+
+        RequireUsableProjectKeys(facts.ProjectKeys, boardId.Value);
+
         var output = services.Out;
         await ListStatusesAsync(output, facts.Statuses, statusRoles);
 
@@ -95,15 +106,14 @@ internal static class DiscoverCommand
             await output.WriteLineAsync($"Sprint field: {field.Id} ({field.Name})");
         }
 
-        var storyPointField = facts.StoryPointFields[0];
-        await output.WriteLineAsync($"Story point field: {storyPointField.Id} ({storyPointField.Name})");
+        await output.WriteLineAsync($"Story point field: {storyPointFieldId} ({storyPointSource})");
         await output.WriteLineAsync($"Project keys: {string.Join(", ", facts.ProjectKeys)}");
 
         var changes = new List<string>();
         Set(jira, "siteUrl", site.AbsoluteUri, "jira.siteUrl", changes);
         Set(jira, "boardId", boardId.Value, "jira.boardId", changes);
         Set(jira, "projectKeys", new JsonArray([.. facts.ProjectKeys.Select(key => (JsonNode)key)]), "jira.projectKeys", changes);
-        Set(jira, "storyPointFieldId", storyPointField.Id, "jira.storyPointFieldId", changes);
+        Set(jira, "storyPointFieldId", storyPointFieldId, "jira.storyPointFieldId", changes);
         Set(jira, "backfillStart", backfillStart!, "jira.backfillStart", changes);
         Set(root, "timeZone", timeZone!, "timeZone", changes);
 
@@ -112,12 +122,21 @@ internal static class DiscoverCommand
             await output.WriteLineAsync(change);
         }
 
+        var text = root.ToJsonString(Indented) + Environment.NewLine;
+        if (text == previous)
+        {
+            // Rewriting would replace the backup of the last real change with a copy of this same file.
+            await output.WriteLineAsync($"{path} already says all of this; it was not rewritten.");
+            return;
+        }
+
         if (previous is not null)
         {
             File.Copy(path, path + ".bak", overwrite: true);
         }
 
-        await File.WriteAllTextAsync(path, root.ToJsonString(Indented) + Environment.NewLine, cancellationToken);
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        await File.WriteAllTextAsync(path, text, cancellationToken);
         await output.WriteLineAsync(previous is null
             ? $"Wrote {path}. Review the status roles before the first run."
             : $"Wrote {path}. The previous file is kept as {path}.bak.");
@@ -138,6 +157,11 @@ internal static class DiscoverCommand
                 var role = TextOf(inFile) ?? inFile.ToJsonString();
                 var differs = proposal is not null && proposal != role ? $"; Jira's category proposes {proposal}" : "";
                 await output.WriteLineAsync($"  {status.Id}  {status.Name}  {status.CategoryKey}  {role} (from the file{differs})");
+            }
+            else if (proposal is null)
+            {
+                // The file takes one of the four roles or nothing. The run stops only if an issue has been in this status.
+                await output.WriteLineAsync($"  {status.Id}  {status.Name}  {status.CategoryKey}  no role (Jira's category proposes none; give it one in the file if issues use this status)");
             }
             else
             {
@@ -164,6 +188,49 @@ internal static class DiscoverCommand
         "done" => "done",
         _ => null,
     };
+
+    /// <summary>
+    /// The story point field and where it came from. The owner's word wins: the option, then the file. Jira's
+    /// list decides only when it names exactly one field, because a site often has two and the board uses one.
+    /// </summary>
+    private static (string Id, string Source) ChooseStoryPointField(string? given, string? inFile, IReadOnlyList<DiscoveredField> listed)
+    {
+        var names = string.Join(", ", listed.Select(field => $"{field.Id} ({field.Name})"));
+        if (given is not null)
+        {
+            return (given, "given with --story-point-field");
+        }
+
+        if (inFile is not null)
+        {
+            return (inFile, listed.Count == 0 || listed.Any(field => field.Id == inFile) ? "from the file" : $"from the file; Jira lists {names}");
+        }
+
+        return listed.Count switch
+        {
+            1 => (listed[0].Id, listed[0].Name),
+            0 => throw new UserFacingException("Jira's field list has no field this tool recognises as story points. Give the field's ID with --story-point-field. Nothing was written."),
+            _ => throw new UserFacingException($"Jira lists more than one story point field: {names}. Say which one the board uses with --story-point-field. Nothing was written."),
+        };
+    }
+
+    /// <summary>The run refuses a file without project keys or with a key not in Jira's form, so discover does not write one.</summary>
+    private static void RequireUsableProjectKeys(IReadOnlyList<string> keys, long boardId)
+    {
+        if (keys.Count == 0)
+        {
+            throw new UserFacingException($"Jira lists no project for board {boardId.ToString(CultureInfo.InvariantCulture)}, so there is nothing to search. Check the board ID. Nothing was written.");
+        }
+
+        try
+        {
+            JiraProjectKey.RequireValid(keys);
+        }
+        catch (FormatException exception)
+        {
+            throw new UserFacingException($"Jira lists a project of board {boardId.ToString(CultureInfo.InvariantCulture)} whose key this tool cannot use: {exception.Message} Nothing was written.", exception);
+        }
+    }
 
     private static JsonObject ReadExisting(string text, string path)
     {

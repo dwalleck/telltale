@@ -39,6 +39,10 @@ public sealed class JiraDiscovery
     private const string SprintFieldType = "com.pyxis.greenhopper.jira:gh-sprint";
     private const string StoryPointEstimateFieldType = "com.pyxis.greenhopper.jira:jsw-story-points";
 
+    // "Story Points" on a company-managed project is an ordinary number field: only its name tells it apart
+    // from any other number, so a renamed one is not found and the owner names it.
+    private const string StoryPointsFieldName = "Story Points";
+
     private const int PageSize = 50;
 
     private readonly HttpMessageHandler _handler;
@@ -94,8 +98,7 @@ public sealed class JiraDiscovery
             foreach (var field in document.RootElement.EnumerateArray())
             {
                 // System fields have no custom type, and some fields have no schema at all.
-                var type = Optional(field, "schema") is { } schema ? Optional(schema, "custom")?.GetString() : null;
-                if (type is null)
+                if (Optional(field, "schema") is not { } schema || Optional(schema, "custom")?.GetString() is not { } type)
                 {
                     continue;
                 }
@@ -105,7 +108,8 @@ public sealed class JiraDiscovery
                 {
                     sprint.Add(found);
                 }
-                else if (type == StoryPointEstimateFieldType)
+                else if (type == StoryPointEstimateFieldType
+                    || (Optional(schema, "type")?.GetString() == "number" && string.Equals(found.Name, StoryPointsFieldName, StringComparison.OrdinalIgnoreCase)))
                 {
                     storyPoints.Add(found);
                 }

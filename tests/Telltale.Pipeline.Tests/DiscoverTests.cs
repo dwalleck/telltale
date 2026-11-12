@@ -1,4 +1,6 @@
 using System.Text.Json.Nodes;
+using Telltale.Cli;
+using Telltale.Core.Secrets;
 using Telltale.Pipeline.Tests.Harness;
 using static Telltale.Pipeline.Tests.Harness.TeamTime;
 
@@ -365,6 +367,224 @@ public class DiscoverTests
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(message + "\n");
         await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
         await Assert.That(File.Exists(pipeline.ConfigPath)).IsFalse();
+    }
+
+    [Test]
+    public async Task A_number_field_named_story_points_is_recognised_and_two_story_point_fields_need_the_owners_choice()
+    {
+        // A site often has both: "Story Points" (an ordinary number field) and "Story point estimate". The board uses one.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.Fields.Add(new FakeField("customfield_10026", "Story Points", "number", FakeJira.NumberFieldType));
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira lists more than one story point field: customfield_10016 (Fake Story point estimate), customfield_10026 (Story Points). "
+            + "Say which one the board uses with --story-point-field. Nothing was written.\n");
+        await Assert.That(File.Exists(pipeline.ConfigPath)).IsFalse();
+    }
+
+    [Test]
+    public async Task The_story_point_field_the_owner_names_is_written()
+    {
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.Fields.Add(new FakeField("customfield_10026", "Story Points", "number", FakeJira.NumberFieldType));
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync([.. FirstDiscover, "--story-point-field", "customfield_10026"]);
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That((await ReadWrittenConfigAsync(pipeline))["jira"]!["storyPointFieldId"]!.GetValue<string>()).IsEqualTo("customfield_10026");
+        await Assert.That(Output(pipeline)).Contains("Story point field: customfield_10026 (given with --story-point-field)\n");
+    }
+
+    [Test]
+    public async Task A_rerun_keeps_the_story_point_field_of_the_file()
+    {
+        await using var pipeline = new PipelineHarness();
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        await EditWrittenConfigAsync(pipeline, config => config["jira"]!["storyPointFieldId"] = "customfield_10026");
+        pipeline.Out.GetStringBuilder().Clear();
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover");
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That((await ReadWrittenConfigAsync(pipeline))["jira"]!["storyPointFieldId"]!.GetValue<string>()).IsEqualTo("customfield_10026");
+        await Assert.That(Output(pipeline)).Contains("Story point field: customfield_10026 (from the file; Jira lists customfield_10016 (Fake Story point estimate))\n");
+        await Assert.That(Output(pipeline)).DoesNotContain("Changed jira.storyPointFieldId");
+    }
+
+    [Test]
+    public async Task A_field_list_without_a_story_point_field_stops_discover_and_names_the_option()
+    {
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.Fields.RemoveAll(field => field.Id == FakeJira.StoryPointFieldId);
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira's field list has no field this tool recognises as story points. Give the field's ID with --story-point-field. Nothing was written.\n");
+        await Assert.That(File.Exists(pipeline.ConfigPath)).IsFalse();
+    }
+
+    [Test]
+    public async Task A_field_list_without_a_sprint_field_stops_discover()
+    {
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.Fields.RemoveAll(field => field.Id == FakeJira.SprintFieldId);
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira's field list has no Sprint field. Check that the site has Jira Software and that this account may see the field. Nothing was written.\n");
+        await Assert.That(File.Exists(pipeline.ConfigPath)).IsFalse();
+    }
+
+    [Test]
+    public async Task A_status_in_a_category_with_no_matching_role_is_listed_and_left_out_of_the_file()
+    {
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/status", _ => true, StubHttpHandler.Json(
+            """
+            [
+              { "id": "600008", "name": "Fake Done", "statusCategory": { "id": 3, "key": "done", "name": "Done" } },
+              { "id": "600011", "name": "Fake Limbo", "statusCategory": { "id": 1, "key": "undefined", "name": "No Category" } }
+            ]
+            """));
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(Output(pipeline)).Contains("  600011  Fake Limbo  undefined  no role (Jira's category proposes none; give it one in the file if issues use this status)\n");
+        var roles = (await ReadWrittenConfigAsync(pipeline))["statusRoles"]!.AsObject();
+        await Assert.That(roles.Select(role => role.Key)).IsEquivalentTo(["600008"]);
+    }
+
+    [Test]
+    public async Task A_board_without_projects_stops_discover()
+    {
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.BoardProjectKeys.Clear();
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira lists no project for board 400001, so there is nothing to search. Check the board ID. Nothing was written.\n");
+        await Assert.That(File.Exists(pipeline.ConfigPath)).IsFalse();
+    }
+
+    [Test]
+    public async Task A_project_key_run_would_refuse_stops_discover()
+    {
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.BoardProjectKeys.Add("fake-low");
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira lists a project of board 400001 whose key this tool cannot use: 'fake-low' is not a Jira project key "
+            + "(an upper-case letter followed by upper-case letters, digits or underscores). Nothing was written.\n");
+        await Assert.That(File.Exists(pipeline.ConfigPath)).IsFalse();
+    }
+
+    [Test]
+    [Arguments("/rest/api/3/field", """{ "fields": [] }""", "field list", "InvalidOperationException")]
+    [Arguments("/rest/api/3/field", """[ { "id": "customfield_10020", "schema": { "custom": "com.pyxis.greenhopper.jira:gh-sprint" } } ]""", "field list", "KeyNotFoundException")]
+    [Arguments("/rest/api/3/resolution/search", """[ { "id": "300001", "name": "Fake Done" } ]""", "resolution list", "InvalidOperationException")]
+    [Arguments("/rest/api/3/resolution/search", """{ "isLast": true, "values": [ { "id": "300001", "name": null } ] }""", "resolution list", "FormatException")]
+    [Arguments("/rest/agile/1.0/board/400001/project", """{ "isLast": true, "values": [ { "id": "100001" } ] }""", "list of the board's projects", "KeyNotFoundException")]
+    [Arguments("/rest/api/3/status", """[ { "id": "600001", "name": "Fake New" } ]""", "status list", "KeyNotFoundException")]
+    public async Task An_answer_in_an_unknown_shape_stops_discover_plainly_and_writes_nothing(string path, string answer, string what, string kind)
+    {
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.Handler.Override(HttpMethod.Get, path, _ => true, StubHttpHandler.Json(answer));
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"Jira's {what} answered in a shape this tool does not understand ({kind}). Nothing was written.\n");
+        await Assert.That(File.Exists(pipeline.ConfigPath)).IsFalse();
+    }
+
+    [Test]
+    [Arguments(SecretName.JiraEmail, "'Jira email'")]
+    [Arguments(SecretName.JiraApiToken, "'Jira API token'")]
+    public async Task A_missing_jira_secret_stops_discover_before_any_call_and_is_named(SecretName missing, string expectedName)
+    {
+        await using var pipeline = new PipelineHarness();
+        pipeline.Secrets.Remove(missing);
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo($"The secret {expectedName} is not set in the secret store.\n");
+        await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
+    }
+
+    [Test]
+    public async Task Discover_does_not_need_the_hashing_salt()
+    {
+        // It stores nothing about people, and the salt may not exist yet on the first day.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Secrets.Remove(SecretName.HashingSalt);
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task A_rerun_that_finds_nothing_new_leaves_the_file_and_any_backup_alone()
+    {
+        await using var pipeline = new PipelineHarness();
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        var written = await File.ReadAllTextAsync(pipeline.ConfigPath);
+        pipeline.Out.GetStringBuilder().Clear();
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover");
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(written);
+        await Assert.That(File.Exists(pipeline.ConfigPath + ".bak")).IsFalse();
+        await Assert.That(Output(pipeline)).Contains($"{pipeline.ConfigPath} already says all of this; it was not rewritten.\n");
+    }
+
+    [Test]
+    public async Task Discover_creates_the_directory_of_the_configuration_file()
+    {
+        // The production path is config/telltale.json, and on the first day there is no config directory.
+        await using var pipeline = new PipelineHarness();
+        var path = Path.Combine(pipeline.Directory, "config", "telltale.json");
+        var services = new AppServices(pipeline.Jira.Handler, pipeline.Clock, new InMemorySecretStore(pipeline.Secrets), pipeline.Out, pipeline.Error,
+            path, pipeline.DatabasePath, pipeline.ReportDirectory);
+
+        var exit = await CliApp.RunAsync(FirstDiscover, services);
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(File.Exists(path)).IsTrue();
+    }
+
+    [Test]
+    public async Task A_site_url_with_a_path_and_no_trailing_slash_keeps_its_path()
+    {
+        // Without the slash, https://host/tenant + rest/api would become https://host/rest/api.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.Handler.On(HttpMethod.Get, "/tenant/rest/api/3/status",
+            _ => throw new HttpRequestException(HttpRequestError.ConnectionError, "synthetic: the tenant path is not served"));
+        string[] args = [.. FirstDiscover];
+        args[Array.IndexOf(args, "--site-url") + 1] = "https://example.invalid/tenant";
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(args);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Jira.Handler.Requests.Select(request => request.Path)).IsEquivalentTo(["/tenant/rest/api/3/status"]);
     }
 
     private static string Output(PipelineHarness pipeline) => pipeline.Out.ToString().ReplaceLineEndings("\n");
