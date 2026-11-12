@@ -110,6 +110,18 @@ public class DeliveryTests
     }
 
     [Test]
+    public async Task An_earlier_move_into_done_does_not_date_an_issue_whose_history_ends_elsewhere()
+    {
+        // Decision D8: the history says the issue left Done; only its current status says it is back.
+        var outcome = Outcome(Done,
+            new StatusChange("1", Local(2026, 11, 3, 9), New, Development),
+            new StatusChange("2", Local(2026, 11, 5, 9), Development, Done),
+            new StatusChange("3", Local(2026, 11, 6, 9), Done, Development));
+
+        await Assert.That(outcome.Value).IsEqualTo(new NotDelivered());
+    }
+
+    [Test]
     public async Task An_issue_that_has_only_ever_been_in_done_statuses_has_no_delivery_moment()
     {
         var outcome = Outcome(Shipped,

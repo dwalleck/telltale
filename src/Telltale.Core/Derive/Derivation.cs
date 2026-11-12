@@ -8,7 +8,10 @@ namespace Telltale.Core.Derive;
 /// Rebuilds all derived data from the raw rows. It is a pure function of the raw data, the
 /// configured board and status roles, and the as-of time, so changing a definition means rerunning it (ADR-0002).
 /// </summary>
-/// <remarks>Throws <see cref="UserFacingException"/> when an issue has been in a status that has no configured role.</remarks>
+/// <remarks>
+/// Throws <see cref="UserFacingException"/> when an issue has been in a status that has no configured role, or when
+/// a closed sprint of the board has neither a completion time nor a planned end.
+/// </remarks>
 public static class Derivation
 {
     public static DerivedData Derive(RawData raw, long boardId, StatusRoles roles, DateTimeOffset asOf)
@@ -22,7 +25,7 @@ public static class Derivation
         // a future sprint has no window yet, even when it carries planned dates.
         var windows = raw.Sprints
             .Where(sprint => sprint.BoardId == boardId && sprint.State != SprintStates.Future && sprint.Start is not null)
-            .Select(sprint => new SprintWindow(sprint.SprintId, sprint.Start!.Value, sprint.PlannedEnd, sprint.Completed))
+            .Select(sprint => new SprintWindow(sprint.SprintId, sprint.Start!.Value, sprint.PlannedEnd, WindowEnd(sprint)))
             .ToList();
 
         var deliverySprints = new DeliverySprints(windows, asOf);
@@ -55,5 +58,23 @@ public static class Derivation
             [.. windows.Select(window => new DerivedSprintWindow(window.SprintId, window.Start, window.Completed))],
             intervals,
             cycles);
+    }
+
+    /// <summary>
+    /// When a sprint's window ends: at its completion; for a closed sprint Jira gives no completion time,
+    /// at its planned end (owner decision D7); null while the sprint is still running, so its window runs
+    /// to the as-of time. A closed sprint with neither time stops the run: nothing says when it ended.
+    /// </summary>
+    private static DateTimeOffset? WindowEnd(RawSprint sprint)
+    {
+        if (sprint.State != SprintStates.Closed)
+        {
+            return sprint.Completed;
+        }
+
+        return sprint.Completed
+            ?? sprint.PlannedEnd
+            ?? throw new UserFacingException(
+                $"Sprint {sprint.SprintId} is closed, but Jira gives it neither a completion time nor a planned end, so when it ended is unknown. No figures were derived.");
     }
 }

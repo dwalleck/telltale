@@ -139,14 +139,34 @@ public class DeliveredCountTests
     }
 
     [Test]
-    public async Task An_issue_in_a_done_status_with_no_move_into_done_in_its_history_is_not_delivered()
+    public async Task An_issue_created_in_a_done_status_and_never_moved_into_done_is_not_delivered()
     {
-        // Without a transition into done there is no delivery moment, so no sprint to count it in.
+        // Owner decision D9. Without a transition into done there is no delivery moment, so no sprint to count it in.
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 8, 9), createdIn: Workflow.Done);
-        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 6, 9))
+        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 8, 9), createdIn: Workflow.Done)
+            .Moved(Local(2026, 1, 22, 9), Workflow.Shipped);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(0);
+        var rows = await pipeline.QueryAsync<(string SprintId, long DeliveredCount)>(
+            "SELECT sprint_id, delivered_count FROM delivered_per_sprint ORDER BY sprint_id;");
+        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 0L), ("42", 0L) }, CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task An_issue_in_a_done_status_whose_history_ends_outside_done_is_not_delivered_even_with_an_earlier_move_into_done()
+    {
+        // Owner decision D8. The changelog says the issue left Done on the 12th; Jira says it is in Done now.
+        // The earlier move into Done (in sprint 41) was undone, and nothing dates the present one.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done)
+            .Moved(Local(2026, 1, 12, 9), Workflow.Development)
             .NowIn(Workflow.Done);
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");

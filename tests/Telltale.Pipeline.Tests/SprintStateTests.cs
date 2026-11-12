@@ -61,6 +61,54 @@ public class SprintStateTests
     }
 
     [Test]
+    public async Task A_closed_sprint_with_no_completion_time_ends_at_its_planned_end()
+    {
+        // Owner decision D7. Without it the sprint's window would run to now and take every later delivery.
+        await using var pipeline = new PipelineHarness(Now);
+        pipeline.Jira.AddClosedSprintWithoutCompletion(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9));
+        pipeline.Jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9));
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 14, 9), Workflow.Done);
+        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 6, 9))
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 19, 9, 30), Workflow.Done);
+        pipeline.Jira.AddIssue("FAKE-3", Local(2026, 1, 6, 9))
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 21, 9), Workflow.Done);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+
+        // FAKE-1 is inside sprint 41; FAKE-2 falls between its planned end and sprint 42's start; FAKE-3 is in sprint 42.
+        var rows = await pipeline.QueryAsync<(string SprintId, long DeliveredCount)>(
+            "SELECT sprint_id, delivered_count FROM delivered_per_sprint ORDER BY sprint_id;");
+        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 1L), ("42", 1L) }, CollectionOrdering.Matching);
+        await Assert.That(await pipeline.ReadReportAsync(41)).StartsWith("# Fake Sprint 41 (2026-01-05 to 2026-01-19)\n");
+    }
+
+    [Test]
+    public async Task A_closed_sprint_with_neither_a_completion_time_nor_a_planned_end_stops_the_run_and_is_named()
+    {
+        // Nothing says when this sprint ended, and guessing would move deliveries between sprints.
+        await using var pipeline = new PipelineHarness(Now);
+        pipeline.Jira.AddClosedSprintWithoutCompletion(41, "Fake Sprint 41", Local(2026, 1, 5, 9));
+        pipeline.Jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9));
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 21, 9), Workflow.Done);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "42");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Sprint 41 is closed, but Jira gives it neither a completion time nor a planned end, so when it ended is unknown. No figures were derived.\n");
+        await Assert.That(File.Exists(Path.Combine(pipeline.ReportDirectory, "sprint-42.md"))).IsFalse();
+    }
+
+    [Test]
     public async Task A_future_sprint_with_planned_dates_is_refused_as_not_started()
     {
         await using var pipeline = new PipelineHarness(Now);
