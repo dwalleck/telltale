@@ -24,7 +24,7 @@ public enum CollectionMode
 
 /// <summary>
 /// Brings the store up to date with the configured Jira board: its sprints and statuses, the issues
-/// of the configured projects, and each issue's status and Sprint field history from the bulk changelog endpoint
+/// of the configured projects, and each issue's status, Sprint field and story point history from the bulk changelog endpoint
 /// (ADR-0004). Only selected fields are kept (ADR-0002), and the assignee's account ID is hashed
 /// before anything leaves this class (ADR-0003).
 /// </summary>
@@ -62,11 +62,17 @@ public sealed class JiraCollector
         // What the watermark stands for is checked before anything is asked of Jira. It is only true for the
         // board, projects and start date it was fetched under; continuing from it under other settings would
         // pass over every older issue the new settings bring in, without a sign.
-        var covers = Covers();
+        var covers = $"{IssueScope()}{HistoryMarker}{HistoryFields()}";
         var watermark = await store.ReadWatermarkAsync(WatermarkName, cancellationToken);
         if (mode == CollectionMode.Incremental && watermark is not null && watermark.Covers != covers)
         {
-            throw new UserFacingException("boardId, projectKeys or backfillStart in the configuration file changed since the store was last filled, so a sync could miss issues. Run backfill.");
+            // The same holds for the fields whose history is fetched. An issue already stored comes back only
+            // when it changes in Jira, so every other issue would lack the history of a newly named field, and
+            // an issue without history reads as one whose sprints or estimate never changed. A store filled
+            // before the watermark named these fields is in the same position.
+            throw new UserFacingException(watermark.Covers.Split(HistoryMarker)[0] != IssueScope()
+                ? "boardId, projectKeys or backfillStart in the configuration file changed since the store was last filled, so a sync could miss issues. Run backfill."
+                : "The store was last filled without the history of the fields that jira.sprintFieldId and jira.storyPointFieldId name now, so sprint membership and point buckets could be wrong. Run backfill.");
         }
 
         // All three secrets are checked before the first call, so a missing salt cannot surface after a long fetch.
@@ -87,8 +93,14 @@ public sealed class JiraCollector
         await store.WriteRawAsync(new RawData(issues, changes, sprints, statuses) { OutOfScopeIssueIds = outOfScopeIssueIds }, reached, cancellationToken);
     }
 
-    /// <summary>What a fetch under the current configuration covers: the settings that decide which issues and sprints are asked for.</summary>
-    private string Covers() =>
+    // Separates the two parts of what a watermark covers. A project key cannot hold it.
+    private const string HistoryMarker = "; history ";
+
+    /// <summary>The fields whose history a fetch under the current configuration asks for.</summary>
+    private string HistoryFields() => $"status,{_config.SprintFieldId},{_config.StoryPointFieldId}";
+
+    /// <summary>The settings that decide which issues and sprints a fetch under the current configuration asks for.</summary>
+    private string IssueScope() =>
         $"board {_config.BoardId.ToString(CultureInfo.InvariantCulture)}; projects {string.Join(",", _config.ProjectKeys.Order(StringComparer.Ordinal))}; from {_config.BackfillStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}";
 
     /// <summary>
@@ -227,6 +239,55 @@ public sealed class JiraCollector
     private static bool IsSprintIdList(string? value) =>
         value is null || value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).All(id => id.All(char.IsAsciiDigit));
 
+    /// <summary>
+    /// One side of a story point change as the store keeps it: the number in round-trip form, or null for no
+    /// estimate. <paramref name="id"/> is the item's <c>from</c> or <c>to</c> and <paramref name="text"/> its
+    /// <c>fromString</c> or <c>toString</c>. The estimate may be in either or in both; in both, they must be
+    /// the same number, because a select list also has a number (its option ID) beside a name. Anything that is
+    /// not an estimate stops the run before anything is kept, and the message quotes no value.
+    /// </summary>
+    private static string? PointValue(string? id, string? text)
+    {
+        var fromId = Estimate(id);
+        var fromText = Estimate(text);
+        if (fromId is not null && fromText is not null && fromId != fromText)
+        {
+            throw NotAnEstimate();
+        }
+
+        return (fromId ?? fromText)?.ToString("R", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>The estimate a text holds: null for an empty one, a number that is finite and not negative otherwise.</summary>
+    private static double? Estimate(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var points) || !double.IsFinite(points) || points < 0)
+        {
+            throw NotAnEstimate();
+        }
+
+        return points;
+    }
+
+    // Two causes look the same from here: the setting names a field that is not the story point field (its
+    // history may hold names or free text), or Jira writes the number in a form not read here, such as a
+    // decimal comma. The real form is confirmed on the work laptop (ticket 13).
+    private static UserFacingException NotAnEstimate() => new(
+        "The history of the field named by jira.storyPointFieldId in the configuration file holds a value that is not a story point number this tool reads. "
+        + "Either the setting names another field, or Jira writes the number in another form. Nothing was stored.");
+
+    /// <summary>One of the four values of a story point changelog item: text, as the schema says, or a JSON number.</summary>
+    private static string? PointText(JsonElement item, string name) => Optional(item, name) switch
+    {
+        { ValueKind: JsonValueKind.Number } number => number.GetRawText(),
+        var value => value?.GetString(),
+    };
+
     private async Task<List<RawChange>> FetchChangesAsync(JiraClient jira, List<RawIssue> issues, CancellationToken cancellationToken)
     {
         var changes = new List<RawChange>();
@@ -236,7 +297,7 @@ public sealed class JiraCollector
             var body = new JsonObject
             {
                 ["issueIdsOrKeys"] = new JsonArray([.. chunk.Select(issue => (JsonNode)issue.IssueId)]),
-                ["fieldIds"] = new JsonArray("status", _config.SprintFieldId),
+                ["fieldIds"] = new JsonArray("status", _config.SprintFieldId, _config.StoryPointFieldId),
                 ["maxResults"] = ChangelogPageSize,
             };
 
@@ -268,11 +329,27 @@ public sealed class JiraCollector
                     {
                         "status" => ChangeFields.Status,
                         { } fieldId when fieldId == _config.SprintFieldId => ChangeFields.Sprint,
+                        { } fieldId when fieldId == _config.StoryPointFieldId => ChangeFields.Points,
                         _ => null,
                     };
 
                     if (field is null)
                     {
+                        continue;
+                    }
+
+                    if (field == ChangeFields.Points)
+                    {
+                        // A number field's history is expected to carry its numbers in fromString and toString and
+                        // leave from and to empty; the documentation does not settle it, so both places are read.
+                        // Only a number is ever kept from them.
+                        changes.Add(new RawChange(
+                            historyId,
+                            issueId,
+                            at,
+                            field,
+                            PointValue(PointText(item, "from"), PointText(item, "fromString")),
+                            PointValue(PointText(item, "to"), PointText(item, "toString"))));
                         continue;
                     }
 

@@ -110,6 +110,20 @@ public sealed class FakeIssue
         return this;
     }
 
+    /// <summary>
+    /// Changes the estimate from what it is now to <paramref name="points"/> (null clears it) and records the
+    /// change the way a number field's history is expected to look: <c>from</c> and <c>to</c> are null and the
+    /// numbers are in <c>fromString</c> and <c>toString</c>. For the other shape, use <see cref="AddHistory"/>.
+    /// </summary>
+    public FakeIssue Reestimated(DateTimeOffset at, double? points)
+    {
+        AddHistory(at, FakeJira.StoryPointFieldId, "Fake Story Points", null, PointText(StoryPoints), null, PointText(points));
+        StoryPoints = points;
+        return this;
+    }
+
+    private static string? PointText(double? points) => points?.ToString("R", CultureInfo.InvariantCulture);
+
     /// <summary>Sets the current resolution, as Jira does when an issue is closed.</summary>
     public FakeIssue Resolved(string resolutionId)
     {
@@ -217,6 +231,12 @@ public sealed partial class FakeJira
     /// note 05). The team's zone by default; the tool does not know it.
     /// </summary>
     public TimeZoneInfo AccountTimeZone { get; set; } = TimeZoneInfo.FindSystemTimeZoneById(TeamTime.ZoneId);
+
+    /// <summary>
+    /// Serves the values of story point history as JSON numbers instead of text. The schema says text; a number
+    /// field's values being numbers is the other thing a real site could do.
+    /// </summary>
+    public bool PointHistoryAsNumbers { get; set; }
 
     /// <summary>Which of the two documented response shapes to serve.</summary>
     public JiraShapes Shapes { get; set; } = JiraShapes.AsSchemas;
@@ -498,10 +518,10 @@ public sealed partial class FakeJira
                         ["field"] = history.FieldName,
                         ["fieldtype"] = history.FieldId.StartsWith("customfield_", StringComparison.Ordinal) ? "custom" : "jira",
                         ["fieldId"] = history.FieldId,
-                        ["from"] = history.From,
-                        ["fromString"] = history.FromText,
-                        ["to"] = history.To,
-                        ["toString"] = history.ToText,
+                        ["from"] = HistoryValue(history, history.From),
+                        ["fromString"] = HistoryValue(history, history.FromText),
+                        ["to"] = HistoryValue(history, history.To),
+                        ["toString"] = HistoryValue(history, history.ToText),
                     }),
                 });
             }
@@ -516,6 +536,11 @@ public sealed partial class FakeJira
         AddLastPageToken(page);
         return page;
     }
+
+    private JsonNode? HistoryValue(FakeHistory history, string? value) =>
+        value is not null && PointHistoryAsNumbers && history.FieldId == StoryPointFieldId
+            ? JsonValue.Create(double.Parse(value, CultureInfo.InvariantCulture))
+            : value;
 
     private void AddLastPageToken(JsonObject page)
     {
