@@ -92,8 +92,10 @@ public static class Derivation
             var membership = SprintMembership.Build(issue.Created, SprintMembership.ParseSprintIds(issue.SprintIds), sprintChanges[issue.IssueId]);
             memberships.AddRange(membership.Intervals.Select(interval => new IssueMembershipInterval(issue.IssueId, interval.SprintId, interval.Start, interval.End)));
 
-            // Only sprints that count (the windows above) have time in status. A sprint the issue was never in gives nothing.
-            foreach (var window in windows)
+            // Only sprints that count (the windows above) have time in status. A sprint the issue was never in
+            // gives nothing, so it is not measured at all: most issues were in one or two of the board's sprints.
+            var memberOf = membership.Intervals.Select(interval => interval.SprintId).ToHashSet(StringComparer.Ordinal);
+            foreach (var window in windows.Where(counted => memberOf.Contains(counted.SprintId)))
             {
                 sprintStatusTimes.AddRange(TimeInStatus.ForSprint(window, timeline.Intervals, membership.Intervals, calendar, asOf)
                     .OrderBy(pair => pair.Key, StringComparer.Ordinal)
