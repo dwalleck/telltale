@@ -56,7 +56,8 @@ public sealed class SqliteStore : ITelltaleStore
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
-        await connection.ExecuteAsync(Command(cancellationToken, 
+        await connection.ExecuteAsync(Command(
+            cancellationToken,
             """
             CREATE TABLE IF NOT EXISTS schema_migration (name TEXT PRIMARY KEY) STRICT;
             CREATE TABLE IF NOT EXISTS derived_object (name TEXT PRIMARY KEY, kind TEXT NOT NULL) STRICT;
@@ -77,7 +78,8 @@ public sealed class SqliteStore : ITelltaleStore
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
-        await connection.ExecuteAsync(Command(cancellationToken, 
+        await connection.ExecuteAsync(Command(
+            cancellationToken,
             """
             INSERT INTO issue (issue_id, issue_key, issue_type_id, created, status_id, resolution_id, story_points, assignee_hash, updated)
             VALUES (@IssueId, @Key, @IssueTypeId, @Created, @StatusId, @ResolutionId, @StoryPoints, @AssigneeHash, @Updated)
@@ -106,7 +108,8 @@ public sealed class SqliteStore : ITelltaleStore
             transaction));
 
         // A changelog entry never changes once written, so a repeat is ignored.
-        await connection.ExecuteAsync(Command(cancellationToken, 
+        await connection.ExecuteAsync(Command(
+            cancellationToken,
             """
             INSERT INTO change (history_id, field, issue_id, at, from_value, to_value)
             VALUES (@HistoryId, @Field, @IssueId, @At, @From, @To)
@@ -123,7 +126,8 @@ public sealed class SqliteStore : ITelltaleStore
             }),
             transaction));
 
-        await connection.ExecuteAsync(Command(cancellationToken, 
+        await connection.ExecuteAsync(Command(
+            cancellationToken,
             """
             INSERT INTO sprint (sprint_id, board_id, name, state, started, planned_end, completed)
             VALUES (@SprintId, @BoardId, @Name, @State, @Started, @PlannedEnd, @Completed)
@@ -147,7 +151,8 @@ public sealed class SqliteStore : ITelltaleStore
             }),
             transaction));
 
-        await connection.ExecuteAsync(Command(cancellationToken, 
+        await connection.ExecuteAsync(Command(
+            cancellationToken,
             """
             INSERT INTO status (status_id, name, category)
             VALUES (@StatusId, @Name, @Category)
@@ -197,7 +202,8 @@ public sealed class SqliteStore : ITelltaleStore
             await connection.ExecuteAsync(Command(cancellationToken, sql, transaction: transaction));
         }
 
-        await connection.ExecuteAsync(Command(cancellationToken, 
+        await connection.ExecuteAsync(Command(
+            cancellationToken,
             "INSERT INTO status_interval (issue_id, status_id, started, ended) VALUES (@IssueId, @StatusId, @Started, @Ended);",
             derived.StatusIntervals.Select(interval => new
             {
@@ -208,7 +214,8 @@ public sealed class SqliteStore : ITelltaleStore
             }),
             transaction));
 
-        await connection.ExecuteAsync(Command(cancellationToken, 
+        await connection.ExecuteAsync(Command(
+            cancellationToken,
             "INSERT INTO issue_cycle (issue_id, cycle_end, delivered, delivery_sprint_id) VALUES (@IssueId, @CycleEnd, @Delivered, @DeliverySprintId);",
             derived.IssueCycles.Select(cycle => new
             {
@@ -225,7 +232,8 @@ public sealed class SqliteStore : ITelltaleStore
         }
 
         // Whatever the scripts created is the tool's, and is what the next rebuild drops.
-        await connection.ExecuteAsync(Command(cancellationToken, 
+        await connection.ExecuteAsync(Command(
+            cancellationToken,
             "INSERT INTO derived_object (name, kind) SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT IN @before;",
             new { before },
             transaction));
