@@ -51,6 +51,15 @@ public sealed record TelltaleSettings
     /// </summary>
     public static TelltaleSettings From(TelltaleConfig config, bool requireDone = true)
     {
+        // The file's reader refuses a null before this runs; a host that builds the configuration in code has
+        // no reader, and "every value here passed its rule" must hold for it too.
+        RequireNotNull(config.Jira, "jira");
+        RequireNotNull(config.StatusRoles, "statusRoles");
+        RequireNotNull(config.AbandonedResolutionIds, "abandonedResolutionIds");
+        RequireNotNull(config.BaselineSprintIds, "baselineSprintIds");
+        RequireNotNull(config.Holidays, "holidays");
+        RequireNotNull(config.TimeZone, "timeZone");
+
         var jira = CheckedJira(config.Jira);
         var roles = CheckedStatusRoles(config.StatusRoles, requireDone);
         var abandonedResolutionIds = CheckedIds(config.AbandonedResolutionIds, "abandonedResolutionIds", "resolution");
@@ -74,6 +83,14 @@ public sealed record TelltaleSettings
                 string.Join(",", config.StatusRoles.Select(status => $"{status.Key}={status.Value}")),
                 string.Join(",", abandonedResolutionIds.Order(StringComparer.Ordinal))),
         };
+    }
+
+    private static void RequireNotNull(object? value, string setting)
+    {
+        if (value is null)
+        {
+            throw new SettingRefusedException($"{setting} must not be null.");
+        }
     }
 
     private static JiraConfig CheckedJira(JiraConfig jira)
