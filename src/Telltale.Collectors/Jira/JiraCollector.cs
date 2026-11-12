@@ -192,10 +192,7 @@ public sealed class JiraCollector
     private static async Task<List<RawStatus>> FetchStatusesAsync(JiraClient jira, CancellationToken cancellationToken)
     {
         using var document = await jira.GetAsync("rest/api/3/status", cancellationToken);
-        return Read<List<RawStatus>>("status list", () => [.. document.RootElement.EnumerateArray().Select(status => new RawStatus(
-            Text(status, "id"),
-            Text(status, "name"),
-            Text(status.GetProperty("statusCategory"), "key")))]);
+        return Read<List<RawStatus>>("status list", () => [.. Statuses(document.RootElement).Select(status => new RawStatus(status.Id, status.Name, status.CategoryKey))]);
     }
 
     /// <summary>
@@ -503,22 +500,8 @@ public sealed class JiraCollector
         };
     }
 
-    /// <summary>
-    /// Reads Jira's answer. An answer in a shape the tool does not know (a missing field, a value of
-    /// another type, a timestamp in an unknown form) stops the run with a plain message. The message
-    /// names only the kind of failure, never a value from the answer.
-    /// </summary>
-    private static T Read<T>(string what, Func<T> parse)
-    {
-        try
-        {
-            return parse();
-        }
-        catch (Exception exception) when (exception is KeyNotFoundException or InvalidOperationException or FormatException)
-        {
-            throw new UserFacingException($"Jira's {what} answered in a shape this tool does not understand ({exception.GetType().Name}). Nothing was stored.", exception);
-        }
-    }
+    /// <summary>Reads Jira's answer (<see cref="JiraJson.Read"/>); when its shape is not known, nothing was stored.</summary>
+    private static T Read<T>(string what, Func<T> parse) => JiraJson.Read(what, "Nothing was stored.", parse);
 
     /// <summary>
     /// An issue's ID. Jira's issue IDs are digits; anything else is an answer in an unknown shape. The ID is
