@@ -2,7 +2,7 @@
 
 **What to build:** `discover` reads a Jira site and writes the configuration file so the owner does not look up IDs by hand. It first makes one call to check proxy and certificate trust and, on a TLS or proxy failure, says plainly that this is the likely cause. It then lists the board's statuses with their Jira category and a proposed role (not started, work, blocked, done), lists resolutions so the owner can mark the abandoned ones, finds the Sprint and story point field IDs, finds the keys of the board's projects, and writes these with the site URL and board ID to the configuration file. The collector reads the project keys from the configuration (owner decision, 2026-11-12) and does not ask Jira for them on each sync. Proposed roles and abandoned resolutions are meant to be reviewed and edited.
 
-Owner decisions (2026-11-12): `discover` writes only the board's statuses, read from the board's configuration in column order, and never re-adds a status the owner removed (D29). A status whose name contains "block" is proposed as blocked (D30). The first `discover` needs the time zone and the backfill start; later runs take them from the file (D31).
+Owner decisions (2026-11-12): `discover` writes only the board's statuses, read from the board's configuration in column order, and never re-adds a status the owner removed (D29). A status whose name contains "block" is proposed as blocked (D30). The first `discover` needs the time zone and the backfill start; later runs take them from the file (D31). On a board with no status in Jira's done category, `discover` still writes the file and says plainly that no status has the done role yet; `run` refuses the file until the owner sets one (D40, applied in the cross-ticket fix pass).
 
 **Blocked by:** 01
 

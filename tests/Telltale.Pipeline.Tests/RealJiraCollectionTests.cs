@@ -399,8 +399,11 @@ public class RealJiraCollectionTests
     [Arguments("""{"field":"status","to":"700001"}""")]
     [Arguments("""{"field":"Sprint","to":"41"}""")]
     [Arguments("""{"field":"Sprint","fieldtype":"jira","to":"41"}""")]
+    [Arguments("""{"field":"Story Points","fieldtype":"custom","toString":"5"}""")]
+    [Arguments("""{"field":"Fake Story point estimate","fieldtype":"custom","toString":"not a number"}""")]
     public async Task An_old_item_that_does_not_say_it_is_the_system_status_field_or_a_custom_sprint_field_is_not_kept(string item)
     {
+        // That includes the story point field: sites name it differently, so no name says an old item is its history.
         await using var pipeline = new PipelineHarness();
         AddSprint41(pipeline.Jira);
         AddDeliveredIssues(pipeline.Jira, count: 1);
