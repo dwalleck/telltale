@@ -315,7 +315,8 @@ internal sealed class PipelineSteps : IDisposable
     /// <summary>
     /// Stops with a message naming the first secret that is not set and how to set it. A missing hashing salt
     /// is two different situations: on a database that holds nobody yet, any salt will do and one can be
-    /// generated; once people are stored under a salt, only that salt keeps each of them one person.
+    /// generated; once people are stored under a salt, only that salt keeps each of them one person, until a
+    /// backfill under a new one hashes them all again.
     /// </summary>
     private static async Task RequireSecretsAsync(AppServices services, CancellationToken cancellationToken)
     {
@@ -332,7 +333,8 @@ internal sealed class PipelineSteps : IDisposable
             {
                 throw new UserFacingException(
                     $"The secret {secret.Label} is not set in the secret store, and the database already holds people hashed with the salt that was there before. "
-                    + $"A new salt would give every person a second hash, so each would count as two. Restore the original salt. {howToSet}");
+                    + "Restore the original salt, or set a new one and run backfill, which hashes everyone again with it; "
+                    + $"until that backfill every other command stops, because a second salt would make each person count as two. {howToSet}");
             }
 
             // Only a store 'secrets set' can write to can be given a generated salt.

@@ -193,14 +193,15 @@ public class SecretsSetTests
 
     private const string LostSaltOnRun =
         "The secret 'hashing salt' is not set in the secret store, and the database already holds people hashed with the salt that was there before. "
-        + "A new salt would give every person a second hash, so each would count as two. Restore the original salt. Run 'telltale secrets set hashing-salt'.\n";
+        + "Restore the original salt, or set a new one and run backfill, which hashes everyone again with it; until that backfill every other command stops, because a second salt would make each person count as two. "
+        + "Run 'telltale secrets set hashing-salt'.\n";
 
     private const string LostSaltOnGenerate =
         "The database already holds people hashed with an earlier salt. A new salt would give every person a second hash, so each would count as two. "
         + "Restore the original salt by running 'telltale secrets set hashing-salt' without --generate, or add --replace to start again with a new salt.\n";
 
     [Test]
-    public async Task A_run_with_the_salt_gone_and_hashed_people_in_the_database_says_to_restore_the_original()
+    public async Task A_run_with_the_salt_gone_and_hashed_people_in_the_database_says_to_restore_the_original_or_backfill_under_a_new_one()
     {
         await using var pipeline = new PipelineHarness();
         await RunOnceWithAnAssigneeAsync(pipeline);
