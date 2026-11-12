@@ -192,7 +192,7 @@ public sealed class FakeIssue
 /// request misbehave, use <see cref="StubHttpHandler.Override"/> on <see cref="Handler"/>.
 /// Responses always carry names, emails and summaries, asked for or not, so the privacy scan means something.
 /// </remarks>
-public sealed class FakeJira
+public sealed partial class FakeJira
 {
     public const string SiteUrl = "https://example.invalid/";
     public const long BoardId = 400001;
@@ -218,6 +218,7 @@ public sealed class FakeJira
             .On(HttpMethod.Get, "/rest/api/3/status", _ => Respond(Statuses()))
             .On(HttpMethod.Post, "/rest/api/3/search/jql", request => Respond(Search(request)))
             .On(HttpMethod.Post, "/rest/api/3/changelog/bulkfetch", request => Respond(Changelogs(request)));
+        AddDiscoverRoutes();
     }
 
     public StubHttpHandler Handler { get; }
