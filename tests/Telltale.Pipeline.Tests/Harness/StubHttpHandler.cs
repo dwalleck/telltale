@@ -82,6 +82,14 @@ public sealed class StubHttpHandler : HttpMessageHandler
         return response;
     };
 
+    /// <summary>A rate-limited answer (429) whose <c>Retry-After</c> header is exactly <paramref name="retryAfter"/>, readable or not.</summary>
+    public static Func<StubRequest, HttpResponseMessage> RateLimitedWithHeader(string retryAfter) => _ =>
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+        response.Headers.TryAddWithoutValidation("Retry-After", retryAfter);
+        return response;
+    };
+
     /// <summary>A rate-limited answer (429) whose <c>Retry-After</c> header is in its other form, an HTTP date.</summary>
     public static Func<StubRequest, HttpResponseMessage> RateLimitedUntil(DateTimeOffset retryAfter) => _ =>
     {

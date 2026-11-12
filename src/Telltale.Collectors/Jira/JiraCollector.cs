@@ -6,6 +6,7 @@ using Telltale.Core.Configuration;
 using Telltale.Core.Identity;
 using Telltale.Core.Secrets;
 using Telltale.Core.Storage;
+using static Telltale.Collectors.Jira.JiraJson;
 
 namespace Telltale.Collectors.Jira;
 
@@ -57,11 +58,14 @@ public sealed class JiraCollector
     private readonly JiraConfig _config;
     private readonly ISecretStore _secrets;
     private readonly TimeProvider _clock;
+    private readonly TextWriter _notices;
 
     /// <param name="clock">Times the waits Jira asks for when it limits the rate of requests.</param>
-    public JiraCollector(HttpMessageHandler handler, JiraConfig config, ISecretStore secrets, TimeProvider clock)
+    /// <param name="notices">Where each such wait is announced: standard error.</param>
+    public JiraCollector(HttpMessageHandler handler, JiraConfig config, ISecretStore secrets, TimeProvider clock, TextWriter notices)
     {
         _clock = clock;
+        _notices = notices;
         _handler = handler;
         _config = config;
         _secrets = secrets;
@@ -81,7 +85,7 @@ public sealed class JiraCollector
 
         // All three secrets are checked before the first call, so a missing salt cannot surface after a long fetch.
         var salt = _secrets.Require(SecretName.HashingSalt);
-        using var jira = new JiraClient(_handler, _config.SiteUrl, _secrets.Require(SecretName.JiraEmail), _secrets.Require(SecretName.JiraApiToken), _clock);
+        using var jira = new JiraClient(_handler, _config.SiteUrl, _secrets.Require(SecretName.JiraEmail), _secrets.Require(SecretName.JiraApiToken), _clock, _notices);
 
         var statuses = await FetchStatusesAsync(jira, cancellationToken);
         var sprints = await FetchSprintsAsync(jira, cancellationToken);
@@ -121,81 +125,39 @@ public sealed class JiraCollector
     }
 
     /// <summary>
-    /// The board's sprints, from every page of the list (owner decision D11). The Agile API pages by offset:
-    /// each request names the position to start at, which is the number of sprints read so far.
+    /// The board's sprints, from every page of the list (owner decision D11). A list that cannot be followed
+    /// to its end for certain stops the run (<see cref="OffsetPaging.StopsWhenInDoubt"/>).
     /// </summary>
     private async Task<List<RawSprint>> FetchSprintsAsync(JiraClient jira, CancellationToken cancellationToken)
     {
-        var sprints = new List<RawSprint>();
-        var seen = new HashSet<long>();
-        long startAt = 0;
-        while (true)
-        {
-            using var document = await jira.GetAsync(
-                $"rest/agile/1.0/board/{_config.BoardId.ToString(CultureInfo.InvariantCulture)}/sprint?startAt={startAt.ToString(CultureInfo.InvariantCulture)}", cancellationToken);
-            var (read, isComplete) = Read("sprint list", () =>
-            {
-                var page = document.RootElement;
-                var count = page.GetProperty("values").GetArrayLength();
-                var complete = IsLastSprintPage(page, startAt, count);
+        var listed = await OffsetPages.ReadAllAsync(
+            jira,
+            $"rest/agile/1.0/board/{_config.BoardId.ToString(CultureInfo.InvariantCulture)}/sprint",
+            pageSize: null,
+            OffsetPaging.StopsWhenInDoubt,
+            "sprint list",
+            "Nothing was stored.",
+            page => Read("sprint list", page),
+            ParseSprint,
+            sprint => sprint.SprintId,
+            cancellationToken);
 
-                // A site that answers every position with the same page would otherwise be asked forever.
-                if (count > 0 && page.GetProperty("values").EnumerateArray().Count(sprint => seen.Add(sprint.GetProperty("id").GetInt64())) == 0)
-                {
-                    throw new UserFacingException("Jira's sprint list gave a page holding only sprints it had already given, so its pages would never end. Nothing was stored.");
-                }
-
-                ParseSprints(page, sprints);
-                return (count, complete);
-            });
-
-            if (isComplete)
-            {
-                return sprints;
-            }
-
-            startAt += read;
-        }
-    }
-
-    /// <summary>
-    /// Whether a page of the sprint list is the last one. Jira says so with <c>isLast</c>; when it leaves that
-    /// out, with <c>total</c>, which it may leave out too; and with neither, the list ends at the first empty
-    /// page. A page that says more follow and holds nothing, or that starts somewhere other than where it was
-    /// asked to, cannot be followed: the run stops instead of dropping sprints or asking forever.
-    /// </summary>
-    private static bool IsLastSprintPage(JsonElement page, long startAt, int count)
-    {
-        if (Optional(page, "startAt") is { } startsAt && startsAt.GetInt64() != startAt)
-        {
-            throw new UserFacingException("Jira's sprint list gave a page that does not start where it was asked to, so sprints could be missing. Nothing was stored.");
-        }
-
-        var isLast = Optional(page, "isLast")?.GetBoolean();
-        var total = Optional(page, "total")?.GetInt64();
-        var complete = isLast ?? (total is { } all ? startAt + count >= all : count == 0);
-        if (!complete && count == 0)
-        {
-            throw new UserFacingException("Jira's sprint list gave an empty page and says more sprints follow, so sprints could be missing. Nothing was stored.");
-        }
-
-        return complete;
-    }
-
-    private void ParseSprints(JsonElement page, List<RawSprint> sprints)
-    {
         // The board also lists sprints created on other boards when one of their issues matches its filter.
         // Those are another team's sprints; counting deliveries in them would take them from this team's.
-        sprints.AddRange(page.GetProperty("values").EnumerateArray()
-            .Where(sprint => Optional(sprint, "originBoardId") is not { } origin || origin.GetInt64() == _config.BoardId)
-            .Select(sprint => new RawSprint(
-            sprint.GetProperty("id").GetInt64().ToString(CultureInfo.InvariantCulture),
+        return [.. listed.Where(sprint => sprint.OriginBoardId is not { } origin || origin == _config.BoardId).Select(sprint => sprint.Sprint)];
+    }
+
+    private (string SprintId, long? OriginBoardId, RawSprint Sprint) ParseSprint(JsonElement sprint)
+    {
+        var sprintId = sprint.GetProperty("id").GetInt64().ToString(CultureInfo.InvariantCulture);
+        return (sprintId, Optional(sprint, "originBoardId")?.GetInt64(), new RawSprint(
+            sprintId,
             _config.BoardId,
             Text(sprint, "name"),
             Text(sprint, "state"),
             OptionalTime(sprint, "startDate"),
             OptionalTime(sprint, "endDate"),
-            OptionalTime(sprint, "completeDate"))));
+            OptionalTime(sprint, "completeDate")));
     }
 
     private async Task<(List<RawIssue> InScope, List<string> OutOfScopeIssueIds)> FetchIssuesAsync(JiraClient jira, string salt, string updatedSince, CancellationToken cancellationToken)
@@ -206,7 +168,7 @@ public sealed class JiraCollector
         var projects = string.Join(", ", _config.ProjectKeys.Select(key => $"\"{key}\""));
         var body = new JsonObject
         {
-            ["jql"] = $"project in ({projects}) AND updated >= {updatedSince} ORDER BY updated ASC",
+            ["jql"] = $"project in ({projects}) AND updated >= {updatedSince} ORDER BY updated ASC, id ASC",
 
             // A request, not a promise: Jira may return fewer than asked for, and the rest comes on further pages.
             ["maxResults"] = SearchPageSize,
@@ -216,8 +178,9 @@ public sealed class JiraCollector
         };
 
         // By issue ID, the issue as it was last seen, or null when it was out of scope then. The search is
-        // ordered by update time, so an issue updated while the pages are read is met again on a later page;
-        // the later sighting is the newer one.
+        // ordered by update time and then by ID, so issues updated in the same instant keep their places
+        // between pages. An issue updated while the pages are read moves to the end and is met again on a
+        // later page; the later sighting is the newer one.
         var seen = new Dictionary<string, RawIssue?>(StringComparer.Ordinal);
         await ForEachPageAsync(jira, "rest/api/3/search/jql", body, "issue search", page => ParseIssues(page, salt, seen), cancellationToken);
         return ([.. seen.Values.OfType<RawIssue>()], [.. seen.Where(issue => issue.Value is null).Select(issue => issue.Key)]);
@@ -229,9 +192,10 @@ public sealed class JiraCollector
     /// appear in no figure, and a field of theirs in an unknown shape cannot stop the run. Only their ID is
     /// read, so the store can delete an issue it holds from the time before it was converted (owner decision D13).
     /// </summary>
-    private void ParseIssues(JsonElement page, string salt, Dictionary<string, RawIssue?> seen)
+    private int ParseIssues(JsonElement page, string salt, Dictionary<string, RawIssue?> seen)
     {
-        foreach (var issue in page.GetProperty("issues").EnumerateArray())
+        var issues = page.GetProperty("issues");
+        foreach (var issue in issues.EnumerateArray())
         {
             var fields = issue.GetProperty("fields");
             var issueType = fields.GetProperty("issuetype");
@@ -254,6 +218,8 @@ public sealed class JiraCollector
                 JiraTime.Parse(fields.GetProperty("updated")),
                 Optional(fields, _config.SprintFieldId) is { } sprints ? SprintIds(sprints) : "");
         }
+
+        return issues.GetArrayLength();
     }
 
     /// <summary>
@@ -283,6 +249,9 @@ public sealed class JiraCollector
     private static bool IsSprintIdList(string? value) =>
         value is null || value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).All(id => id.All(char.IsAsciiDigit));
 
+    /// <summary>True when a status change's value is what the status field's history holds: nothing, or a status ID (digits).</summary>
+    private static bool IsStatusId(string? value) => string.IsNullOrEmpty(value) || value.All(char.IsAsciiDigit);
+
     private async Task<List<RawChange>> FetchChangesAsync(JiraClient jira, List<RawIssue> issues, CancellationToken cancellationToken)
     {
         var changes = new List<RawChange>();
@@ -303,9 +272,10 @@ public sealed class JiraCollector
         return changes;
     }
 
-    private void ParseChanges(JsonElement page, List<RawChange> changes)
+    private int ParseChanges(JsonElement page, List<RawChange> changes)
     {
-        foreach (var log in page.GetProperty("issueChangeLogs").EnumerateArray())
+        var logs = page.GetProperty("issueChangeLogs");
+        foreach (var log in logs.EnumerateArray())
         {
             var issueId = Text(log, "issueId");
             foreach (var history in log.GetProperty("changeHistories").EnumerateArray())
@@ -325,7 +295,13 @@ public sealed class JiraCollector
                     var from = Optional(item, "from")?.GetString();
                     var to = Optional(item, "to")?.GetString();
 
-                    // Checked before anything is kept, and the message quotes no value.
+                    // Checked before anything is kept, and no message quotes a value. A status change holds
+                    // status IDs, which are digits: anything else is not the status field's history.
+                    if (field == ChangeFields.Status && !(IsStatusId(from) && IsStatusId(to)))
+                    {
+                        throw new FormatException("A status change holds a value that is not a status ID.");
+                    }
+
                     if (field == ChangeFields.Sprint && !(IsSprintIdList(from) && IsSprintIdList(to)))
                     {
                         throw new UserFacingException(
@@ -336,14 +312,18 @@ public sealed class JiraCollector
                 }
             }
         }
+
+        return logs.GetArrayLength();
     }
 
     /// <summary>
     /// Which kept field a changelog item is about, or null for any other field. The item's <c>fieldId</c>
-    /// decides. Old history carries none, only the field's name: there the status field is the system field
-    /// "status" (a custom field can carry that name too, and is not it), and the Sprint field is "Sprint",
-    /// Jira Software's own name for it. A site that renamed its Sprint field loses the sprint changes of that
-    /// old history: the name is all such an item has.
+    /// decides. Old history carries none, only the field's name and whether it is a system field
+    /// (<c>fieldtype</c> "jira") or a custom one ("custom"): there the status field is the system field named
+    /// "status", and the Sprint field is the custom field named "Sprint", Jira Software's own name for it. An
+    /// item that does not say which kind it is, is neither. A site that renamed its Sprint field loses the
+    /// sprint changes of that old history, and one with a second custom field named "Sprint" stops on that
+    /// field's values: the name is all such an item has.
     /// </summary>
     private string? FieldOf(JsonElement item)
     {
@@ -354,11 +334,10 @@ public sealed class JiraCollector
                 : null;
         }
 
-        var isCustom = Optional(item, "fieldtype")?.GetString() == "custom";
-        return Optional(item, "field")?.GetString() switch
+        return (Optional(item, "field")?.GetString(), Optional(item, "fieldtype")?.GetString()) switch
         {
-            StatusFieldId when !isCustom => ChangeFields.Status,
-            SprintFieldName => ChangeFields.Sprint,
+            (StatusFieldId, "jira") => ChangeFields.Status,
+            (SprintFieldName, "custom") => ChangeFields.Sprint,
             _ => null,
         };
     }
@@ -380,37 +359,30 @@ public sealed class JiraCollector
         }
     }
 
-    /// <summary>A text value Jira must give. Absent, null or not text is an answer in an unknown shape.</summary>
-    private static string Text(JsonElement parent, string name) =>
-        parent.GetProperty(name).GetString() ?? throw new FormatException($"{name} is null.");
-
-    /// <summary>A property's value, or null when it is absent or JSON null. Jira uses both for "not set".</summary>
-    private static JsonElement? Optional(JsonElement parent, string name) =>
-        parent.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null ? value : null;
-
     private static DateTimeOffset? OptionalTime(JsonElement parent, string name) =>
         Optional(parent, name) is { } value ? JiraTime.Parse(value) : null;
 
     /// <summary>
     /// Asks a token-paged endpoint for every page: the same request again, each time with the token the page
-    /// before gave, until a page gives none. <paramref name="read"/> takes what it keeps from each page; the
-    /// page itself is released before the next is asked for.
+    /// before gave, until a page gives none. <paramref name="read"/> takes what it keeps from each page and
+    /// returns how many entries the page held; the page itself is released before the next is asked for.
     /// </summary>
-    private static async Task ForEachPageAsync(JiraClient jira, string relativeUrl, JsonObject body, string what, Action<JsonElement> read, CancellationToken cancellationToken)
+    private static async Task ForEachPageAsync(JiraClient jira, string relativeUrl, JsonObject body, string what, Func<JsonElement, int> read, CancellationToken cancellationToken)
     {
         var tokens = new HashSet<string>(StringComparer.Ordinal);
         while (true)
         {
             using var document = await jira.PostAsync(relativeUrl, body, cancellationToken);
-            var next = Read(what, () =>
-            {
-                read(document.RootElement);
-                return NextPageToken(document.RootElement, what);
-            });
-
+            var (entries, next) = Read(what, () => (read(document.RootElement), NextPageToken(document.RootElement, what)));
             if (next is null)
             {
                 return;
+            }
+
+            // A site that keeps giving new tokens and nothing else would otherwise be asked forever.
+            if (entries == 0)
+            {
+                throw new UserFacingException($"Jira's {what} gave an empty page and says more follow, so entries could be missing. Nothing was stored.");
             }
 
             // Jira would have to repeat itself for this, but then the run would never end.

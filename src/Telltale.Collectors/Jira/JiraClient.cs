@@ -24,13 +24,20 @@ internal sealed class JiraClient : IDisposable
     private static readonly TimeSpan ShortestWait = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan FirstWaitWithoutRetryAfter = TimeSpan.FromSeconds(5);
 
+    // The most one client, and so one command, waits on rate limits in all.
+    private static readonly TimeSpan LongestTotalWait = TimeSpan.FromMinutes(15);
+
     private readonly HttpClient _http;
     private readonly TimeProvider _clock;
+    private readonly TextWriter _notices;
+    private TimeSpan _waited;
 
     /// <param name="clock">Times the waits between retries of a rate-limited request. Nothing else: timeouts stay on real time.</param>
-    public JiraClient(HttpMessageHandler handler, Uri siteUrl, string email, string apiToken, TimeProvider clock)
+    /// <param name="notices">Where each such wait is announced (standard error), so a waiting command is not a silent one.</param>
+    public JiraClient(HttpMessageHandler handler, Uri siteUrl, string email, string apiToken, TimeProvider clock, TextWriter notices)
     {
         _clock = clock;
+        _notices = notices;
         _http = new HttpClient(handler, disposeHandler: false) { BaseAddress = siteUrl };
 
         // Jira sends no authentication challenge, so the header goes on every request.
@@ -49,7 +56,7 @@ internal sealed class JiraClient : IDisposable
 
     /// <summary>
     /// The status of the last answer that was an error from Jira itself, or null when there has been none.
-    /// A proxy's 407 is not one: that request never reached Jira.
+    /// A proxy's 407 is not one: that request never reached Jira. A 429 the client gave up on is one.
     /// </summary>
     public HttpStatusCode? LastRefusal { get; private set; }
 
@@ -117,13 +124,24 @@ internal sealed class JiraClient : IDisposable
 
             if (response.StatusCode == HttpStatusCode.TooManyRequests)
             {
+                // Whatever ends the run below, the request reached Jira and Jira refused it.
+                LastRefusal = response.StatusCode;
                 if (retries == MaxRetries)
                 {
-                    throw new UserFacingException(
-                        $"Jira is limiting how often it can be asked: it answered 429 (too many requests) to {call} again after {MaxRetries} retries. Run the command again later.");
+                    throw new UserFacingException($"{RateLimited(call)} again after {MaxRetries} retries. Run the command again later.");
                 }
 
-                await Task.Delay(RetryWait(response, call, retries), _clock, cancellationToken);
+                var wait = RetryWait(response, call, retries);
+                if (_waited + wait > LongestTotalWait)
+                {
+                    throw new UserFacingException(
+                        $"{RateLimited(call)}, and waiting again would bring this command's waits to more than {LongestTotalWait.TotalMinutes:0} minutes in all. Run the command again later.");
+                }
+
+                // The number of seconds is the only thing of Jira's answer that is repeated.
+                await _notices.WriteLineAsync($"Jira is limiting how often it can be asked. Waiting {wait.TotalSeconds:0} seconds before asking again ({call}).");
+                _waited += wait;
+                await Task.Delay(wait, _clock, cancellationToken);
                 return null;
             }
 
@@ -147,25 +165,29 @@ internal sealed class JiraClient : IDisposable
 
     /// <summary>
     /// How long to wait before sending a rate-limited request again: what the answer's <c>Retry-After</c>
-    /// header asks for, as a number of seconds or as a time to come back at. Without a header that can be
-    /// read, the wait starts at five seconds and doubles with every retry of the request.
+    /// header asks for, as a number of seconds or as a time to come back at. With no such header, the wait
+    /// starts at five seconds and doubles with every retry of the request. A header that is there but cannot
+    /// be read (a number too large for a wait, a fraction, text) is not taken for a missing one: it ends the
+    /// run like a wait that is too long.
     /// </summary>
     private TimeSpan RetryWait(HttpResponseMessage response, string call, int retries)
     {
-        var wait = response.Headers.RetryAfter switch
-        {
-            { Delta: { } seconds } => seconds,
-            { Date: { } time } => time - _clock.GetUtcNow(),
-            _ => FirstWaitWithoutRetryAfter * Math.Pow(2, retries),
-        };
+        TimeSpan? wait = !response.Headers.TryGetValues("Retry-After", out var values)
+            ? FirstWaitWithoutRetryAfter * Math.Pow(2, retries)
+            : RetryConditionHeaderValue.TryParse(string.Join(",", values), out var asked)
+                ? asked.Delta ?? asked.Date - _clock.GetUtcNow()
+                : null;
 
-        // The message does not quote the header: no value Jira sends is ever repeated.
-        if (wait > LongestWait)
+        // The message does not quote the header.
+        if (wait is not { } readable || readable > LongestWait)
         {
             throw new UserFacingException(
-                $"Jira is limiting how often it can be asked: it answered 429 (too many requests) to {call} and asked for a wait of more than {LongestWait.TotalMinutes:0} minutes. Run the command again later.");
+                $"{RateLimited(call)} and asked for a wait of more than {LongestWait.TotalMinutes:0} minutes, or one this tool cannot read. Run the command again later.");
         }
 
-        return wait > ShortestWait ? wait : ShortestWait;
+        return readable > ShortestWait ? readable : ShortestWait;
     }
+
+    private static string RateLimited(string call) =>
+        $"Jira is limiting how often it can be asked: it answered 429 (too many requests) to {call}";
 }

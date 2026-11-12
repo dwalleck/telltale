@@ -486,8 +486,9 @@ public sealed partial class FakeJira
         }
         else
         {
+            RequireStableOrder(request);
             var updatedSince = UpdatedSince(request);
-            found = [.. Issues.Where(issue => issue.Updated >= updatedSince).OrderBy(issue => issue.Updated)];
+            found = [.. Issues.Where(issue => issue.Updated >= updatedSince).OrderBy(issue => issue.Updated).ThenBy(issue => long.Parse(issue.Id, CultureInfo.InvariantCulture))];
             offset = 0;
             lock (_gate)
             {
@@ -588,6 +589,20 @@ public sealed partial class FakeJira
         }
 
         throw new InvalidOperationException($"FakeJira: the search JQL has no lower bound on updated that the fake understands: {jql}");
+    }
+
+    /// <summary>
+    /// The fake pages a search by update time and then by issue ID, the one order that keeps issues updated in
+    /// the same instant in place from page to page. A search that asks for another order fails the test.
+    /// </summary>
+    private static void RequireStableOrder(StubRequest request)
+    {
+        using var body = JsonDocument.Parse(request.Body);
+        var jql = body.RootElement.GetProperty("jql").GetString() ?? "";
+        if (!jql.EndsWith(" ORDER BY updated ASC, id ASC", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"FakeJira: the search JQL does not order by updated and then by ID, so its pages are not stable: {jql}");
+        }
     }
 
     /// <summary>The Sprint field of a search result: null when the issue is in no sprint, otherwise one object per sprint.</summary>

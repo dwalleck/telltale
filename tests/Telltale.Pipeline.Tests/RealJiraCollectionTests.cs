@@ -145,7 +145,10 @@ public class RealJiraCollectionTests
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
-        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        // Each wait is announced on standard error, with the seconds and the request and nothing else of Jira's answer.
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira is limiting how often it can be asked. Waiting 30 seconds before asking again (POST rest/api/3/search/jql).\n"
+            + "Jira is limiting how often it can be asked. Waiting 7 seconds before asking again (POST rest/api/3/search/jql).\n");
         await Assert.That(exit).IsEqualTo(0);
         await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
 
@@ -171,7 +174,8 @@ public class RealJiraCollectionTests
 
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            "Jira is limiting how often it can be asked: it answered 429 (too many requests) to POST rest/api/3/changelog/bulkfetch again after 5 retries. Run the command again later.\n");
+            string.Concat(Enumerable.Repeat("Jira is limiting how often it can be asked. Waiting 2 seconds before asking again (POST rest/api/3/changelog/bulkfetch).\n", 5))
+            + "Jira is limiting how often it can be asked: it answered 429 (too many requests) to POST rest/api/3/changelog/bulkfetch again after 5 retries. Run the command again later.\n");
         await Assert.That(before).Contains("## watermark\njira | ");
         await Assert.That(await pipeline.ReadStoreContentAsync()).IsEqualTo(before);
 
@@ -226,8 +230,98 @@ public class RealJiraCollectionTests
         await Assert.That(exit).IsEqualTo(retried ? 0 : 1);
         await Assert.That(pipeline.Clock.Waits).IsEquivalentTo(retried ? new[] { TimeSpan.FromSeconds(secondsWaited) } : []);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(retried
-            ? ""
-            : "Jira is limiting how often it can be asked: it answered 429 (too many requests) to POST rest/api/3/search/jql and asked for a wait of more than 5 minutes. Run the command again later.\n");
+            ? $"Jira is limiting how often it can be asked. Waiting {secondsWaited} seconds before asking again (POST rest/api/3/search/jql).\n"
+            : WaitTooLongOrUnreadable);
+    }
+
+    [Test]
+    [Arguments("99999999999999999999")]
+    [Arguments("1.5")]
+    [Arguments("synthetic text quoting Fake Person One")]
+    public async Task A_rate_limited_answer_whose_wait_cannot_be_read_ends_the_run_and_is_not_taken_for_one_that_names_no_wait(string retryAfter)
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprint41(pipeline.Jira);
+        AddDeliveredIssues(pipeline.Jira, count: 1);
+        pipeline.Jira.Handler.AnswerNext(HttpMethod.Post, "/rest/api/3/search/jql", StubHttpHandler.RateLimitedWithHeader(retryAfter));
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Clock.Waits).IsEmpty();
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(WaitTooLongOrUnreadable);
+    }
+
+    [Test]
+    public async Task The_waits_of_one_command_add_up_to_at_most_fifteen_minutes()
+    {
+        // Four requests are each told to wait five minutes. Three waits make fifteen minutes; the fourth is not started.
+        await using var pipeline = new PipelineHarness();
+        AddSprint41(pipeline.Jira);
+        AddDeliveredIssues(pipeline.Jira, count: 1);
+        pipeline.Jira.Handler
+            .AnswerNext(HttpMethod.Get, "/rest/api/3/status", StubHttpHandler.RateLimited(300))
+            .AnswerNext(HttpMethod.Get, $"/rest/agile/1.0/board/{FakeJira.BoardId}/sprint", StubHttpHandler.RateLimited(300))
+            .AnswerNext(HttpMethod.Post, "/rest/api/3/search/jql", StubHttpHandler.RateLimited(300))
+            .AnswerNext(HttpMethod.Post, "/rest/api/3/changelog/bulkfetch", StubHttpHandler.RateLimited(300));
+
+        var exit = await pipeline.RunAsync("backfill");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Clock.Waits).IsEquivalentTo(Enumerable.Repeat(TimeSpan.FromSeconds(300), 3));
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).EndsWith(
+            "\nJira is limiting how often it can be asked: it answered 429 (too many requests) to POST rest/api/3/changelog/bulkfetch, "
+            + "and waiting again would bring this command's waits to more than 15 minutes in all. Run the command again later.\n");
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM issue;")).IsEquivalentTo(new[] { 0L });
+    }
+
+    [Test]
+    public async Task Cancelling_while_a_rate_limit_is_waited_out_ends_the_run_and_jira_is_not_asked_again()
+    {
+        // The user's Ctrl+C arrives while the command waits.
+        await using var pipeline = new PipelineHarness();
+        AddSprint41(pipeline.Jira);
+        AddDeliveredIssues(pipeline.Jira, count: 1);
+        pipeline.Jira.Handler.AnswerNext(HttpMethod.Post, "/rest/api/3/search/jql", StubHttpHandler.RateLimited(30));
+        pipeline.Clock.DuringWait = pipeline.Cancellation.Cancel;
+
+        var exit = await pipeline.RunAsync("backfill");
+
+        await Assert.That(exit).IsEqualTo(130);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira is limiting how often it can be asked. Waiting 30 seconds before asking again (POST rest/api/3/search/jql).\nCancelled.\n");
+        await Assert.That(pipeline.Jira.Handler.Requests.Count(request => request.Path == "/rest/api/3/search/jql")).IsEqualTo(1);
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM issue;")).IsEquivalentTo(new[] { 0L });
+    }
+
+    [Test]
+    public async Task Discover_waits_out_a_rate_limit_through_the_clock_it_was_given()
+    {
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.Handler.AnswerNext(HttpMethod.Get, "/rest/api/3/field", StubHttpHandler.RateLimited(30));
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(DiscoverTests.FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(pipeline.Clock.Waits).IsEquivalentTo(new[] { TimeSpan.FromSeconds(30) });
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira is limiting how often it can be asked. Waiting 30 seconds before asking again (GET rest/api/3/field).\n");
+        await Assert.That(File.Exists(pipeline.ConfigPath)).IsTrue();
+    }
+
+    [Test]
+    public async Task A_rate_limit_that_ends_discovers_first_call_is_reported_as_a_rate_limit_not_as_a_proxy_or_certificate_problem()
+    {
+        // The request reached Jira and Jira answered, so the connection is fine.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/status", _ => true, StubHttpHandler.RateLimited(301));
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(DiscoverTests.FirstDiscover);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira is limiting how often it can be asked: it answered 429 (too many requests) to GET rest/api/3/status and asked for a wait of more than 5 minutes, or one this tool cannot read. Run the command again later.\n");
+        await Assert.That(File.Exists(pipeline.ConfigPath)).IsFalse();
     }
 
     [Test]
@@ -300,6 +394,49 @@ public class RealJiraCollectionTests
         await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
         await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM change;")).IsEquivalentTo(new[] { 2L });
     }
+
+    [Test]
+    [Arguments("""{"field":"status","to":"700001"}""")]
+    [Arguments("""{"field":"Sprint","to":"41"}""")]
+    [Arguments("""{"field":"Sprint","fieldtype":"jira","to":"41"}""")]
+    public async Task An_old_item_that_does_not_say_it_is_the_system_status_field_or_a_custom_sprint_field_is_not_kept(string item)
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprint41(pipeline.Jira);
+        AddDeliveredIssues(pipeline.Jira, count: 1);
+        pipeline.Jira.Handler.Override(HttpMethod.Post, "/rest/api/3/changelog/bulkfetch", _ => true, StubHttpHandler.Json(ChangelogWithOneItem(item)));
+
+        await pipeline.RunAllAsync(["backfill"]);
+
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM issue;")).IsEquivalentTo(new[] { 1L });
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM change;")).IsEquivalentTo(new[] { 0L });
+    }
+
+    [Test]
+    [Arguments("""{"field":"status","fieldtype":"jira","from":"600001","to":"Synthetic value quoting Fake Person One"}""")]
+    [Arguments("""{"field":"status","fieldtype":"jira","fieldId":"status","from":"Synthetic value quoting Fake Person One","to":"600004"}""")]
+    public async Task A_status_change_whose_values_are_not_status_ids_stops_the_run_and_nothing_is_stored(string item)
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprint41(pipeline.Jira);
+        AddDeliveredIssues(pipeline.Jira, count: 1);
+        pipeline.Jira.Handler.Override(HttpMethod.Post, "/rest/api/3/changelog/bulkfetch", _ => true, StubHttpHandler.Json(ChangelogWithOneItem(item)));
+
+        var exit = await pipeline.RunAsync("backfill");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira's bulk changelog answered in a shape this tool does not understand (FormatException). Nothing was stored.\n");
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM issue;")).IsEquivalentTo(new[] { 0L });
+    }
+
+    /// <summary>What wait-limit and unreadable-wait failures say for the search. It quotes nothing of the header.</summary>
+    private const string WaitTooLongOrUnreadable =
+        "Jira is limiting how often it can be asked: it answered 429 (too many requests) to POST rest/api/3/search/jql and asked for a wait of more than 5 minutes, or one this tool cannot read. Run the command again later.\n";
+
+    /// <summary>A bulk changelog answer with one history entry for the first issue of the fake, holding <paramref name="item"/>.</summary>
+    private static string ChangelogWithOneItem(string item) =>
+        """{"issueChangeLogs":[{"issueId":"900001","changeHistories":[{"id":"200001","created":"2026-01-08T15:00:00.000+0000","items":[""" + item + """]}]}]}""";
 
     private static void AddSprint41(FakeJira jira) =>
         jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
