@@ -40,6 +40,10 @@ public sealed class JiraCollector
     private const int SearchPageSize = 100;
     private const int ChangelogPageSize = 10000;
 
+    // The status field's ID, which is also the name old history gives it, and the Sprint field's name there.
+    private const string StatusFieldId = "status";
+    private const string SprintFieldName = "Sprint";
+
     /// <summary>The name of this collector's row in the store's watermarks.</summary>
     public const string WatermarkName = "jira";
 
@@ -52,9 +56,12 @@ public sealed class JiraCollector
     private readonly HttpMessageHandler _handler;
     private readonly JiraConfig _config;
     private readonly ISecretStore _secrets;
+    private readonly TimeProvider _clock;
 
-    public JiraCollector(HttpMessageHandler handler, JiraConfig config, ISecretStore secrets)
+    /// <param name="clock">Times the waits Jira asks for when it limits the rate of requests.</param>
+    public JiraCollector(HttpMessageHandler handler, JiraConfig config, ISecretStore secrets, TimeProvider clock)
     {
+        _clock = clock;
         _handler = handler;
         _config = config;
         _secrets = secrets;
@@ -74,7 +81,7 @@ public sealed class JiraCollector
 
         // All three secrets are checked before the first call, so a missing salt cannot surface after a long fetch.
         var salt = _secrets.Require(SecretName.HashingSalt);
-        using var jira = new JiraClient(_handler, _config.SiteUrl, _secrets.Require(SecretName.JiraEmail), _secrets.Require(SecretName.JiraApiToken));
+        using var jira = new JiraClient(_handler, _config.SiteUrl, _secrets.Require(SecretName.JiraEmail), _secrets.Require(SecretName.JiraApiToken), _clock);
 
         var statuses = await FetchStatusesAsync(jira, cancellationToken);
         var sprints = await FetchSprintsAsync(jira, cancellationToken);
@@ -282,7 +289,7 @@ public sealed class JiraCollector
             var body = new JsonObject
             {
                 ["issueIdsOrKeys"] = new JsonArray([.. chunk.Select(issue => (JsonNode)issue.IssueId)]),
-                ["fieldIds"] = new JsonArray("status", _config.SprintFieldId),
+                ["fieldIds"] = new JsonArray(StatusFieldId, _config.SprintFieldId),
                 ["maxResults"] = ChangelogPageSize,
             };
 
@@ -305,12 +312,7 @@ public sealed class JiraCollector
 
                 foreach (var item in history.GetProperty("items").EnumerateArray())
                 {
-                    var field = Optional(item, "fieldId")?.GetString() switch
-                    {
-                        "status" => ChangeFields.Status,
-                        { } fieldId when fieldId == _config.SprintFieldId => ChangeFields.Sprint,
-                        _ => null,
-                    };
+                    var field = FieldOf(item);
 
                     if (field is null)
                     {
@@ -331,6 +333,31 @@ public sealed class JiraCollector
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Which kept field a changelog item is about, or null for any other field. The item's <c>fieldId</c>
+    /// decides. Old history carries none, only the field's name: there the status field is the system field
+    /// "status" (a custom field can carry that name too, and is not it), and the Sprint field is "Sprint",
+    /// Jira Software's own name for it. A site that renamed its Sprint field loses the sprint changes of that
+    /// old history: the name is all such an item has.
+    /// </summary>
+    private string? FieldOf(JsonElement item)
+    {
+        if (Optional(item, "fieldId")?.GetString() is { } fieldId)
+        {
+            return fieldId == StatusFieldId ? ChangeFields.Status
+                : fieldId == _config.SprintFieldId ? ChangeFields.Sprint
+                : null;
+        }
+
+        var isCustom = Optional(item, "fieldtype")?.GetString() == "custom";
+        return Optional(item, "field")?.GetString() switch
+        {
+            StatusFieldId when !isCustom => ChangeFields.Status,
+            SprintFieldName => ChangeFields.Sprint,
+            _ => null,
+        };
     }
 
     /// <summary>

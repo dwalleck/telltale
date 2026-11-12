@@ -39,7 +39,8 @@ public enum SprintListEnd
 }
 
 /// <summary>One entry in an issue's changelog: a single field changing at one moment.</summary>
-public sealed record FakeHistory(string Id, DateTimeOffset At, FakePerson Author, string FieldId, string FieldName, string? From, string? FromText, string? To, string? ToText);
+/// <param name="WithoutFieldId">An entry from old history: its item carries the field's name but no <c>fieldId</c>.</param>
+public sealed record FakeHistory(string Id, DateTimeOffset At, FakePerson Author, string FieldId, string FieldName, string? From, string? FromText, string? To, string? ToText, bool WithoutFieldId = false);
 
 /// <summary>A sprint as the board lists it. <see cref="State"/> is Jira's: future, active or closed. A null <see cref="OriginBoardId"/> leaves the field out.</summary>
 public sealed record FakeSprint(long Id, string Name, string State, DateTimeOffset? Start, DateTimeOffset? PlannedEnd, DateTimeOffset? Completed, long? OriginBoardId)
@@ -154,6 +155,31 @@ public sealed class FakeIssue
         return this;
     }
 
+    /// <summary>
+    /// A move as old history records it: the item names the field ("status") but carries no <c>fieldId</c>.
+    /// </summary>
+    public FakeIssue MovedInOldHistory(DateTimeOffset at, FakeStatus to)
+    {
+        AddHistory(at, "status", "status", Status.Id, _jira.NameOf(Status), to.Id, _jira.NameOf(to), withoutFieldId: true);
+        Status = to;
+        return this;
+    }
+
+    /// <summary>
+    /// A Sprint field change as old history records it: the item names the field ("Sprint") but carries no
+    /// <c>fieldId</c>, and "no sprint" is null where newer history has an empty text.
+    /// </summary>
+    public FakeIssue SprintsChangedInOldHistory(DateTimeOffset at, params long[] sprintIds)
+    {
+        AddHistory(at, FakeJira.SprintFieldId, "Sprint", OldSprintList(SprintIds), OldSprintNames(SprintIds), OldSprintList(sprintIds), OldSprintNames(sprintIds), withoutFieldId: true);
+        SprintIds = sprintIds;
+        return this;
+    }
+
+    private static string? OldSprintList(IReadOnlyList<long> sprintIds) => sprintIds.Count == 0 ? null : SprintList(sprintIds);
+
+    private static string? OldSprintNames(IReadOnlyList<long> sprintIds) => sprintIds.Count == 0 ? null : SprintNames(sprintIds);
+
     /// <summary>Sets the Sprint field without recording history, as for an issue created inside a sprint.</summary>
     public FakeIssue InSprints(params long[] sprintIds)
     {
@@ -178,9 +204,9 @@ public sealed class FakeIssue
     private static string SprintNames(IReadOnlyList<long> sprintIds) => string.Join(", ", sprintIds.Select(FakeJira.SprintName));
 
     /// <summary>Appends one changelog entry with the next history ID.</summary>
-    public FakeIssue AddHistory(DateTimeOffset at, string fieldId, string fieldName, string? from, string? fromText, string? to, string? toText, FakePerson? author = null)
+    public FakeIssue AddHistory(DateTimeOffset at, string fieldId, string fieldName, string? from, string? fromText, string? to, string? toText, FakePerson? author = null, bool withoutFieldId = false)
     {
-        _histories.Add(new FakeHistory(_jira.NextHistoryId(), at, author ?? People.BoardAdmin, fieldId, fieldName, from, fromText, to, toText));
+        _histories.Add(new FakeHistory(_jira.NextHistoryId(), at, author ?? People.BoardAdmin, fieldId, fieldName, from, fromText, to, toText, withoutFieldId));
         Updated = at > Updated ? at : Updated;
         return this;
     }
@@ -602,9 +628,11 @@ public sealed class FakeJira
                 ? fields.EnumerateArray().Select(id => id.GetString()).ToHashSet()
                 : null;
 
+            // An entry without a field ID is served whatever fields were asked for: nothing documents what the
+            // filter does with one, and this is the harder case for the tool.
             // Oldest history first, then by issue ID: one issue's histories can be spread over several pages (research note 05).
             found = [.. Issues.Where(issue => asked.Contains(issue.Id) || asked.Contains(issue.Key))
-                .SelectMany(issue => issue.Histories.Where(history => fieldIds is null || fieldIds.Contains(history.FieldId)).Select(history => (issue, history)))
+                .SelectMany(issue => issue.Histories.Where(history => fieldIds is null || history.WithoutFieldId || fieldIds.Contains(history.FieldId)).Select(history => (issue, history)))
                 .OrderBy(entry => entry.history.At)
                 .ThenBy(entry => entry.issue.Id, StringComparer.Ordinal)];
             offset = 0;
@@ -630,16 +658,7 @@ public sealed class FakeJira
                     ["id"] = history.Id,
                     ["author"] = UserDetails(history.Author),
                     ["created"] = Shapes == JiraShapes.AsExamples ? history.At.ToUnixTimeMilliseconds() : PlatformTime(history.At),
-                    ["items"] = new JsonArray(new JsonObject
-                    {
-                        ["field"] = history.FieldName,
-                        ["fieldtype"] = history.FieldId.StartsWith("customfield_", StringComparison.Ordinal) ? "custom" : "jira",
-                        ["fieldId"] = history.FieldId,
-                        ["from"] = history.From,
-                        ["fromString"] = history.FromText,
-                        ["to"] = history.To,
-                        ["toString"] = history.ToText,
-                    }),
+                    ["items"] = new JsonArray(ChangeItem(history)),
                 });
             }
 
@@ -663,6 +682,25 @@ public sealed class FakeJira
         }
 
         return page;
+    }
+
+    private static JsonObject ChangeItem(FakeHistory history)
+    {
+        var item = new JsonObject
+        {
+            ["field"] = history.FieldName,
+            ["fieldtype"] = history.FieldId.StartsWith("customfield_", StringComparison.Ordinal) ? "custom" : "jira",
+        };
+        if (!history.WithoutFieldId)
+        {
+            item["fieldId"] = history.FieldId;
+        }
+
+        item["from"] = history.From;
+        item["fromString"] = history.FromText;
+        item["to"] = history.To;
+        item["toString"] = history.ToText;
+        return item;
     }
 
     private void AddLastPageToken(JsonObject page)

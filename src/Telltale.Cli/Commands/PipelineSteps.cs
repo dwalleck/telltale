@@ -85,7 +85,7 @@ internal sealed class PipelineSteps : IDisposable
     public Task SyncAsync(CancellationToken cancellationToken) => CollectAsync(CollectionMode.Incremental, cancellationToken);
 
     private Task CollectAsync(CollectionMode mode, CancellationToken cancellationToken) =>
-        new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets).BringUpToDateAsync(_store, mode, cancellationToken);
+        new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets, _services.Clock).BringUpToDateAsync(_store, mode, cancellationToken);
 
     /// <summary>Rebuilds every derived table and metric view from the raw tables.</summary>
     public async Task DeriveAsync(CancellationToken cancellationToken)

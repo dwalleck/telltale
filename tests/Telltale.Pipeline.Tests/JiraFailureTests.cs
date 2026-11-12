@@ -272,7 +272,7 @@ public class JiraFailureTests
     [Test]
     public async Task The_changelog_request_asks_for_the_largest_page_jira_documents()
     {
-        // Without it Jira's default page applies and a board of ordinary size needs paging, which is not built yet.
+        // Without it Jira's default page of 1000 entries applies, and a backfill takes ten times the requests.
         await using var pipeline = new PipelineHarness();
         AddSprintAndIssue(pipeline.Jira);
 
