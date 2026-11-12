@@ -13,11 +13,22 @@ public interface ITelltaleStore
     /// Writes a batch of raw rows in one transaction, replacing rows with the same Jira IDs, deleting the
     /// issue row and the change rows of every issue in <see cref="RawData.OutOfScopeIssueIds"/>, and setting the
     /// collector's watermark to <paramref name="reached"/>: the watermark advances only when the whole batch
-    /// is written, and no batch is written without saying how far it reaches. A batch that
-    /// <see cref="RawData.ReplacesEverything"/> first removes every raw row, in the same transaction: if the
-    /// write fails, the store holds what it held before.
+    /// is written, and no batch is written without saying how far it reaches.
     /// </summary>
     Task WriteRawAsync(RawData batch, Watermark reached, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Destructive: removes every issue, change and sprint the store holds and writes <paramref name="everything"/>
+    /// in their place, with the watermark, in one transaction. Afterwards the store holds no issue, change or
+    /// sprint that is not in <paramref name="everything"/>; if the write fails, it holds what it held before.
+    /// Only for a batch that is all the source holds (a backfill; owner decision D4). Statuses are reference
+    /// data (an ID's name) and are added and updated, never removed: stored history can name a status the
+    /// source no longer lists.
+    /// </summary>
+    Task ReplaceRawAsync(RawData everything, Watermark reached, CancellationToken cancellationToken = default);
+
+    /// <summary>How many issues, sprints and changes the raw tables hold.</summary>
+    Task<RawCounts> CountRawAsync(CancellationToken cancellationToken = default);
 
     /// <summary>The watermark <paramref name="collector"/> last wrote, or null when it has never written a batch.</summary>
     Task<Watermark?> ReadWatermarkAsync(string collector, CancellationToken cancellationToken = default);

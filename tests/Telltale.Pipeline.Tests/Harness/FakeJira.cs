@@ -426,7 +426,7 @@ public sealed partial class FakeJira
         }
     }
 
-    /// <summary>Deletes a status from the site's status list. Use one no issue is in or has been in.</summary>
+    /// <summary>Takes a status off the site's status list. History that names it by ID stays as it is. Use one no issue is in now.</summary>
     public void DeleteStatus(FakeStatus status)
     {
         lock (_gate)

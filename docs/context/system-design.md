@@ -13,7 +13,7 @@ Repo clones ─┼─► sync job ─► SQLite ─┼─ derived tables (rebuil
 Session logs─┘                 └─ metric views ─► Confluence page, ad hoc SQL
 ```
 
-Every collector keeps a watermark, fetches only what changed since it, and upserts by the source system's own IDs, so reruns and missed runs are harmless.
+Every collector keeps a watermark, fetches only what changed since it, and upserts by the source system's own IDs, so a rerun or a missed run of `sync` is harmless. A sync never removes a row, so work deleted in the source stays until the next `backfill`. `backfill` is the exception to upserting: it fetches everything from the configured start date and replaces the stored issues, changes and sprints with what it fetched, in one transaction. It prints how many of each the store held before and holds now, and refuses to replace stored issues or sprints with none unless run with `--allow-empty`. Statuses are reference data and are only added and updated.
 
 ## Host and operations (laptop phase)
 

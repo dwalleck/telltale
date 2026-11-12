@@ -74,7 +74,11 @@ public sealed class JiraCollector
         _secrets = secrets;
     }
 
-    public async Task BringUpToDateAsync(ITelltaleStore store, CollectionMode mode, CancellationToken cancellationToken = default)
+    /// <param name="allowEmpty">
+    /// Lets a backfill replace stored issues or sprints with none. Without it such a backfill is refused:
+    /// Jira returning nothing is far more often a wrong setting or lost access than an empty board.
+    /// </param>
+    public async Task BringUpToDateAsync(ITelltaleStore store, CollectionMode mode, bool allowEmpty, CancellationToken cancellationToken = default)
     {
         // What the watermark stands for is checked before anything is asked of Jira. It is only true for the
         // board, projects and start date it was fetched under; continuing from it under other settings would
@@ -100,6 +104,11 @@ public sealed class JiraCollector
         var sprints = await FetchSprintsAsync(jira, cancellationToken);
         var since = mode == CollectionMode.Incremental ? watermark?.UpdatedThrough : null;
         var (issues, outOfScopeIssueIds) = await FetchIssuesAsync(jira, salt, UpdatedSince(since), cancellationToken);
+        if (mode == CollectionMode.Backfill && !allowEmpty)
+        {
+            await RequireSomethingToReplaceWithAsync(store, issues.Count, sprints.Count, cancellationToken);
+        }
+
         var changes = await FetchChangesAsync(jira, issues, cancellationToken);
 
         // The watermark is Jira's own time, the newest update fetched, and is written with the batch: if anything
@@ -108,8 +117,33 @@ public sealed class JiraCollector
         // does not move it: the overlap brings that issue back, and deleting it again changes nothing.
         var reached = new Watermark(WatermarkName, covers, issues.Count > 0 ? issues.Max(issue => issue.Updated) : since);
         // A backfill asked for everything, so its batch replaces what the store holds; a sync's is added to it.
-        var batch = new RawData(issues, changes, sprints, statuses) { OutOfScopeIssueIds = outOfScopeIssueIds, ReplacesEverything = mode == CollectionMode.Backfill };
-        await store.WriteRawAsync(batch, reached, cancellationToken);
+        var batch = new RawData(issues, changes, sprints, statuses) { OutOfScopeIssueIds = outOfScopeIssueIds };
+        await (mode == CollectionMode.Backfill ? store.ReplaceRawAsync(batch, reached, cancellationToken) : store.WriteRawAsync(batch, reached, cancellationToken));
+    }
+
+    /// <summary>
+    /// Stops a backfill that fetched no issue, or no sprint, while the store holds some: writing it would remove
+    /// them all. Jira answers a wrong project key or board ID, or an account without access, with an empty
+    /// list and no error. Fewer than before is not refused: the counts the command prints are the sign of that.
+    /// </summary>
+    private static async Task RequireSomethingToReplaceWithAsync(ITelltaleStore store, int issuesFetched, int sprintsFetched, CancellationToken cancellationToken)
+    {
+        if (issuesFetched > 0 && sprintsFetched > 0)
+        {
+            return;
+        }
+
+        var held = await store.CountRawAsync(cancellationToken);
+        var finding = issuesFetched == 0 && held.Issues > 0 ? $"Jira returned no issues to this backfill, but the store holds {held.Issues.ToString(CultureInfo.InvariantCulture)}."
+            : sprintsFetched == 0 && held.Sprints > 0 ? $"Jira returned no sprints to this backfill, but the store holds {held.Sprints.ToString(CultureInfo.InvariantCulture)}."
+            : null;
+        if (finding is not null)
+        {
+            throw new UserFacingException(
+                $"{finding} A backfill replaces what the store holds, so this one would remove them all. "
+                + "Check jira.projectKeys and jira.boardId in the configuration file, and that the Jira account can still see the projects and the board. "
+                + "Nothing was stored. If Jira really holds none, run backfill --allow-empty.");
+        }
     }
 
     // Separates the two parts of what a watermark covers. A project key cannot hold it.
@@ -120,7 +154,26 @@ public sealed class JiraCollector
 
     /// <summary>The settings that decide which issues and sprints a fetch under the current configuration asks for.</summary>
     private string IssueScope() =>
-        $"board {_config.BoardId.ToString(CultureInfo.InvariantCulture)}; projects {string.Join(",", _config.ProjectKeys.Order(StringComparer.Ordinal))}; from {_config.BackfillStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}";
+        $"board {_config.BoardId.ToString(CultureInfo.InvariantCulture)}; projects {string.Join(",", _config.ProjectKeys.Order(StringComparer.Ordinal))}{StartDateMarker}{_config.BackfillStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}";
+
+    // Introduces the start date in what a watermark covers. A project key cannot hold it.
+    private const string StartDateMarker = "; from ";
+
+    /// <summary>
+    /// The earliest moment from which the store holds every issue update, read from what this collector's
+    /// watermark covers: the start of the <c>backfillStart</c> date the store was filled from. Jira reads that
+    /// date in the time zone of the account asking, which the tool does not know, so this is where the date
+    /// begins last, twelve hours behind UTC. Null when <paramref name="covers"/> names no start date.
+    /// A sprint that started earlier can lack issues delivered in it.
+    /// </summary>
+    public static DateTimeOffset? CompleteFrom(string covers)
+    {
+        var marker = covers.IndexOf(StartDateMarker, StringComparison.Ordinal);
+        var date = marker < 0 ? "" : covers[(marker + StartDateMarker.Length)..];
+        return date.Length >= 10 && DateOnly.TryParseExact(date[..10], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var start)
+            ? new DateTimeOffset(start.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(-12))
+            : null;
+    }
 
     /// <summary>
     /// The JQL value for the lower bound on <c>updated</c>, a quoted JQL date. From a watermark it is the

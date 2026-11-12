@@ -78,14 +78,28 @@ internal sealed class PipelineSteps : IDisposable
 
     public void Dispose() => _storeLock.Dispose();
 
-    /// <summary>Fetches everything from the configured start date and replaces the raw tables' rows with it.</summary>
-    public Task BackfillAsync(CancellationToken cancellationToken) => CollectAsync(CollectionMode.Backfill, cancellationToken);
+    /// <summary>
+    /// Fetches everything from the configured start date and replaces the store's issues, changes and sprints
+    /// with it, then says how many of each the store held before and holds now. A backfill removes what it
+    /// did not fetch, so the counts are how the user sees one that replaced much with little.
+    /// </summary>
+    /// <param name="allowEmpty">Lets the backfill replace stored issues or sprints with none (<c>--allow-empty</c>).</param>
+    public async Task BackfillAsync(bool allowEmpty, CancellationToken cancellationToken)
+    {
+        // The store is this command's alone (StoreLock), so nothing changes it between the counts and the write.
+        var before = await _store.CountRawAsync(cancellationToken);
+        await CollectAsync(CollectionMode.Backfill, allowEmpty, cancellationToken);
+        var now = await _store.CountRawAsync(cancellationToken);
+        await _services.Out.WriteLineAsync(string.Create(
+            CultureInfo.InvariantCulture,
+            $"The store now holds what Jira returned. Issues: {before.Issues} before, {now.Issues} now. Sprints: {before.Sprints} before, {now.Sprints} now. Changes: {before.Changes} before, {now.Changes} now."));
+    }
 
     /// <summary>Brings the raw tables up to date with what changed in Jira since the last sync or backfill.</summary>
-    public Task SyncAsync(CancellationToken cancellationToken) => CollectAsync(CollectionMode.Incremental, cancellationToken);
+    public Task SyncAsync(CancellationToken cancellationToken) => CollectAsync(CollectionMode.Incremental, allowEmpty: false, cancellationToken);
 
-    private Task CollectAsync(CollectionMode mode, CancellationToken cancellationToken) =>
-        new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets, _services.Clock, _services.Error).BringUpToDateAsync(_store, mode, cancellationToken);
+    private Task CollectAsync(CollectionMode mode, bool allowEmpty, CancellationToken cancellationToken) =>
+        new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets, _services.Clock, _services.Error).BringUpToDateAsync(_store, mode, allowEmpty, cancellationToken);
 
     /// <summary>Rebuilds every derived table and metric view from the raw tables.</summary>
     public async Task DeriveAsync(CancellationToken cancellationToken)
@@ -133,7 +147,8 @@ internal sealed class PipelineSteps : IDisposable
             ?? throw new UserFacingException("The store has no derived data yet. Run derive first.");
 
         // The views would answer from the old derived tables without a sign, so the report checks first.
-        if (derivedFrom != DigestOf(await _store.ReadRawAsync(cancellationToken)))
+        var raw = await _store.ReadRawAsync(cancellationToken);
+        if (derivedFrom != DigestOf(raw))
         {
             throw new UserFacingException("The raw data changed since the derived data was built. Run derive first.");
         }
@@ -151,8 +166,28 @@ internal sealed class PipelineSteps : IDisposable
             return;
         }
 
+        await RequireSprintWithinWhatWasFetchedAsync(raw, sprint, cancellationToken);
         var path = await SprintReport.WriteAsync(_store, sprint, _timeZone, _services.ReportDirectory, cancellationToken);
         await _services.Out.WriteLineAsync($"Wrote {path}");
+    }
+
+    /// <summary>
+    /// Refuses a sprint that started before the start date the store was last filled from. The store holds
+    /// only issues updated since that date, so issues delivered in such a sprint and not touched since are
+    /// missing, and the report would show too few deliveries without a sign.
+    /// </summary>
+    private async Task RequireSprintWithinWhatWasFetchedAsync(RawData raw, string sprintId, CancellationToken cancellationToken)
+    {
+        var filled = await _store.ReadWatermarkAsync(JiraCollector.WatermarkName, cancellationToken);
+        if (filled is not null
+            && JiraCollector.CompleteFrom(filled.Covers) is { } completeFrom
+            && raw.Sprints.FirstOrDefault(sprint => sprint.SprintId == sprintId)?.Start < completeFrom)
+        {
+            throw new UserFacingException(
+                $"Sprint {sprintId} started before {completeFrom.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}, the jira.backfillStart the store was last filled from, "
+                + "so issues delivered in it can be missing and its figures would be too low. "
+                + "No report was written. To report on it, set jira.backfillStart to a date before the sprint started and run backfill.");
+        }
     }
 
     /// <summary>

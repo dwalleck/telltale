@@ -101,24 +101,21 @@ public class BackfillRebuildTests
     }
 
     [Test]
-    public async Task A_status_deleted_in_jira_stays_after_a_sync_and_is_gone_from_the_store_after_a_backfill()
+    public async Task A_status_that_jira_no_longer_lists_keeps_its_name_in_the_report_after_a_backfill()
     {
+        // Statuses are reference data: stored history still names a status by ID after Jira stops listing it,
+        // and the report needs its name. A rebuild does not clear them.
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
-            .Moved(Local(2026, 1, 21, 9), Workflow.Development)
-            .Moved(Local(2026, 1, 22, 9), Workflow.Done);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9)).InSprints(41)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Review)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done);
         await pipeline.RunAllAsync(["backfill"]);
 
-        pipeline.Jira.DeleteStatus(Workflow.Shipped);
-        await pipeline.RunAllAsync(["sync"]);
-        var afterSync = await pipeline.ReadStoreContentAsync();
-        await pipeline.RunAllAsync(["backfill"]);
+        pipeline.Jira.DeleteStatus(Workflow.Review);
+        await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
 
-        await Assert.That(afterSync).Contains("Fake Shipped");
-        var afterBackfill = await pipeline.ReadStoreContentAsync();
-        await Assert.That(afterBackfill).DoesNotContain("Fake Shipped");
-        await Assert.That(afterBackfill).Contains("Fake Done");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\n| Fake Review | 1 | 2.0 |\n");
     }
 
     [Test]
@@ -324,13 +321,125 @@ public class BackfillRebuildTests
         var storeBefore = await pipeline.ReadStoreContentAsync();
 
         pipeline.Config["jira"]!["backfillStart"] = "2026-01-15";
-        await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"], ["report", "--sprint", "42"]);
+        await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "42"]);
+        var report = await pipeline.RunAsync("report", "--sprint", "41");
+        var run = await pipeline.RunAsync("run", "--sprint", "41");
 
+        // Sprint 41 began before the new start date, so its deliveries can be missing (here its only one is):
+        // a report on it is refused, and the one written before stays as it was.
+        const string Refusal =
+            "Sprint 41 started before 2026-01-15, the jira.backfillStart the store was last filled from, so issues delivered in it can be missing and its figures would be too low. "
+            + "No report was written. To report on it, set jira.backfillStart to a date before the sprint started and run backfill.\n";
+        await Assert.That(report).IsEqualTo(1);
+        await Assert.That(run).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(Refusal + Refusal);
         await Assert.That(before).Contains("\nDelivered issues: 1\n");
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 0\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).IsEqualTo(before);
         await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
         await Assert.That(storeBefore).Contains("FAKE-1");
         await Assert.That(await pipeline.ReadStoreContentAsync()).DoesNotContain("FAKE-1");
+    }
+
+    [Test]
+    public async Task A_backfill_says_how_many_issues_sprints_and_changes_the_store_held_before_and_holds_now()
+    {
+        // Counts only. They are the sign of a backfill that replaced much with little.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
+            .Moved(Local(2026, 1, 21, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 22, 9), Workflow.Done);
+        var deleted = pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 20, 9))
+            .Moved(Local(2026, 1, 21, 9), Workflow.Development);
+        await pipeline.RunAllAsync(["backfill"]);
+
+        pipeline.Jira.Delete(deleted);
+        await pipeline.RunAllAsync(["backfill"]);
+
+        await Assert.That(pipeline.Out.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "The store now holds what Jira returned. Issues: 0 before, 2 now. Sprints: 0 before, 2 now. Changes: 0 before, 3 now.\n"
+            + "The store now holds what Jira returned. Issues: 2 before, 1 now. Sprints: 2 before, 2 now. Changes: 3 before, 2 now.\n");
+    }
+
+    [Test]
+    [Arguments("issues", "Jira returned no issues to this backfill, but the store holds 2.")]
+    [Arguments("sprints", "Jira returned no sprints to this backfill, but the store holds 2.")]
+    public async Task A_backfill_that_would_replace_stored_issues_or_sprints_with_none_is_refused_unless_it_is_allowed(string missing, string finding)
+    {
+        // What a wrong projectKeys or boardId, or an account that lost its access, looks like: Jira answers
+        // normally and returns nothing.
+        await using var pipeline = new PipelineHarness();
+        var sprints = new[]
+        {
+            pipeline.Jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10)),
+            pipeline.Jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9), completed: Local(2026, 2, 2, 9, 30)),
+        };
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9)).Moved(Local(2026, 1, 21, 9), Workflow.Development);
+        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 20, 9)).Moved(Local(2026, 1, 22, 9), Workflow.Development);
+        await pipeline.RunAllAsync(["backfill"]);
+        var storeBefore = await pipeline.ReadStoreContentAsync();
+        var gone = missing == "issues" ? "FAKE-" : "Fake Sprint";
+
+        if (missing == "issues")
+        {
+            pipeline.Jira.Delete(pipeline.Jira.Issues[1]);
+            pipeline.Jira.Delete(pipeline.Jira.Issues[0]);
+        }
+        else
+        {
+            pipeline.Jira.RemoveSprint(sprints[0]);
+            pipeline.Jira.RemoveSprint(sprints[1]);
+        }
+
+        var refused = await pipeline.RunAsync("backfill");
+        var storeAfterRefusal = await pipeline.ReadStoreContentAsync();
+        var allowed = await pipeline.RunAsync("backfill", "--allow-empty");
+
+        await Assert.That(refused).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            finding + " A backfill replaces what the store holds, so this one would remove them all. "
+            + "Check jira.projectKeys and jira.boardId in the configuration file, and that the Jira account can still see the projects and the board. "
+            + "Nothing was stored. If Jira really holds none, run backfill --allow-empty.\n");
+        await Assert.That(storeBefore).Contains(gone);
+        await Assert.That(storeAfterRefusal).IsEqualTo(storeBefore);
+        await Assert.That(allowed).IsEqualTo(0);
+        await Assert.That(await pipeline.ReadStoreContentAsync()).DoesNotContain(gone);
+    }
+
+    [Test]
+    public async Task A_first_backfill_to_which_jira_returns_nothing_is_not_refused()
+    {
+        // The store holds nothing a backfill could remove, so there is nothing to protect.
+        await using var pipeline = new PipelineHarness();
+
+        var exit = await pipeline.RunAsync("backfill");
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(pipeline.Out.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "The store now holds what Jira returned. Issues: 0 before, 0 now. Sprints: 0 before, 0 now. Changes: 0 before, 0 now.\n");
+    }
+
+    [Test]
+    [Arguments(9, "2026-01-05", 0)]
+    [Arguments(9, "2026-01-06", 1)]
+    [Arguments(5, "2026-01-05", 1)]
+    public async Task A_report_is_refused_only_for_a_sprint_that_can_have_started_before_the_start_date_in_the_jira_accounts_time_zone(int startHour, string backfillStart, int expectedExit)
+    {
+        // Jira reads the start date in the time zone of the account asking, which the tool does not know. The
+        // date begins last at twelve hours behind UTC, which is 06:00 in the team's zone in January: a sprint
+        // that started at 09:00 on the start date is whole for any account, one that started at 05:00 may not be.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, startHour), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done);
+        pipeline.Config["jira"]!["backfillStart"] = backfillStart;
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+
+        var exit = await pipeline.RunAsync("report", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(expectedExit);
+        await Assert.That(File.Exists(Path.Combine(pipeline.ReportDirectory, "sprint-41.md"))).IsEqualTo(expectedExit == 0);
     }
 
     /// <summary>Sprint 41 (5 to 19 January 2026) and sprint 42 (19 January to 2 February), both completed.</summary>

@@ -12,7 +12,10 @@ namespace Telltale.Storage.Sqlite;
 /// <remarks>
 /// <list type="bullet">
 /// <item><c>Sql/Migrations</c>: raw tables. Each script runs once per database, recorded by file name. Never edit one
-/// that has been merged; add a new file. Raw data is costly to refetch, so these tables are never dropped.</item>
+/// that has been merged; add a new file. Raw data is costly to refetch, so these tables are never dropped.
+/// Their rows are added and updated by Jira's own IDs (<see cref="WriteRawAsync(RawData, Watermark, CancellationToken)"/>),
+/// except in <see cref="ReplaceRawAsync"/>: a backfill removes every issue, change and sprint and writes what it
+/// fetched in their place, so a row for something that has left Jira does not stay. Statuses are only ever added and updated.</item>
 /// <item><c>Sql/Derived</c>: derived tables. Every rebuild drops what the last one created and runs every script, so a
 /// changed definition needs no migration (ADR-0002). A script only creates; it never drops.</item>
 /// <item><c>Sql/Views</c>: metric views, the only thing Reporting and ad hoc SQL read. Rebuilt the same way, after the
@@ -73,22 +76,38 @@ public sealed class SqliteStore : ITelltaleStore
         }
     }
 
-    public async Task WriteRawAsync(RawData batch, Watermark reached, CancellationToken cancellationToken = default)
+    public Task WriteRawAsync(RawData batch, Watermark reached, CancellationToken cancellationToken = default) =>
+        WriteRawAsync(batch, reached, replaceAll: false, cancellationToken);
+
+    public Task ReplaceRawAsync(RawData everything, Watermark reached, CancellationToken cancellationToken = default) =>
+        WriteRawAsync(everything, reached, replaceAll: true, cancellationToken);
+
+    public async Task<RawCounts> CountRawAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
+        return await connection.QuerySingleAsync<RawCounts>(Command(
+            cancellationToken,
+            "SELECT (SELECT COUNT(*) FROM issue) AS Issues, (SELECT COUNT(*) FROM sprint) AS Sprints, (SELECT COUNT(*) FROM change) AS Changes;"));
+    }
+
+    private async Task WriteRawAsync(RawData batch, Watermark reached, bool replaceAll, CancellationToken cancellationToken)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
         // A backfill's batch is everything Jira holds now, so whatever else the raw tables hold has left Jira,
         // or was fetched under settings or a salt that no longer apply (owner decision D4). Inside the
-        // transaction, so a failed write leaves the rows that were there.
-        if (batch.ReplacesEverything)
+        // transaction, so a failed write leaves the rows that were there. The status table is not cleared:
+        // it gives a status ID its name, and stored history can name a status Jira no longer lists.
+        if (replaceAll)
         {
-            await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM change; DELETE FROM issue; DELETE FROM sprint; DELETE FROM status;", transaction: transaction));
+            await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM change; DELETE FROM issue; DELETE FROM sprint;", transaction: transaction));
         }
 
         // An issue that is out of scope now may have been stored while it was in scope (owner decision D13).
         // Its rows go in the same transaction as the batch, so the store never holds half of the change.
-        var outOfScope = batch.OutOfScopeIssueIds.Select(issueId => new { issueId });
+        // After a replace nothing of such an issue is left to delete.
+        var outOfScope = replaceAll ? [] : batch.OutOfScopeIssueIds.Select(issueId => new { issueId });
         await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM change WHERE issue_id = @issueId;", outOfScope, transaction));
         await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM issue WHERE issue_id = @issueId;", outOfScope, transaction));
 
