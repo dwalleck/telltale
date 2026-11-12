@@ -2,6 +2,8 @@
 
 **What to build:** An issue's point bucket becomes its story point estimate at the moment its cycle started, so a later re-estimate cannot move it between buckets (ADR-0006). The collector fetches story point history alongside status history, and derive reconstructs the value in effect at cycle start.
 
+Owner decision (2026-11-12): a delivered issue that never entered a work status has no cycle start; its point bucket is its estimate at the delivery moment (D35).
+
 **Blocked by:** 03
 
 **Status:** ready-for-agent
