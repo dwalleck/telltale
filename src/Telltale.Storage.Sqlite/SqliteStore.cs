@@ -23,11 +23,13 @@ namespace Telltale.Storage.Sqlite;
 /// Their rows are added and updated by Jira's own IDs (<see cref="WriteRawAsync"/>),
 /// except for a batch with <see cref="RawBatch.ReplacesEverything"/>: a backfill removes every issue, change and sprint and writes what it
 /// fetched in their place, so a row for something that has left Jira does not stay. Statuses are only ever added and updated.</item>
-/// <item><c>Sql/Derived</c>: derived tables. Every rebuild drops what the last one created and runs every script, so a
+/// <item><c>Sql/Derived</c>: derived tables, and internal views over them that no query may read (they apply no
+/// minimum group size). Every rebuild drops what the last one created and runs every script, so a
 /// changed definition needs no migration (ADR-0002). A script only creates; it never drops.</item>
 /// <item><c>Sql/Views</c>: metric views, the only thing Reporting and ad hoc SQL read. Rebuilt the same way, after the
 /// derived tables. A group-size guard belongs inside its view (ADR-0003).</item>
-/// <item>Tables and views the scripts create are recorded in <c>derived_object</c>. Anything else in the database
+/// <item>Tables and views the scripts create are recorded in <c>derived_object</c>, with their kind: <c>table</c>,
+/// <c>internal view</c> or <c>view</c> (a metric view). Anything else in the database
 /// (a view the owner saved by hand) is left alone.</item>
 /// </list>
 /// Times are stored as UTC text (<see cref="StoredTime"/>).
@@ -334,10 +336,10 @@ public sealed class SqliteStore : ITelltaleStore
         // Drop what the previous rebuild created, and only that: a table or view the owner made by hand is
         // not the tool's to drop, and one whose script has since been removed must not linger.
         // Views go first, because they read the derived tables.
-        var previous = await connection.QueryAsync<(string Name, string Kind)>(Command(cancellationToken, "SELECT name, kind FROM derived_object ORDER BY kind = 'view' DESC, name;", transaction: transaction));
+        var previous = await connection.QueryAsync<(string Name, string Kind)>(Command(cancellationToken, "SELECT name, kind FROM derived_object ORDER BY kind = 'view' DESC, kind = 'internal view' DESC, name;", transaction: transaction));
         foreach (var (name, kind) in previous)
         {
-            await connection.ExecuteAsync(Command(cancellationToken, $"DROP {(kind == "view" ? "VIEW" : "TABLE")} IF EXISTS {Quoted(name)};", transaction: transaction));
+            await connection.ExecuteAsync(Command(cancellationToken, $"DROP {(kind == "table" ? "TABLE" : "VIEW")} IF EXISTS {Quoted(name)};", transaction: transaction));
         }
 
         await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM derived_object;", transaction: transaction));
@@ -422,6 +424,9 @@ public sealed class SqliteStore : ITelltaleStore
             derived.Anomalies.Select(anomaly => new object?[] { anomaly.IssueId, anomaly.Message }),
             cancellationToken);
 
+        // A view a Derived script creates is internal: the metric views read it, and nothing else may, because
+        // it applies no minimum group size. Only what the Views scripts create is a metric view.
+        var internalViews = (await connection.QueryAsync<string>(Command(cancellationToken, "SELECT name FROM sqlite_master WHERE type = 'view' AND name NOT IN @before;", new { before }, transaction))).AsList();
         foreach (var (_, sql) in Scripts.InFolder("Views"))
         {
             await connection.ExecuteAsync(Command(cancellationToken, sql, transaction: transaction));
@@ -430,8 +435,8 @@ public sealed class SqliteStore : ITelltaleStore
         // Whatever the scripts created is the tool's, and is what the next rebuild drops.
         await connection.ExecuteAsync(Command(
             cancellationToken,
-            "INSERT INTO derived_object (name, kind) SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT IN @before;",
-            new { before },
+            "INSERT INTO derived_object (name, kind) SELECT name, CASE WHEN name IN @internalViews THEN 'internal view' ELSE type END FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT IN @before;",
+            new { before, internalViews },
             transaction));
 
         await transaction.CommitAsync(cancellationToken);

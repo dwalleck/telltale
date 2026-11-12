@@ -10,36 +10,22 @@
 -- baseline sprint. The rule is in that view and is read here. A baseline sprint with no issue in the status
 -- does not suppress it. There is no issue count.
 CREATE VIEW baseline_time_in_status AS
-WITH pooled AS (
-    SELECT t.status_id,
-           t.business_days,
-           ROW_NUMBER() OVER (PARTITION BY t.status_id ORDER BY t.business_days) AS rn,
-           COUNT(*)     OVER (PARTITION BY t.status_id)                          AS n
-    FROM sprint_status_time t
-    JOIN baseline_sprint b ON b.sprint_id = t.sprint_id
-    WHERE t.business_days > 0
-),
 -- One row per status: 1 when any baseline sprint's own view withholds the status.
-withheld AS (
+WITH withheld AS (
     SELECT v.status_id, MAX(v.suppressed) AS suppressed
     FROM time_in_status_per_sprint v
     JOIN baseline_sprint b ON b.sprint_id = v.sprint_id
     GROUP BY v.status_id
-),
-status_time AS (
-    SELECT p.status_id,
-           AVG(CASE WHEN p.rn IN ((p.n + 1) / 2, (p.n + 2) / 2) THEN p.business_days END) AS median_business_days
-    FROM pooled p
-    GROUP BY p.status_id
 )
-SELECT st.status_id,
-       COALESCE(s.name, st.status_id) AS status_name,
+SELECT f.group_key                    AS status_id,
+       COALESCE(s.name, f.group_key)  AS status_name,
        b.position                     AS board_position,
-       CASE WHEN w.suppressed = 0 THEN st.median_business_days END AS median_business_days,
-       CASE WHEN w.suppressed = 0 THEN 0 ELSE 1 END                AS suppressed
-FROM status_time st
-LEFT JOIN withheld w ON w.status_id = st.status_id
-JOIN board_status b ON b.status_id = st.status_id
-LEFT JOIN status s ON s.status_id = st.status_id
-WHERE b.is_done = 0
+       CASE WHEN w.suppressed = 0 THEN f.median_days END AS median_business_days,
+       CASE WHEN w.suppressed = 0 THEN 0 ELSE 1 END      AS suppressed
+FROM duration_figures f
+LEFT JOIN withheld w ON w.status_id = f.group_key
+JOIN board_status b ON b.status_id = f.group_key
+LEFT JOIN status s ON s.status_id = f.group_key
+WHERE f.scope = 'baseline' AND f.measure = 'status'
+  AND b.is_done = 0
   AND NOT EXISTS (SELECT 1 FROM baseline_sprint WHERE suppressed <> 0);
