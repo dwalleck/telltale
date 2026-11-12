@@ -358,13 +358,12 @@ internal static class DiscoverCommand
             throw new UserFacingException($"Jira lists no project for board {boardId.ToString(CultureInfo.InvariantCulture)}, so there is nothing to search. Check the board ID. Nothing was written.");
         }
 
-        try
+        // This key is Jira's answer, not the file's, and the owner needs to know which project it is.
+        if (listed.FirstOrDefault(key => !JiraProjectKey.IsValid(key)) is { } unusable)
         {
-            JiraProjectKey.RequireValid(listed);
-        }
-        catch (FormatException exception)
-        {
-            throw new UserFacingException($"Jira lists a project of board {boardId.ToString(CultureInfo.InvariantCulture)} whose key this tool cannot use: {exception.Message} Nothing was written.", exception);
+            throw new UserFacingException(
+                $"Jira lists a project of board {boardId.ToString(CultureInfo.InvariantCulture)} whose key this tool cannot use: '{unusable}' is not a Jira project key "
+                + "(an upper-case letter followed by upper-case letters, digits or underscores). Nothing was written.");
         }
 
         return (new JsonArray([.. listed.Select(key => (JsonNode)key)]), string.Join(", ", listed));

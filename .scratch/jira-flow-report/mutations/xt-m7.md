@@ -14,3 +14,4 @@ replace: |-
 
 Claim (cross-ticket finding 18, review finding 9): a role in the file that is text but not one of the four roles stops a rerun before anything is shown, with a message that names the status and not the role.
 Expected red: `A_role_in_the_file_that_run_would_refuse_stops_a_rerun_and_is_neither_replaced_nor_copied_nor_shown("finished")` (it also ran red before the fix).
+- Verified 2026-11-12 at 73ad3e6: red, 1 failed of 111 (Pipeline, filter /*/*/DiscoverTests/*); restored.

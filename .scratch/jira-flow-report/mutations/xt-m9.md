@@ -14,3 +14,4 @@ replace: |-
 
 Claim (cross-ticket finding 18, review findings 5 and 9): a field ID in the file that is not a custom field ID stops a rerun when no option replaces it, and is neither shown nor kept in a backup when one does.
 Expected red: the sprintFieldId and storyPointFieldId cases of `A_bad_value_in_the_file_is_reported_as_the_files_and_not_as_an_option` and of `An_option_replaces_a_value_in_the_file_that_run_would_refuse_and_the_old_value_is_neither_shown_nor_kept` (they also ran red before the fix).
+- Verified 2026-11-12 at 73ad3e6: red, 4 failed of 111 (Pipeline, filter /*/*/DiscoverTests/*); restored.

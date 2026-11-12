@@ -14,3 +14,4 @@ replace: |-
 
 Claim (review finding 1): only a missing table, view or column maps to the "run derive" message; a damaged, locked or unopenable store keeps the database's own error.
 Expected red: `A_report_rendered_from_a_file_that_is_not_a_database_gets_the_databases_error_and_not_a_message_to_run_derive` (it also ran red before the fix).
+- Verified 2026-11-12 at 73ad3e6: red, 2 failed of 6 (Pipeline, filter /*/*/StoreTests/*); restored.

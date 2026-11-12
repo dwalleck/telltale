@@ -42,7 +42,7 @@ public class ConfigurationAndSecretsTests
     }
 
     [Test]
-    public async Task A_status_role_outside_the_four_roles_is_refused()
+    public async Task A_status_role_outside_the_four_roles_is_refused_and_the_status_is_named_not_the_role()
     {
         await using var pipeline = new PipelineHarness();
         AddOneSprint(pipeline.Jira);
@@ -51,7 +51,9 @@ public class ConfigurationAndSecretsTests
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid: statusRoles: 'finished' is not a status role.");
+        // What was written as the role could be a secret pasted into the wrong place (owner decision D43).
+        await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid: statusRoles: the role of status 600008 is not one of: not started, work, blocked, done.");
+        await Assert.That(pipeline.Error.ToString()).DoesNotContain("finished");
         await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
     }
 
@@ -156,8 +158,10 @@ public class ConfigurationAndSecretsTests
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString()).Contains(
-            $"telltale.json is not valid: jira.projectKeys: '{key}' is not a Jira project key (an upper-case letter followed by upper-case letters, digits or underscores).");
+        // The refused key is not repeated: it could be a secret pasted into the wrong place (owner decision D43).
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"The configuration file {pipeline.ConfigPath} is not valid: jira.projectKeys: every entry must be a Jira project key "
+            + "(an upper-case letter followed by upper-case letters, digits or underscores), and one is not.\n");
         await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
     }
 
