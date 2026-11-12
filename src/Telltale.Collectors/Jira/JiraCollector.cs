@@ -33,8 +33,11 @@ public sealed class JiraCollector
     // The bulk changelog endpoint takes at most 1000 issues per request.
     private const int ChangelogIssuesPerRequest = 1000;
 
-    // The largest page sizes Jira documents for the search and bulk changelog endpoints. Jira may return fewer.
-    private const int SearchPageSize = 5000;
+    // Page sizes asked for. Jira may return fewer on any page, so every list is read until its last page.
+    // Search: the documented 5000 holds only for pages of IDs or keys alone; with named fields a real site
+    // is reported to cap a page near 100 (undocumented), so more is not asked for.
+    // Bulk changelog: the documented maximum.
+    private const int SearchPageSize = 100;
     private const int ChangelogPageSize = 10000;
 
     /// <summary>The name of this collector's row in the store's watermarks.</summary>
@@ -110,21 +113,73 @@ public sealed class JiraCollector
             Text(status.GetProperty("statusCategory"), "key")))]);
     }
 
+    /// <summary>
+    /// The board's sprints, from every page of the list (owner decision D11). The Agile API pages by offset:
+    /// each request names the position to start at, which is the number of sprints read so far.
+    /// </summary>
     private async Task<List<RawSprint>> FetchSprintsAsync(JiraClient jira, CancellationToken cancellationToken)
     {
-        using var document = await jira.GetAsync($"rest/agile/1.0/board/{_config.BoardId}/sprint", cancellationToken);
-        return Read("sprint list", () =>
+        var sprints = new List<RawSprint>();
+        var seen = new HashSet<long>();
+        long startAt = 0;
+        while (true)
         {
-            RequireCompleteList(document.RootElement, "sprint list");
-            return ParseSprints(document.RootElement);
-        });
+            using var document = await jira.GetAsync(
+                $"rest/agile/1.0/board/{_config.BoardId.ToString(CultureInfo.InvariantCulture)}/sprint?startAt={startAt.ToString(CultureInfo.InvariantCulture)}", cancellationToken);
+            var (read, isComplete) = Read("sprint list", () =>
+            {
+                var page = document.RootElement;
+                var count = page.GetProperty("values").GetArrayLength();
+                var complete = IsLastSprintPage(page, startAt, count);
+
+                // A site that answers every position with the same page would otherwise be asked forever.
+                if (count > 0 && page.GetProperty("values").EnumerateArray().Count(sprint => seen.Add(sprint.GetProperty("id").GetInt64())) == 0)
+                {
+                    throw new UserFacingException("Jira's sprint list gave a page holding only sprints it had already given, so its pages would never end. Nothing was stored.");
+                }
+
+                ParseSprints(page, sprints);
+                return (count, complete);
+            });
+
+            if (isComplete)
+            {
+                return sprints;
+            }
+
+            startAt += read;
+        }
     }
 
-    private List<RawSprint> ParseSprints(JsonElement page)
+    /// <summary>
+    /// Whether a page of the sprint list is the last one. Jira says so with <c>isLast</c>; when it leaves that
+    /// out, with <c>total</c>, which it may leave out too; and with neither, the list ends at the first empty
+    /// page. A page that says more follow and holds nothing, or that starts somewhere other than where it was
+    /// asked to, cannot be followed: the run stops instead of dropping sprints or asking forever.
+    /// </summary>
+    private static bool IsLastSprintPage(JsonElement page, long startAt, int count)
+    {
+        if (Optional(page, "startAt") is { } startsAt && startsAt.GetInt64() != startAt)
+        {
+            throw new UserFacingException("Jira's sprint list gave a page that does not start where it was asked to, so sprints could be missing. Nothing was stored.");
+        }
+
+        var isLast = Optional(page, "isLast")?.GetBoolean();
+        var total = Optional(page, "total")?.GetInt64();
+        var complete = isLast ?? (total is { } all ? startAt + count >= all : count == 0);
+        if (!complete && count == 0)
+        {
+            throw new UserFacingException("Jira's sprint list gave an empty page and says more sprints follow, so sprints could be missing. Nothing was stored.");
+        }
+
+        return complete;
+    }
+
+    private void ParseSprints(JsonElement page, List<RawSprint> sprints)
     {
         // The board also lists sprints created on other boards when one of their issues matches its filter.
         // Those are another team's sprints; counting deliveries in them would take them from this team's.
-        return [.. page.GetProperty("values").EnumerateArray()
+        sprints.AddRange(page.GetProperty("values").EnumerateArray()
             .Where(sprint => Optional(sprint, "originBoardId") is not { } origin || origin.GetInt64() == _config.BoardId)
             .Select(sprint => new RawSprint(
             sprint.GetProperty("id").GetInt64().ToString(CultureInfo.InvariantCulture),
@@ -133,7 +188,7 @@ public sealed class JiraCollector
             Text(sprint, "state"),
             OptionalTime(sprint, "startDate"),
             OptionalTime(sprint, "endDate"),
-            OptionalTime(sprint, "completeDate")))];
+            OptionalTime(sprint, "completeDate"))));
     }
 
     private async Task<(List<RawIssue> InScope, List<string> OutOfScopeIssueIds)> FetchIssuesAsync(JiraClient jira, string salt, string updatedSince, CancellationToken cancellationToken)
@@ -146,22 +201,17 @@ public sealed class JiraCollector
         {
             ["jql"] = $"project in ({projects}) AND updated >= {updatedSince} ORDER BY updated ASC",
 
-            // A request, not a promise: Jira's default is 50, and it may return fewer than asked for. The docs
-            // say the largest pages come with the ID or key alone; with named fields a real site is expected to
-            // cap a page near 100. So a board of ordinary size still has a further page, which stops the run
-            // until paging is built (ticket 10).
+            // A request, not a promise: Jira may return fewer than asked for, and the rest comes on further pages.
             ["maxResults"] = SearchPageSize,
 
             // Named fields only: the default is the ID alone, and free-text fields are never asked for.
             ["fields"] = new JsonArray("issuetype", "status", "resolution", "assignee", "created", "updated", _config.SprintFieldId, _config.StoryPointFieldId),
         };
 
-        using var document = await jira.PostAsync("rest/api/3/search/jql", body, cancellationToken);
-        return Read("issue search", () =>
-        {
-            RequireLastPage(document.RootElement, "issue search");
-            return ParseIssues(document.RootElement, salt);
-        });
+        var issues = new List<RawIssue>();
+        var outOfScopeIssueIds = new List<string>();
+        await ForEachPageAsync(jira, "rest/api/3/search/jql", body, "issue search", page => ParseIssues(page, salt, issues, outOfScopeIssueIds), cancellationToken);
+        return (issues, outOfScopeIssueIds);
     }
 
     /// <summary>
@@ -170,10 +220,8 @@ public sealed class JiraCollector
     /// appear in no figure, and a field of theirs in an unknown shape cannot stop the run. Only their ID is
     /// read, so the store can delete an issue it holds from the time before it was converted (owner decision D13).
     /// </summary>
-    private (List<RawIssue> InScope, List<string> OutOfScopeIssueIds) ParseIssues(JsonElement page, string salt)
+    private void ParseIssues(JsonElement page, string salt, List<RawIssue> issues, List<string> outOfScopeIssueIds)
     {
-        var issues = new List<RawIssue>();
-        var outOfScopeIssueIds = new List<string>();
         foreach (var issue in page.GetProperty("issues").EnumerateArray())
         {
             var fields = issue.GetProperty("fields");
@@ -196,8 +244,6 @@ public sealed class JiraCollector
                 JiraTime.Parse(fields.GetProperty("updated")),
                 Optional(fields, _config.SprintFieldId) is { } sprints ? SprintIds(sprints) : ""));
         }
-
-        return (issues, outOfScopeIssueIds);
     }
 
     /// <summary>
@@ -240,20 +286,15 @@ public sealed class JiraCollector
                 ["maxResults"] = ChangelogPageSize,
             };
 
-            using var document = await jira.PostAsync("rest/api/3/changelog/bulkfetch", body, cancellationToken);
-            changes.AddRange(Read("bulk changelog", () =>
-            {
-                RequireLastPage(document.RootElement, "bulk changelog");
-                return ParseChanges(document.RootElement);
-            }));
+            // One issue's history can be spread over several pages: entries come oldest first, not issue by issue.
+            await ForEachPageAsync(jira, "rest/api/3/changelog/bulkfetch", body, "bulk changelog", page => ParseChanges(page, changes), cancellationToken);
         }
 
         return changes;
     }
 
-    private List<RawChange> ParseChanges(JsonElement page)
+    private void ParseChanges(JsonElement page, List<RawChange> changes)
     {
-        var changes = new List<RawChange>();
         foreach (var log in page.GetProperty("issueChangeLogs").EnumerateArray())
         {
             var issueId = Text(log, "issueId");
@@ -290,8 +331,6 @@ public sealed class JiraCollector
                 }
             }
         }
-
-        return changes;
     }
 
     /// <summary>
@@ -322,45 +361,54 @@ public sealed class JiraCollector
     private static DateTimeOffset? OptionalTime(JsonElement parent, string name) =>
         Optional(parent, name) is { } value ? JiraTime.Parse(value) : null;
 
-    // Paging is not built yet. Until it is, a further page stops the run instead of being dropped silently.
-    // Both checks run inside Read, so an answer that is not a JSON object is reported as an unknown shape.
-
     /// <summary>
-    /// For the Agile API's offset paging. The list is complete when <c>isLast</c> is true, or, when Jira leaves
-    /// <c>isLast</c> out, when <c>startAt</c> plus the number of values reaches <c>total</c>. With neither, nothing
-    /// says the list is complete, and the run stops.
+    /// Asks a token-paged endpoint for every page: the same request again, each time with the token the page
+    /// before gave, until a page gives none. <paramref name="read"/> takes what it keeps from each page; the
+    /// page itself is released before the next is asked for.
     /// </summary>
-    private static void RequireCompleteList(JsonElement page, string what)
+    private static async Task ForEachPageAsync(JiraClient jira, string relativeUrl, JsonObject body, string what, Action<JsonElement> read, CancellationToken cancellationToken)
     {
-        var isLast = Optional(page, "isLast");
-        if (isLast?.ValueKind == JsonValueKind.True)
+        var tokens = new HashSet<string>(StringComparer.Ordinal);
+        while (true)
         {
-            return;
-        }
+            using var document = await jira.PostAsync(relativeUrl, body, cancellationToken);
+            var next = Read(what, () =>
+            {
+                read(document.RootElement);
+                return NextPageToken(document.RootElement, what);
+            });
 
-        if (isLast?.ValueKind == JsonValueKind.False)
-        {
-            throw new UserFacingException($"Jira's {what} has more than one page, and paging is not supported yet.");
-        }
+            if (next is null)
+            {
+                return;
+            }
 
-        if (Optional(page, "total") is not { } total)
-        {
-            throw new UserFacingException($"Jira's {what} does not say whether it is complete, so sprints could be missing. Paging is not supported yet.");
-        }
+            // Jira would have to repeat itself for this, but then the run would never end.
+            if (!tokens.Add(next))
+            {
+                throw new UserFacingException($"Jira's {what} gave the same page token twice, so its pages would never end. Nothing was stored.");
+            }
 
-        var seen = (Optional(page, "startAt")?.GetInt64() ?? 0) + page.GetProperty("values").GetArrayLength();
-        if (seen < total.GetInt64())
-        {
-            throw new UserFacingException($"Jira's {what} has more than one page, and paging is not supported yet.");
+            body["nextPageToken"] = next;
         }
     }
 
-    /// <summary>For token paging. A last page has no <c>nextPageToken</c>, or a null one; both are documented.</summary>
-    private static void RequireLastPage(JsonElement page, string what)
+    /// <summary>
+    /// The token for the page after this one, or null on the last page. A last page has no
+    /// <c>nextPageToken</c>, or a null one; both are documented. The search also says <c>isLast</c>; when it
+    /// does, it must agree with the token, or nothing says for certain whether issues are still to come.
+    /// </summary>
+    private static string? NextPageToken(JsonElement page, string what)
     {
-        if (Optional(page, "nextPageToken") is not null)
+        var token = Optional(page, "nextPageToken")?.GetString();
+        var isLast = Optional(page, "isLast")?.GetBoolean();
+        if (isLast is { } last && last != (token is null))
         {
-            throw new UserFacingException($"Jira's {what} has more than one page, and paging is not supported yet.");
+            throw new UserFacingException(last
+                ? $"Jira's {what} says a page is the last one and also gives a token for a further page. Nothing was stored."
+                : $"Jira's {what} says a further page follows but gives no token for it. Nothing was stored.");
         }
+
+        return token;
     }
 }

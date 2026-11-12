@@ -19,6 +19,25 @@ public enum JiraShapes
     AsExamples,
 }
 
+/// <summary>
+/// What a page of the sprint list carries to say whether it is the last one. Atlassian's example shows
+/// <c>isLast</c> and <c>total</c>, and its text calls <c>total</c> optional (research note 05).
+/// </summary>
+public enum SprintListEnd
+{
+    /// <summary>Both <c>isLast</c> and <c>total</c>, as in the documented example.</summary>
+    IsLastAndTotal,
+
+    /// <summary><c>isLast</c> only: the total was too expensive to calculate.</summary>
+    IsLastOnly,
+
+    /// <summary><c>total</c> only, with <c>startAt</c>.</summary>
+    TotalOnly,
+
+    /// <summary>Neither: the list ends with an empty page.</summary>
+    Neither,
+}
+
 /// <summary>One entry in an issue's changelog: a single field changing at one moment.</summary>
 public sealed record FakeHistory(string Id, DateTimeOffset At, FakePerson Author, string FieldId, string FieldName, string? From, string? FromText, string? To, string? ToText);
 
@@ -193,14 +212,17 @@ public sealed class FakeJira
     private readonly List<FakeSprint> _sprints = [];
     private readonly List<FakeIssue> _issues = [];
     private readonly List<IReadOnlyList<string>> _searchAnswers = [];
+    private readonly Dictionary<string, (List<FakeIssue> Found, int Answer, int Offset)> _searchPages = [];
     private readonly Dictionary<string, string> _statusNames = Workflow.BoardOrder.ToDictionary(status => status.Id, status => status.DefaultName);
     private int _nextIssueId = 900001;
+    private readonly Dictionary<string, (List<(FakeIssue Issue, FakeHistory History)> Found, int Offset)> _changelogPages = [];
     private int _nextHistoryId = 200001;
+    private int _nextPageToken = 2;
 
     public FakeJira()
     {
         Handler = new StubHttpHandler()
-            .On(HttpMethod.Get, $"/rest/agile/1.0/board/{BoardId}/sprint", _ => Respond(Sprints()))
+            .On(HttpMethod.Get, $"/rest/agile/1.0/board/{BoardId}/sprint", request => Respond(Sprints(request)))
             .On(HttpMethod.Get, "/rest/api/3/status", _ => Respond(Statuses()))
             .On(HttpMethod.Post, "/rest/api/3/search/jql", request => Respond(Search(request)))
             .On(HttpMethod.Post, "/rest/api/3/changelog/bulkfetch", request => Respond(Changelogs(request)));
@@ -220,6 +242,27 @@ public sealed class FakeJira
     /// <summary>Which of the two documented response shapes to serve.</summary>
     public JiraShapes Shapes { get; set; } = JiraShapes.AsSchemas;
 
+    /// <summary>
+    /// The most issues one page of the search holds, whatever the request asks for: Jira may return fewer
+    /// than asked. Further issues come on later pages, each asked for with the token of the page before.
+    /// </summary>
+    public int SearchPageSize { get; set; } = 1000;
+
+    /// <summary>The most sprints one page of the board's sprint list holds. The rest comes when asked for with <c>startAt</c>.</summary>
+    public int SprintPageSize { get; set; } = 50;
+
+    /// <summary>How a page of the sprint list says whether more follow.</summary>
+    public SprintListEnd SprintListSays { get; set; } = SprintListEnd.IsLastAndTotal;
+
+    /// <summary>The most history entries one page of the bulk changelog holds. Further entries come on later pages.</summary>
+    public int ChangelogPageSize { get; set; } = 10000;
+
+    /// <summary>
+    /// When set, each bulk changelog page after the first starts with the last entry of the page before, again
+    /// (ADR-0004: the endpoint can return duplicate entries depending on page size).
+    /// </summary>
+    public bool RepeatsHistoryOnNextPage { get; set; }
+
     public IReadOnlyList<FakeIssue> Issues
     {
         get
@@ -232,8 +275,8 @@ public sealed class FakeJira
     }
 
     /// <summary>
-    /// The issue keys each search answered with, one entry per search, oldest first: what the tool fetched,
-    /// whatever JQL it used to ask.
+    /// The issue keys each search answered with, one entry per search (all the pages the tool asked for
+    /// together), oldest first: what the tool fetched, whatever JQL it used to ask.
     /// </summary>
     public IReadOnlyList<IReadOnlyList<string>> SearchAnswers
     {
@@ -336,9 +379,11 @@ public sealed class FakeJira
         return new(HttpStatusCode.OK) { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
     }
 
-    private JsonObject Sprints()
+    private JsonObject Sprints(StubRequest request)
     {
-        var sprints = SprintList();
+        var all = SprintList();
+        var startAt = request.Query.TryGetValue("startAt", out var asked) ? int.Parse(asked, CultureInfo.InvariantCulture) : 0;
+        var sprints = all.Skip(startAt).Take(SprintPageSize).ToList();
 
         var values = new JsonArray();
         foreach (var sprint in sprints)
@@ -376,29 +421,59 @@ public sealed class FakeJira
             values.Add(value);
         }
 
-        return new JsonObject
+        // The documented envelope carries both isLast and total, and calls total optional (research note 05).
+        var page = new JsonObject { ["maxResults"] = SprintPageSize, ["startAt"] = startAt };
+        if (SprintListSays is SprintListEnd.IsLastAndTotal or SprintListEnd.TotalOnly)
         {
-            ["maxResults"] = 50,
-            ["startAt"] = 0,
-            ["total"] = sprints.Count,
-            ["isLast"] = true,
-            ["values"] = values,
-        };
+            page["total"] = all.Count;
+        }
+
+        if (SprintListSays is SprintListEnd.IsLastAndTotal or SprintListEnd.IsLastOnly)
+        {
+            page["isLast"] = startAt + sprints.Count >= all.Count;
+        }
+
+        page["values"] = values;
+        return page;
     }
 
     private JsonArray Statuses() => new(Workflow.BoardOrder.Select(status => (JsonNode)StatusDetails(status)).ToArray());
 
     private JsonObject Search(StubRequest request)
     {
-        var updatedSince = UpdatedSince(request);
-        var found = Issues.Where(issue => issue.Updated >= updatedSince).OrderBy(issue => issue.Updated).ToList();
+        // A first page runs the search and remembers its result; a later page continues it from its token.
+        List<FakeIssue> found;
+        int answer;
+        int offset;
+        if (PageToken(request) is { } token)
+        {
+            lock (_gate)
+            {
+                (found, answer, offset) = _searchPages.TryGetValue(token, out var next)
+                    ? next
+                    : throw new InvalidOperationException($"FakeJira: the search was asked for a page token it never gave: {token}");
+            }
+        }
+        else
+        {
+            var updatedSince = UpdatedSince(request);
+            found = [.. Issues.Where(issue => issue.Updated >= updatedSince).OrderBy(issue => issue.Updated)];
+            offset = 0;
+            lock (_gate)
+            {
+                answer = _searchAnswers.Count;
+                _searchAnswers.Add([]);
+            }
+        }
+
+        var served = found.Skip(offset).Take(SearchPageSize).ToList();
         lock (_gate)
         {
-            _searchAnswers.Add([.. found.Select(issue => issue.Key)]);
+            _searchAnswers[answer] = [.. _searchAnswers[answer], .. served.Select(issue => issue.Key)];
         }
 
         var issues = new JsonArray();
-        foreach (var issue in found)
+        foreach (var issue in served)
         {
             issues.Add(new JsonObject
             {
@@ -422,9 +497,41 @@ public sealed class FakeJira
             });
         }
 
-        var page = new JsonObject { ["issues"] = issues, ["isLast"] = true };
-        AddLastPageToken(page);
+        var page = new JsonObject { ["issues"] = issues };
+        var reached = offset + served.Count;
+        if (reached < found.Count)
+        {
+            var nextToken = NextPageToken("SEARCH");
+            lock (_gate)
+            {
+                _searchPages[nextToken] = (found, answer, reached);
+            }
+
+            page["isLast"] = false;
+            page["nextPageToken"] = nextToken;
+        }
+        else
+        {
+            page["isLast"] = true;
+            AddLastPageToken(page);
+        }
+
         return page;
+    }
+
+    /// <summary>The page token a request's body carries, or null on a request for a first page.</summary>
+    private static string? PageToken(StubRequest request)
+    {
+        using var body = JsonDocument.Parse(request.Body);
+        return body.RootElement.TryGetProperty("nextPageToken", out var token) ? token.GetString() : null;
+    }
+
+    private string NextPageToken(string kind)
+    {
+        lock (_gate)
+        {
+            return $"FAKE_{kind}_TOKEN_{_nextPageToken++}";
+        }
     }
 
     /// <summary>
@@ -475,17 +582,48 @@ public sealed class FakeJira
 
     private JsonObject Changelogs(StubRequest request)
     {
-        using var body = JsonDocument.Parse(request.Body);
-        var asked = body.RootElement.GetProperty("issueIdsOrKeys").EnumerateArray().Select(id => id.GetString()).ToHashSet();
-        var fieldIds = body.RootElement.TryGetProperty("fieldIds", out var fields)
-            ? fields.EnumerateArray().Select(id => id.GetString()).ToHashSet()
-            : null;
+        // A first page collects the histories asked for; a later page continues from its token.
+        List<(FakeIssue Issue, FakeHistory History)> found;
+        int offset;
+        if (PageToken(request) is { } token)
+        {
+            lock (_gate)
+            {
+                (found, offset) = _changelogPages.TryGetValue(token, out var next)
+                    ? next
+                    : throw new InvalidOperationException($"FakeJira: the bulk changelog was asked for a page token it never gave: {token}");
+            }
+        }
+        else
+        {
+            using var body = JsonDocument.Parse(request.Body);
+            var asked = body.RootElement.GetProperty("issueIdsOrKeys").EnumerateArray().Select(id => id.GetString()).ToHashSet();
+            var fieldIds = body.RootElement.TryGetProperty("fieldIds", out var fields)
+                ? fields.EnumerateArray().Select(id => id.GetString()).ToHashSet()
+                : null;
+
+            // Oldest history first, then by issue ID: one issue's histories can be spread over several pages (research note 05).
+            found = [.. Issues.Where(issue => asked.Contains(issue.Id) || asked.Contains(issue.Key))
+                .SelectMany(issue => issue.Histories.Where(history => fieldIds is null || fieldIds.Contains(history.FieldId)).Select(history => (issue, history)))
+                .OrderBy(entry => entry.history.At)
+                .ThenBy(entry => entry.issue.Id, StringComparer.Ordinal)];
+            offset = 0;
+        }
+
+        var served = found.Skip(offset).Take(ChangelogPageSize).ToList();
+        var reached = offset + served.Count;
+
+        // ADR-0004: depending on the page size, the endpoint can return an entry again on the next page.
+        if (RepeatsHistoryOnNextPage && offset > 0)
+        {
+            served.Insert(0, found[offset - 1]);
+        }
 
         var logs = new JsonArray();
-        foreach (var issue in Issues.Where(issue => asked.Contains(issue.Id) || asked.Contains(issue.Key)))
+        foreach (var issue in served.GroupBy(entry => entry.Issue))
         {
             var histories = new JsonArray();
-            foreach (var history in issue.Histories.Where(history => fieldIds is null || fieldIds.Contains(history.FieldId)))
+            foreach (var (_, history) in issue)
             {
                 histories.Add(new JsonObject
                 {
@@ -505,14 +643,25 @@ public sealed class FakeJira
                 });
             }
 
-            if (histories.Count > 0)
-            {
-                logs.Add(new JsonObject { ["issueId"] = issue.Id, ["changeHistories"] = histories });
-            }
+            logs.Add(new JsonObject { ["issueId"] = issue.Key.Id, ["changeHistories"] = histories });
         }
 
         var page = new JsonObject { ["issueChangeLogs"] = logs };
-        AddLastPageToken(page);
+        if (reached < found.Count)
+        {
+            var nextToken = NextPageToken("CHANGELOG");
+            lock (_gate)
+            {
+                _changelogPages[nextToken] = (found, reached);
+            }
+
+            page["nextPageToken"] = nextToken;
+        }
+        else
+        {
+            AddLastPageToken(page);
+        }
+
         return page;
     }
 
