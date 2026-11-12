@@ -89,10 +89,29 @@ internal static class SecretsCommand
     /// A different salt gives every person a different hash. So without <c>--replace</c>, a stored salt is
     /// kept, and a new one is not generated while the database holds people hashed with a salt that has since
     /// gone missing. Typing a salt in that case is allowed: it is how the original is restored.
+    /// A stored salt that cannot be read is no reason to stop: the message about it says to set it again.
+    /// Only when the database holds hashed people does it count as a stored salt, which <c>--replace</c> replaces.
     /// </summary>
     private static async Task RefuseToSplitPeopleAsync(AppServices services, IWritableSecretStore store, SecretInfo salt, bool generate, CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrWhiteSpace(store.Get(salt.Name)))
+        string? stored;
+        try
+        {
+            stored = store.Get(salt.Name);
+        }
+        catch (UserFacingException)
+        {
+            if (await SqliteStore.HoldsHashedPeopleAsync(services.DatabasePath, cancellationToken))
+            {
+                throw new UserFacingException(
+                    "The stored hashing salt cannot be read, and the database already holds people hashed with a salt. A different salt would give every person a second hash, "
+                    + "so each would count as two. To store a salt over the one that cannot be read, add --replace.");
+            }
+
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(stored))
         {
             throw new UserFacingException(
                 "A hashing salt is already stored. A different salt gives every person a different hash, so the hashes already in the database would stop matching new ones. To replace it anyway, add --replace.");
