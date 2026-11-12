@@ -35,7 +35,7 @@ public static class SprintReport
     {
         var rows = await QueryAsync<DeliveredRow>(
             store,
-            "SELECT sprint_name, started, ended, delivered_count FROM delivered_per_sprint WHERE sprint_id = @sprintId;",
+            "SELECT sprint_name, started, ended, planned_end, delivered_count FROM delivered_per_sprint WHERE sprint_id = @sprintId;",
             new { sprintId },
             cancellationToken);
 
@@ -104,10 +104,12 @@ public static class SprintReport
     private static void AppendTitle(StringBuilder report, DeliveredRow sprint, TimeZoneInfo teamTimeZone)
     {
         // The dates are the sprint window's, which the figures were counted in. A sprint that is not
-        // completed has no end yet: its window runs to the as-of time, whatever end was planned.
-        var dates = sprint.Ended is null
-            ? $"from {LocalDate(sprint.Started, teamTimeZone)}"
-            : $"{LocalDate(sprint.Started, teamTimeZone)} to {LocalDate(sprint.Ended, teamTimeZone)}";
+        // completed has no end yet: its window runs to the as-of time. Its planned end is shown as a plan,
+        // in words that stay true once that day has passed.
+        var start = LocalDate(sprint.Started, teamTimeZone);
+        var dates = sprint.Ended is not null ? $"{start} to {LocalDate(sprint.Ended, teamTimeZone)}"
+            : sprint.PlannedEnd is null ? $"from {start}, still running"
+            : $"from {start}, still running; planned end {LocalDate(sprint.PlannedEnd, teamTimeZone)}";
 
         report.Append("# ").Append(sprint.SprintName).Append(" (").Append(dates).Append(")\n\n");
     }
@@ -208,6 +210,7 @@ public static class SprintReport
         public string SprintName { get; init; } = "";
         public string Started { get; init; } = "";
         public string? Ended { get; init; }
+        public string? PlannedEnd { get; init; }
         public long DeliveredCount { get; init; }
     }
 

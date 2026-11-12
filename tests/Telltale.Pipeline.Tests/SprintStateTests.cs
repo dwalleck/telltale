@@ -23,8 +23,8 @@ public class SprintStateTests
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
         var report = await pipeline.ReadReportAsync(42);
-        // Not completed yet, so the title gives no end: the figures run to the as-of time, not to the planned end.
-        await Assert.That(report).StartsWith("# Fake Sprint 42 (from 2026-01-19)\n");
+        // Not completed yet: the title says so and gives the planned end as that, not as the end of the figures.
+        await Assert.That(report).StartsWith("# Fake Sprint 42 (from 2026-01-19, still running; planned end 2026-02-02)\n");
         await Assert.That(report).Contains("\nDelivered issues: 1\n");
     }
 
@@ -44,7 +44,7 @@ public class SprintStateTests
     }
 
     [Test]
-    public async Task An_active_sprint_past_its_planned_end_still_takes_deliveries_and_its_title_gives_no_end()
+    public async Task An_active_sprint_past_its_planned_end_still_takes_deliveries_and_its_title_says_it_is_still_running()
     {
         // Sprint 42 was planned to end on 2 February and is still running on the 5th.
         await using var pipeline = new PipelineHarness(Local(2026, 2, 5, 12));
@@ -56,8 +56,20 @@ public class SprintStateTests
         await pipeline.RunAllAsync(["run", "--sprint", "42"]);
 
         var report = await pipeline.ReadReportAsync(42);
-        await Assert.That(report).StartsWith("# Fake Sprint 42 (from 2026-01-19)\n");
+        await Assert.That(report).StartsWith("# Fake Sprint 42 (from 2026-01-19, still running; planned end 2026-02-02)\n");
         await Assert.That(report).Contains("\nDelivered issues: 1\n");
+    }
+
+    [Test]
+    public async Task An_active_sprint_with_no_planned_end_has_a_title_that_names_none()
+    {
+        await using var pipeline = new PipelineHarness(Now);
+        pipeline.Jira.Handler.Override(HttpMethod.Get, $"/rest/agile/1.0/board/{FakeJira.BoardId}/sprint", _ => true, StubHttpHandler.Json(
+            """{"isLast":true,"values":[{"id":42,"state":"active","name":"Fake Sprint 42","startDate":"2026-01-19T16:30:00.000Z","originBoardId":400001}]}"""));
+
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+
+        await Assert.That(await pipeline.ReadReportAsync(42)).StartsWith("# Fake Sprint 42 (from 2026-01-19, still running)\n");
     }
 
     [Test]
