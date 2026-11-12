@@ -44,6 +44,38 @@ public sealed record SprintStatusTime(string IssueId, string SprintId, string St
 /// </summary>
 public sealed record BoardStatus(string StatusId, int Position, bool IsDone);
 
+/// <summary>The ways an issue's changelog can fail to line up. Each has one fixed message.</summary>
+public enum ChangelogAnomalyKind
+{
+    /// <summary>A status change does not start where the one before it ended, is dated before the issue was created, or the history ends in a status the issue is not in.</summary>
+    StatusHistory,
+
+    /// <summary>A Sprint field change does not start from the sprints the one before it left, or the history ends in sprints the field does not list.</summary>
+    SprintHistory,
+
+    /// <summary>The issue is in a done-role status, but its status history ends in one that is not done: nothing dates a delivery (owner decision D8).</summary>
+    DoneButHistoryEndsOutsideDone,
+
+    /// <summary>The issue is in a done-role status and its history holds no move into one: it was created there (owner decision D9).</summary>
+    DoneWithoutMoveIntoDone,
+}
+
+/// <summary>
+/// One changelog anomaly of one issue. It can only say which issue and which kind: <see cref="Message"/> is the
+/// kind's fixed text, so no name, summary or changelog value can travel in it to the store or a log.
+/// </summary>
+public sealed record IssueAnomaly(string IssueId, ChangelogAnomalyKind Kind)
+{
+    public string Message => Kind switch
+    {
+        ChangelogAnomalyKind.StatusHistory => "its status history does not line up",
+        ChangelogAnomalyKind.SprintHistory => "its Sprint field history does not line up",
+        ChangelogAnomalyKind.DoneButHistoryEndsOutsideDone => "it is in a done status but its status history ends outside done, so it is not counted as delivered",
+        ChangelogAnomalyKind.DoneWithoutMoveIntoDone => "it is in a done status but its history holds no move into done, so it is not counted as delivered",
+        _ => throw new ArgumentOutOfRangeException(nameof(Kind), Kind, "Not a changelog anomaly kind."),
+    };
+}
+
 /// <summary>Everything derive computes. It replaces the previous derived data as a whole (ADR-0002).</summary>
 public sealed record DerivedData(
     IReadOnlyList<DerivedSprintWindow> SprintWindows,
@@ -51,4 +83,11 @@ public sealed record DerivedData(
     IReadOnlyList<IssueCycle> IssueCycles,
     IReadOnlyList<IssueMembershipInterval> MembershipIntervals,
     IReadOnlyList<SprintStatusTime> SprintStatusTimes,
-    IReadOnlyList<BoardStatus> BoardStatuses);
+    IReadOnlyList<BoardStatus> BoardStatuses)
+{
+    /// <summary>The as-of time the rebuild used to close open intervals and the running sprint's window.</summary>
+    public required DateTimeOffset AsOf { get; init; }
+
+    /// <summary>The changelog anomalies found, at most one per issue and kind.</summary>
+    public IReadOnlyList<IssueAnomaly> Anomalies { get; init; } = [];
+}

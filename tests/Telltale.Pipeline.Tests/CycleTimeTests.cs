@@ -402,7 +402,10 @@ public class CycleTimeTests
             ],
             MembershipIntervals: [],
             SprintStatusTimes: [],
-            BoardStatuses: []));
+            BoardStatuses: [])
+        {
+            AsOf = end,
+        });
 
         var rows = await CycleTimeRowsAsync(pipeline, 41);
         await Assert.That(rows.Select(row => (row.PointBucket, row.IssueCount, row.P85BusinessDays, row.P85CalendarDays)))

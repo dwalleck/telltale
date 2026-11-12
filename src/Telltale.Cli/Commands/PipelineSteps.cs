@@ -57,9 +57,19 @@ internal sealed class PipelineSteps
         return new PipelineSteps(services, config, roles, abandonedResolutionIds, timeZone, store);
     }
 
-    /// <summary>Brings the raw tables up to date with Jira.</summary>
-    public Task SyncAsync(CancellationToken cancellationToken) =>
-        new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets).BringUpToDateAsync(_store, cancellationToken);
+    /// <summary>
+    /// Brings the raw tables up to date with Jira, then logs every changelog anomaly in the store to standard
+    /// error, one line per issue and kind. A line holds the Jira issue ID and the kind's fixed message, never the key.
+    /// </summary>
+    public async Task SyncAsync(CancellationToken cancellationToken)
+    {
+        await new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets).BringUpToDateAsync(_store, cancellationToken);
+
+        foreach (var anomaly in ChangelogAnomalies.Find(await _store.ReadRawAsync(cancellationToken), _roles))
+        {
+            await _services.Error.WriteLineAsync($"Changelog anomaly: issue {anomaly.IssueId}: {anomaly.Message}.");
+        }
+    }
 
     /// <summary>Rebuilds every derived table and metric view from the raw tables.</summary>
     public async Task DeriveAsync(CancellationToken cancellationToken)

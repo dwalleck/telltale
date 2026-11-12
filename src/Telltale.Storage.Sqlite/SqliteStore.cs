@@ -265,6 +265,22 @@ public sealed class SqliteStore : ITelltaleStore
             derived.BoardStatuses.Select(status => new object?[] { status.StatusId, (long)status.Position, status.IsDone ? 1L : 0L }),
             cancellationToken);
 
+        await InsertRowsAsync(
+            connection,
+            transaction,
+            "INSERT INTO run (as_of) VALUES (@asOf);",
+            ["@asOf"],
+            [[StoredTime.ToStored(derived.AsOf)]],
+            cancellationToken);
+
+        await InsertRowsAsync(
+            connection,
+            transaction,
+            "INSERT INTO anomaly (issue_id, message) VALUES (@issueId, @message);",
+            ["@issueId", "@message"],
+            derived.Anomalies.Select(anomaly => new object?[] { anomaly.IssueId, anomaly.Message }),
+            cancellationToken);
+
         foreach (var (_, sql) in Scripts.InFolder("Views"))
         {
             await connection.ExecuteAsync(Command(cancellationToken, sql, transaction: transaction));

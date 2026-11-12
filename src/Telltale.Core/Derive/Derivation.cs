@@ -27,13 +27,8 @@ public static class Derivation
                 : $"{sprintsUnknown} issues in the store were fetched before the Sprint field was kept, so the sprints they belonged to are unknown. Run a backfill to fetch them again. No figures were derived.");
         }
 
-        var sprintChanges = raw.Changes
-            .Where(change => change.Field == ChangeFields.Sprint)
-            .ToLookup(change => change.IssueId, change => SprintChange.FromRaw(change.HistoryId, change.At, change.From, change.To));
-
-        var statusChanges = raw.Changes
-            .Where(change => change.Field == ChangeFields.Status && change.To is not null)
-            .ToLookup(change => change.IssueId, change => new StatusChange(change.HistoryId, change.At, change.From, change.To!));
+        var sprintChanges = SprintChangesByIssue(raw);
+        var statusChanges = StatusChangesByIssue(raw);
 
         // Which sprints count is decided here and nowhere else. Only the configured board's: the store can
         // still hold sprints of a board ID that was since corrected. And only sprints that have started:
@@ -48,6 +43,7 @@ public static class Derivation
         var cycles = new List<IssueCycle>();
         var memberships = new List<IssueMembershipInterval>();
         var sprintStatusTimes = new List<SprintStatusTime>();
+        var anomalies = new List<IssueAnomaly>();
 
         foreach (var issue in raw.Issues)
         {
@@ -72,6 +68,7 @@ public static class Derivation
             });
 
             var membership = SprintMembership.Build(issue.Created, SprintMembership.ParseSprintIds(issue.SprintIds), sprintChanges[issue.IssueId]);
+            anomalies.AddRange(ChangelogAnomalies.Of(issue, timeline, membership, roles));
             memberships.AddRange(membership.Intervals.Select(interval => new IssueMembershipInterval(issue.IssueId, interval.SprintId, interval.Start, interval.End)));
 
             // Only sprints that count (the windows above) have time in status. A sprint the issue was never in gives nothing.
@@ -99,8 +96,24 @@ public static class Derivation
             cycles,
             memberships,
             sprintStatusTimes,
-            [.. roles.StatusIds.Select((statusId, index) => new BoardStatus(statusId, index + 1, roles.IsDone(statusId)))]);
+            [.. roles.StatusIds.Select((statusId, index) => new BoardStatus(statusId, index + 1, roles.IsDone(statusId)))])
+        {
+            AsOf = asOf,
+            Anomalies = anomalies,
+        };
     }
+
+    /// <summary>Each issue's Sprint field changes.</summary>
+    internal static ILookup<string, SprintChange> SprintChangesByIssue(RawData raw) =>
+        raw.Changes
+            .Where(change => change.Field == ChangeFields.Sprint)
+            .ToLookup(change => change.IssueId, change => SprintChange.FromRaw(change.HistoryId, change.At, change.From, change.To));
+
+    /// <summary>Each issue's status changes.</summary>
+    internal static ILookup<string, StatusChange> StatusChangesByIssue(RawData raw) =>
+        raw.Changes
+            .Where(change => change.Field == ChangeFields.Status && change.To is not null)
+            .ToLookup(change => change.IssueId, change => new StatusChange(change.HistoryId, change.At, change.From, change.To!));
 
     /// <summary>
     /// When a sprint's window ends: at its completion; for a closed sprint Jira gives no completion time,

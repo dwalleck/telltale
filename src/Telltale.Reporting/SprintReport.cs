@@ -42,6 +42,11 @@ public static class SprintReport
             new { sprintId },
             cancellationToken));
         AppendTimeInStatus(report, await ReadTimeInStatusAsync(store, sprintId, cancellationToken));
+        AppendMethodNote(report, teamTimeZone);
+        AppendFooter(
+            report,
+            (await store.QueryViewsAsync<DataQualityRow>("SELECT as_of, anomaly_issue_count, delivered_between_sprints_count FROM data_quality;", cancellationToken: cancellationToken)).Single(),
+            teamTimeZone);
         return report.ToString();
     }
 
@@ -135,6 +140,33 @@ public static class SprintReport
     }
 
     /// <summary>
+    /// What the figures mean, with each rule as the glossary and the owner's decisions state it. The suppression
+    /// rule is ADR-0003's for results grouped by issue attributes.
+    /// </summary>
+    private static void AppendMethodNote(StringBuilder report, TimeZoneInfo teamTimeZone) =>
+        report.Append("\n## Method\n\n")
+            .Append("- Durations are in business days: days that are neither a weekend nor a company holiday, each counted in full (24 hours) in the team's time zone (").Append(teamTimeZone.Id).Append("). Calendar days are shown alongside: elapsed time divided by 24 hours.\n")
+            .Append("- Cycle time runs from an issue's first entry into a work status to its last entry into a done status, for delivered issues only. It belongs to the sprint in which the issue was delivered.\n")
+            .Append("- Figures are medians and P85s. The median is the middle value, or the mean of the two middle values. The P85 is the smallest value with at least 85% of the values at or below it.\n")
+            .Append("- Time in status covers the statuses before done. An issue counts toward a status only if it spent more than zero business days there.\n")
+            .Append("- A figure is suppressed when the issues in the sprint have fewer than five distinct assignees, or when the figure itself has fewer than three distinct assignees behind it, so that it cannot show one person's work. The delivered count is subject to the first check only. A suppressed row still shows its issue count.\n")
+            .Append("- An interval that is still open (an issue still in a status, a sprint not yet completed) ends at the as-of time below.\n")
+            .Append("- Figures can include work since removed from Jira until the next backfill.\n");
+
+    /// <summary>
+    /// The data-quality footer. Its two counts cover the whole store, not the sprint: an issue delivered
+    /// between sprints belongs to no sprint. They are counts only: no issue is named.
+    /// </summary>
+    private static void AppendFooter(StringBuilder report, DataQualityRow quality, TimeZoneInfo teamTimeZone)
+    {
+        var asOf = TimeZoneInfo.ConvertTime(StoredTime.FromStored(quality.AsOf), teamTimeZone);
+        report.Append("\n---\n\n")
+            .Append("- As-of time: ").Append(asOf.ToString("yyyy-MM-dd HH:mm zzz", CultureInfo.InvariantCulture)).Append(" (").Append(teamTimeZone.Id).Append(")\n")
+            .Append("- Issues with changelog anomalies, in the whole store: ").Append(quality.AnomalyIssueCount.ToString(CultureInfo.InvariantCulture)).Append('\n')
+            .Append("- Issues delivered between sprints, in the whole store: ").Append(quality.DeliveredBetweenSprintsCount.ToString(CultureInfo.InvariantCulture)).Append('\n');
+    }
+
+    /// <summary>
     /// A point bucket's label: the estimate in full (3, 0.5, 2.001), so two buckets the view keeps apart
     /// never print alike. The round-trip format gives the shortest text that identifies the number.
     /// </summary>
@@ -156,6 +188,13 @@ public static class SprintReport
         public string StatusName { get; init; } = "";
         public long IssueCount { get; init; }
         public double MedianBusinessDays { get; init; }
+    }
+
+    private sealed class DataQualityRow
+    {
+        public string AsOf { get; init; } = "";
+        public long AnomalyIssueCount { get; init; }
+        public long DeliveredBetweenSprintsCount { get; init; }
     }
 
     private sealed class DeliveredRow
