@@ -13,16 +13,19 @@ namespace Telltale.Storage.Sqlite;
 /// <list type="bullet">
 /// <item><c>Sql/Migrations</c>: raw tables. Each script runs once per database, recorded by file name. Never edit one
 /// that has been merged; add a new file. Raw data is costly to refetch, so these tables are never dropped.</item>
-/// <item><c>Sql/Derived</c>: derived tables. Every rebuild runs every script, and each script drops and recreates its
-/// table, so a changed definition needs no migration (ADR-0002).</item>
-/// <item><c>Sql/Views</c>: metric views, the only thing Reporting and ad hoc SQL read. Every rebuild drops all views and
-/// runs every script. A group-size guard belongs inside its view (ADR-0003).</item>
+/// <item><c>Sql/Derived</c>: derived tables. Every rebuild drops what the last one created and runs every script, so a
+/// changed definition needs no migration (ADR-0002). A script only creates; it never drops.</item>
+/// <item><c>Sql/Views</c>: metric views, the only thing Reporting and ad hoc SQL read. Rebuilt the same way, after the
+/// derived tables. A group-size guard belongs inside its view (ADR-0003).</item>
+/// <item>Tables and views the scripts create are recorded in <c>derived_object</c>. Anything else in the database
+/// (a view the owner saved by hand) is left alone.</item>
 /// </list>
 /// Times are stored as UTC text (<see cref="StoredTime"/>).
 /// </remarks>
 public sealed class SqliteStore : ITelltaleStore
 {
     private readonly string _connectionString;
+    private readonly string _readOnlyConnectionString;
 
     static SqliteStore()
     {
@@ -45,29 +48,36 @@ public sealed class SqliteStore : ITelltaleStore
             Pooling = false,
             ForeignKeys = true,
         }.ToString();
+
+        // Queries over the metric views cannot write, whatever SQL they are given.
+        _readOnlyConnectionString = new SqliteConnectionStringBuilder(_connectionString) { Mode = SqliteOpenMode.ReadOnly }.ToString();
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        await using var connection = await OpenAsync(cancellationToken);
-        await connection.ExecuteAsync("CREATE TABLE IF NOT EXISTS schema_migration (name TEXT PRIMARY KEY) STRICT;");
-        var applied = (await connection.QueryAsync<string>("SELECT name FROM schema_migration;")).ToHashSet(StringComparer.Ordinal);
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
+        await connection.ExecuteAsync(Command(cancellationToken, 
+            """
+            CREATE TABLE IF NOT EXISTS schema_migration (name TEXT PRIMARY KEY) STRICT;
+            CREATE TABLE IF NOT EXISTS derived_object (name TEXT PRIMARY KEY, kind TEXT NOT NULL) STRICT;
+            """));
+        var applied = (await connection.QueryAsync<string>(Command(cancellationToken, "SELECT name FROM schema_migration;"))).ToHashSet(StringComparer.Ordinal);
 
         foreach (var (name, sql) in Scripts.InFolder("Migrations").Where(script => !applied.Contains(script.Name)))
         {
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-            await connection.ExecuteAsync(sql, transaction: transaction);
-            await connection.ExecuteAsync("INSERT INTO schema_migration (name) VALUES (@name);", new { name }, transaction);
+            await connection.ExecuteAsync(Command(cancellationToken, sql, transaction: transaction));
+            await connection.ExecuteAsync(Command(cancellationToken, "INSERT INTO schema_migration (name) VALUES (@name);", new { name }, transaction));
             await transaction.CommitAsync(cancellationToken);
         }
     }
 
     public async Task WriteRawAsync(RawData batch, CancellationToken cancellationToken = default)
     {
-        await using var connection = await OpenAsync(cancellationToken);
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
-        await connection.ExecuteAsync(
+        await connection.ExecuteAsync(Command(cancellationToken, 
             """
             INSERT INTO issue (issue_id, issue_key, issue_type_id, created, status_id, resolution_id, story_points, assignee_hash, updated)
             VALUES (@IssueId, @Key, @IssueTypeId, @Created, @StatusId, @ResolutionId, @StoryPoints, @AssigneeHash, @Updated)
@@ -93,10 +103,10 @@ public sealed class SqliteStore : ITelltaleStore
                 issue.AssigneeHash,
                 Updated = StoredTime.ToStored(issue.Updated),
             }),
-            transaction);
+            transaction));
 
         // A changelog entry never changes once written, so a repeat is ignored.
-        await connection.ExecuteAsync(
+        await connection.ExecuteAsync(Command(cancellationToken, 
             """
             INSERT INTO change (history_id, field, issue_id, at, from_value, to_value)
             VALUES (@HistoryId, @Field, @IssueId, @At, @From, @To)
@@ -111,9 +121,9 @@ public sealed class SqliteStore : ITelltaleStore
                 change.From,
                 change.To,
             }),
-            transaction);
+            transaction));
 
-        await connection.ExecuteAsync(
+        await connection.ExecuteAsync(Command(cancellationToken, 
             """
             INSERT INTO sprint (sprint_id, board_id, name, state, started, planned_end, completed)
             VALUES (@SprintId, @BoardId, @Name, @State, @Started, @PlannedEnd, @Completed)
@@ -135,28 +145,28 @@ public sealed class SqliteStore : ITelltaleStore
                 PlannedEnd = StoredTime.ToStored(sprint.PlannedEnd),
                 Completed = StoredTime.ToStored(sprint.Completed),
             }),
-            transaction);
+            transaction));
 
-        await connection.ExecuteAsync(
+        await connection.ExecuteAsync(Command(cancellationToken, 
             """
             INSERT INTO status (status_id, name, category)
             VALUES (@StatusId, @Name, @Category)
             ON CONFLICT (status_id) DO UPDATE SET name = excluded.name, category = excluded.category;
             """,
             batch.Statuses,
-            transaction);
+            transaction));
 
         await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task<RawData> ReadRawAsync(CancellationToken cancellationToken = default)
     {
-        await using var connection = await OpenAsync(cancellationToken);
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
 
-        var issues = await connection.QueryAsync<IssueRow>("SELECT * FROM issue ORDER BY issue_id;");
-        var changes = await connection.QueryAsync<ChangeRow>("SELECT * FROM change ORDER BY issue_id, at, history_id;");
-        var sprints = await connection.QueryAsync<SprintRow>("SELECT * FROM sprint ORDER BY sprint_id;");
-        var statuses = await connection.QueryAsync<StatusRow>("SELECT * FROM status ORDER BY status_id;");
+        var issues = await connection.QueryAsync<IssueRow>(Command(cancellationToken, "SELECT * FROM issue ORDER BY issue_id;"));
+        var changes = await connection.QueryAsync<ChangeRow>(Command(cancellationToken, "SELECT * FROM change ORDER BY issue_id, at, history_id;"));
+        var sprints = await connection.QueryAsync<SprintRow>(Command(cancellationToken, "SELECT * FROM sprint ORDER BY sprint_id;"));
+        var statuses = await connection.QueryAsync<StatusRow>(Command(cancellationToken, "SELECT * FROM status ORDER BY status_id;"));
 
         return new RawData(
             [.. issues.Select(row => new RawIssue(row.IssueId, row.IssueKey, row.IssueTypeId, StoredTime.FromStored(row.Created), row.StatusId, row.ResolutionId, row.StoryPoints, row.AssigneeHash, StoredTime.FromStored(row.Updated)))],
@@ -167,21 +177,27 @@ public sealed class SqliteStore : ITelltaleStore
 
     public async Task ReplaceDerivedAsync(DerivedData derived, CancellationToken cancellationToken = default)
     {
-        await using var connection = await OpenAsync(cancellationToken);
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
-        // Views first: they read the derived tables about to be dropped.
-        foreach (var view in await connection.QueryAsync<string>("SELECT name FROM sqlite_master WHERE type = 'view';", transaction: transaction))
+        // Drop what the previous rebuild created, and only that: a table or view the owner made by hand is
+        // not the tool's to drop, and one whose script has since been removed must not linger.
+        // Views go first, because they read the derived tables.
+        var previous = await connection.QueryAsync<(string Name, string Kind)>(Command(cancellationToken, "SELECT name, kind FROM derived_object ORDER BY kind = 'view' DESC, name;", transaction: transaction));
+        foreach (var (name, kind) in previous)
         {
-            await connection.ExecuteAsync($"DROP VIEW \"{view.Replace("\"", "\"\"", StringComparison.Ordinal)}\";", transaction: transaction);
+            await connection.ExecuteAsync(Command(cancellationToken, $"DROP {(kind == "view" ? "VIEW" : "TABLE")} IF EXISTS {Quoted(name)};", transaction: transaction));
         }
+
+        await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM derived_object;", transaction: transaction));
+        var before = (await connection.QueryAsync<string>(Command(cancellationToken, AllTablesAndViews, transaction: transaction))).ToHashSet(StringComparer.Ordinal);
 
         foreach (var (_, sql) in Scripts.InFolder("Derived"))
         {
-            await connection.ExecuteAsync(sql, transaction: transaction);
+            await connection.ExecuteAsync(Command(cancellationToken, sql, transaction: transaction));
         }
 
-        await connection.ExecuteAsync(
+        await connection.ExecuteAsync(Command(cancellationToken, 
             "INSERT INTO status_interval (issue_id, status_id, started, ended) VALUES (@IssueId, @StatusId, @Started, @Ended);",
             derived.StatusIntervals.Select(interval => new
             {
@@ -190,9 +206,9 @@ public sealed class SqliteStore : ITelltaleStore
                 Started = StoredTime.ToStored(interval.Start),
                 Ended = StoredTime.ToStored(interval.End),
             }),
-            transaction);
+            transaction));
 
-        await connection.ExecuteAsync(
+        await connection.ExecuteAsync(Command(cancellationToken, 
             "INSERT INTO issue_cycle (issue_id, cycle_end, delivered, delivery_sprint_id) VALUES (@IssueId, @CycleEnd, @Delivered, @DeliverySprintId);",
             derived.IssueCycles.Select(cycle => new
             {
@@ -201,25 +217,38 @@ public sealed class SqliteStore : ITelltaleStore
                 cycle.Delivered,
                 cycle.DeliverySprintId,
             }),
-            transaction);
+            transaction));
 
         foreach (var (_, sql) in Scripts.InFolder("Views"))
         {
-            await connection.ExecuteAsync(sql, transaction: transaction);
+            await connection.ExecuteAsync(Command(cancellationToken, sql, transaction: transaction));
         }
+
+        // Whatever the scripts created is the tool's, and is what the next rebuild drops.
+        await connection.ExecuteAsync(Command(cancellationToken, 
+            "INSERT INTO derived_object (name, kind) SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT IN @before;",
+            new { before },
+            transaction));
 
         await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<T>> QueryViewsAsync<T>(string sql, object? parameters = null, CancellationToken cancellationToken = default)
     {
-        await using var connection = await OpenAsync(cancellationToken);
+        await using var connection = await OpenAsync(_readOnlyConnectionString, cancellationToken);
         return (await connection.QueryAsync<T>(new CommandDefinition(sql, parameters, cancellationToken: cancellationToken))).AsList();
     }
 
-    private async Task<DbConnection> OpenAsync(CancellationToken cancellationToken)
+    private static CommandDefinition Command(CancellationToken cancellationToken, string sql, object? parameters = null, DbTransaction? transaction = null) =>
+        new(sql, parameters, transaction, cancellationToken: cancellationToken);
+
+    private const string AllTablesAndViews = "SELECT name FROM sqlite_master WHERE type IN ('table', 'view');";
+
+    private static string Quoted(string identifier) => $"\"{identifier.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+
+    private static async Task<DbConnection> OpenAsync(string connectionString, CancellationToken cancellationToken)
     {
-        var connection = new SqliteConnection(_connectionString);
+        var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
         return connection;
     }

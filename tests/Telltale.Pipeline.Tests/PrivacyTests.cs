@@ -39,6 +39,19 @@ public class PrivacyTests
     }
 
     [Test]
+    public async Task White_space_around_the_salt_does_not_change_the_hash()
+    {
+        // A salt pasted with a trailing newline must hash people the same way as the clean one.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Secrets[SecretName.HashingSalt] = "  synthetic-salt-one\r\n";
+        AddScenario(pipeline.Jira);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await ReadDatabaseAsync(pipeline)).Contains(PersonOneHashedWithSaltOne);
+    }
+
+    [Test]
     public async Task No_account_id_name_email_or_summary_reaches_the_database_the_report_or_the_console()
     {
         await using var pipeline = new PipelineHarness();
@@ -61,6 +74,16 @@ public class PrivacyTests
         await Assert.That(forbidden).Contains(People.Two.DisplayName);
         await Assert.That(forbidden).Contains(People.One.Email);
         await Assert.That(forbidden).Contains(pipeline.Jira.Issues[0].Summary);
+        await Assert.That(forbidden).Contains(pipeline.Jira.Issues[0].Description);
+
+        // Free text and people the fake serves beyond the assignee: the changelog authors, the sprint goal,
+        // the project name and the resolution and status descriptions.
+        await Assert.That(forbidden).Contains(People.Three.DisplayName);
+        await Assert.That(forbidden).Contains(People.BoardAdmin.AccountId);
+        await Assert.That(forbidden).Contains("Synthetic goal of sprint 41 that must never be stored");
+        await Assert.That(forbidden).Contains(FakeJira.ProjectName);
+        await Assert.That(forbidden).Contains(FakeJira.ResolutionDescription);
+        await Assert.That(forbidden).Contains(FakeJira.StatusDescription);
 
         var written = files.Select(file => (Where: file.Key, Text: file.Value))
             .Append((Where: "standard output", Text: pipeline.Out.ToString()))
@@ -95,13 +118,17 @@ public class PrivacyTests
         await Assert.That(leaks).IsEmpty();
     }
 
-    /// <summary>Two assigned issues delivered in sprint 41 and one unassigned issue still in development.</summary>
+    /// <summary>
+    /// Two assigned issues delivered in sprint 41 and one unassigned issue still in development. FAKE-1 is
+    /// resolved and was moved by someone who is not its assignee; the other moves are the board admin's.
+    /// </summary>
     private static void AddScenario(FakeJira jira)
     {
         jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
         jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).AssignedTo(People.One)
-            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
-            .Moved(Local(2026, 1, 9, 15), Workflow.Done);
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development, by: People.Three)
+            .Moved(Local(2026, 1, 9, 15), Workflow.Done, by: People.Three)
+            .Resolved("300001");
         jira.AddIssue("FAKE-2", Local(2026, 1, 6, 9)).AssignedTo(People.Two)
             .Moved(Local(2026, 1, 8, 9), Workflow.Development)
             .Moved(Local(2026, 1, 14, 11), Workflow.Done);

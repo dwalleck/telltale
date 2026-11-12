@@ -21,6 +21,108 @@ public class JiraFailureTests
         await Assert.That(File.Exists(Path.Combine(pipeline.ReportDirectory, "sprint-41.md"))).IsFalse();
     }
 
+    [Test]
+    public async Task A_tls_or_proxy_failure_is_reported_plainly_and_names_the_proxy_and_the_certificate()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        pipeline.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/status", _ => true,
+            _ => throw new HttpRequestException(HttpRequestError.SecureConnectionError, "synthetic TLS failure"));
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Could not reach Jira (GET rest/api/3/status): SecureConnectionError. "
+            + "On the corporate network this usually means the proxy or the certificate: check that the system proxy is set and that the corporate root certificate is trusted.\n");
+    }
+
+    [Test]
+    public async Task A_request_that_times_out_is_reported_plainly()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        pipeline.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/status", _ => true,
+            _ => throw new TaskCanceledException("synthetic timeout", new TimeoutException()));
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo("Jira did not answer GET rest/api/3/status in time.\n");
+    }
+
+    [Test]
+    public async Task A_web_page_served_in_place_of_jiras_answer_is_reported_plainly()
+    {
+        // A proxy block page or a sign-in page arrives as HTML with status 200.
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        pipeline.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/status", _ => true,
+            _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("<html>synthetic block page for Fake Person One</html>", System.Text.Encoding.UTF8, "text/html") });
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "The answer to GET rest/api/3/status was not JSON. A proxy or sign-in page may have been served in place of Jira's answer.\n");
+    }
+
+    [Test]
+    public async Task An_answer_without_the_expected_fields_is_reported_plainly_and_quotes_nothing()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        pipeline.Jira.Handler.Override(HttpMethod.Post, "/rest/api/3/search/jql", _ => true,
+            StubHttpHandler.Json("""{"issues":[{"id":"900001","key":"FAKE-1","fields":{"created":"not a time by Fake Person One"}}]}"""));
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira's issue search answered in a shape this tool does not understand (KeyNotFoundException). Nothing was stored.\n");
+    }
+
+    [Test]
+    public async Task A_timestamp_jira_sends_in_an_unknown_form_is_reported_plainly_and_not_quoted()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        pipeline.Jira.Handler.Override(HttpMethod.Get, $"/rest/agile/1.0/board/{FakeJira.BoardId}/sprint", _ => true,
+            StubHttpHandler.Json("""{"isLast":true,"values":[{"id":41,"state":"closed","name":"Fake Sprint 41","startDate":"5 January, says Fake Person One"}]}"""));
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira's sprint list answered in a shape this tool does not understand (FormatException). Nothing was stored.\n");
+    }
+
+    [Test]
+    public async Task A_proxy_that_asks_for_authentication_is_not_blamed_on_jira()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        pipeline.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/status", _ => true,
+            StubHttpHandler.Json("{}", HttpStatusCode.ProxyAuthenticationRequired));
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "The proxy asked for authentication (407) on GET rest/api/3/status, so the request never reached Jira. Check the system proxy settings and that this account may use the proxy.\n");
+    }
+
+    [Test]
+    public async Task The_production_http_handler_offers_the_signed_in_users_credentials_to_the_system_proxy()
+    {
+        var handler = Telltale.Cli.AppServices.ForProduction().HttpHandler;
+
+        await Assert.That(handler).IsTypeOf<SocketsHttpHandler>();
+        var sockets = (SocketsHttpHandler)handler;
+        await Assert.That(sockets.UseProxy).IsTrue();
+        await Assert.That(sockets.DefaultProxyCredentials).IsSameReferenceAs(CredentialCache.DefaultCredentials);
+    }
+
     // Paging belongs to a later ticket. Until then a further page must stop the run, never be dropped silently.
 
     [Test]
@@ -78,8 +180,40 @@ public class JiraFailureTests
         await Assert.That(body.RootElement.GetProperty("jql").GetString())
             .IsEqualTo("project in (\"FAKE\") AND updated >= \"2025-01-01\" ORDER BY updated ASC");
         var fields = body.RootElement.GetProperty("fields").EnumerateArray().Select(field => field.GetString()!).ToList();
+        await Assert.That(body.RootElement.GetProperty("maxResults").GetInt32()).IsEqualTo(5000);
         await Assert.That(fields).IsEquivalentTo(new[] { "issuetype", "status", "resolution", "assignee", "created", "updated", FakeJira.StoryPointFieldId });
         await Assert.That(pipeline.Jira.Handler.Requests.Where(request => request.Query.ContainsKey("expand") || request.Body.Contains("\"expand\"", StringComparison.Ordinal))).IsEmpty();
+    }
+
+    [Test]
+    public async Task The_changelog_request_asks_for_the_largest_page_jira_documents()
+    {
+        // Without it Jira's default page applies and a board of ordinary size needs paging, which is not built yet.
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        var request = pipeline.Jira.Handler.Requests.Single(request => request.Path == "/rest/api/3/changelog/bulkfetch");
+        using var body = System.Text.Json.JsonDocument.Parse(request.Body);
+        await Assert.That(body.RootElement.GetProperty("maxResults").GetInt32()).IsEqualTo(10000);
+    }
+
+    [Test]
+    public async Task The_search_date_is_written_in_the_gregorian_calendar_whatever_the_machines_culture()
+    {
+        // ar-SA uses the Um Al Qura calendar by default, where 2025-01-01 is a date in 1446.
+        // The current culture flows with the async context, so this does not touch other tests.
+        System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("ar-SA");
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        var search = pipeline.Jira.Handler.Requests.Single(request => request.Path == "/rest/api/3/search/jql");
+        using var body = System.Text.Json.JsonDocument.Parse(search.Body);
+        await Assert.That(body.RootElement.GetProperty("jql").GetString()).Contains("updated >= \"2025-01-01\"");
+        await Assert.That(await pipeline.ReadReportAsync(41)).StartsWith("# Fake Sprint 41 (2026-01-05 to 2026-01-19)\n");
     }
 
     private static void AddSprintAndIssue(FakeJira jira)

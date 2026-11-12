@@ -20,6 +20,10 @@ public sealed class JiraCollector
     // The bulk changelog endpoint takes at most 1000 issues per request.
     private const int ChangelogIssuesPerRequest = 1000;
 
+    // The largest pages Jira documents for the search and bulk changelog endpoints.
+    private const int SearchPageSize = 5000;
+    private const int ChangelogPageSize = 10000;
+
     private readonly HttpMessageHandler _handler;
     private readonly JiraConfig _config;
     private readonly ISecretStore _secrets;
@@ -49,10 +53,10 @@ public sealed class JiraCollector
     private static async Task<List<RawStatus>> FetchStatusesAsync(JiraClient jira, CancellationToken cancellationToken)
     {
         using var document = await jira.GetAsync("rest/api/3/status", cancellationToken);
-        return [.. document.RootElement.EnumerateArray().Select(status => new RawStatus(
+        return Read<List<RawStatus>>("status list", () => [.. document.RootElement.EnumerateArray().Select(status => new RawStatus(
             status.GetProperty("id").GetString()!,
             status.GetProperty("name").GetString()!,
-            status.GetProperty("statusCategory").GetProperty("key").GetString()!))];
+            status.GetProperty("statusCategory").GetProperty("key").GetString()!))]);
     }
 
     private async Task<List<RawSprint>> FetchSprintsAsync(JiraClient jira, CancellationToken cancellationToken)
@@ -60,9 +64,14 @@ public sealed class JiraCollector
         using var document = await jira.GetAsync($"rest/agile/1.0/board/{_config.BoardId}/sprint", cancellationToken);
         RequireSinglePage(document.RootElement, "sprint list");
 
+        return Read<List<RawSprint>>("sprint list", () => ParseSprints(document.RootElement));
+    }
+
+    private List<RawSprint> ParseSprints(JsonElement page)
+    {
         // The board also lists sprints created on other boards when one of their issues matches its filter.
         // Those are another team's sprints; counting deliveries in them would take them from this team's.
-        return [.. document.RootElement.GetProperty("values").EnumerateArray()
+        return [.. page.GetProperty("values").EnumerateArray()
             .Where(sprint => Optional(sprint, "originBoardId") is not { } origin || origin.GetInt64() == _config.BoardId)
             .Select(sprint => new RawSprint(
             sprint.GetProperty("id").GetInt64().ToString(CultureInfo.InvariantCulture),
@@ -79,7 +88,7 @@ public sealed class JiraCollector
         using var document = await jira.GetAsync($"rest/agile/1.0/board/{_config.BoardId}/project", cancellationToken);
         RequireSinglePage(document.RootElement, "list of the board's projects");
 
-        List<string> keys = [.. document.RootElement.GetProperty("values").EnumerateArray().Select(project => project.GetProperty("key").GetString()!)];
+        var keys = Read<List<string>>("list of the board's projects", () => [.. document.RootElement.GetProperty("values").EnumerateArray().Select(project => project.GetProperty("key").GetString()!)]);
         if (keys.Count == 0)
         {
             throw new UserFacingException($"Jira lists no projects for board {_config.BoardId}. Check the board ID and that the account can see the board.");
@@ -94,7 +103,10 @@ public sealed class JiraCollector
         var projects = string.Join(", ", projectKeys.Select(key => $"\"{key}\""));
         var body = new JsonObject
         {
-            ["jql"] = $"project in ({projects}) AND updated >= \"{_config.BackfillStart:yyyy-MM-dd}\" ORDER BY updated ASC",
+            ["jql"] = $"project in ({projects}) AND updated >= \"{_config.BackfillStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}\" ORDER BY updated ASC",
+
+            // The largest page Jira documents. Its default is 50, and a further page stops the run until paging is built.
+            ["maxResults"] = SearchPageSize,
 
             // Named fields only: the default is the ID alone, and free-text fields are never asked for.
             ["fields"] = new JsonArray("issuetype", "status", "resolution", "assignee", "created", "updated", _config.StoryPointFieldId),
@@ -103,7 +115,7 @@ public sealed class JiraCollector
         using var document = await jira.PostAsync("rest/api/3/search/jql", body, cancellationToken);
         RequireLastPage(document.RootElement, "issue search");
 
-        return [.. document.RootElement.GetProperty("issues").EnumerateArray().Select(issue =>
+        return Read<List<RawIssue>>("issue search", () => [.. document.RootElement.GetProperty("issues").EnumerateArray().Select(issue =>
         {
             var fields = issue.GetProperty("fields");
             return new RawIssue(
@@ -116,7 +128,7 @@ public sealed class JiraCollector
                 Optional(fields, _config.StoryPointFieldId)?.GetDouble(),
                 Optional(fields, "assignee") is { } assignee ? IdentityHash.Of(assignee.GetProperty("accountId").GetString()!, salt) : null,
                 JiraTime.Parse(fields.GetProperty("updated")));
-        })];
+        })]);
     }
 
     private static async Task<List<RawChange>> FetchChangesAsync(JiraClient jira, List<RawIssue> issues, CancellationToken cancellationToken)
@@ -129,31 +141,57 @@ public sealed class JiraCollector
             {
                 ["issueIdsOrKeys"] = new JsonArray([.. chunk.Select(issue => (JsonNode)issue.IssueId)]),
                 ["fieldIds"] = new JsonArray("status"),
+                ["maxResults"] = ChangelogPageSize,
             };
 
             using var document = await jira.PostAsync("rest/api/3/changelog/bulkfetch", body, cancellationToken);
             RequireLastPage(document.RootElement, "bulk changelog");
 
-            foreach (var log in document.RootElement.GetProperty("issueChangeLogs").EnumerateArray())
-            {
-                var issueId = log.GetProperty("issueId").GetString()!;
-                foreach (var history in log.GetProperty("changeHistories").EnumerateArray())
-                {
-                    var historyId = history.GetProperty("id").GetString()!;
-                    var at = JiraTime.Parse(history.GetProperty("created"));
+            changes.AddRange(Read("bulk changelog", () => ParseChanges(document.RootElement)));
+        }
 
-                    foreach (var item in history.GetProperty("items").EnumerateArray())
+        return changes;
+    }
+
+    private static List<RawChange> ParseChanges(JsonElement page)
+    {
+        var changes = new List<RawChange>();
+        foreach (var log in page.GetProperty("issueChangeLogs").EnumerateArray())
+        {
+            var issueId = log.GetProperty("issueId").GetString()!;
+            foreach (var history in log.GetProperty("changeHistories").EnumerateArray())
+            {
+                var historyId = history.GetProperty("id").GetString()!;
+                var at = JiraTime.Parse(history.GetProperty("created"));
+
+                foreach (var item in history.GetProperty("items").EnumerateArray())
+                {
+                    if (Optional(item, "fieldId")?.GetString() == "status")
                     {
-                        if (Optional(item, "fieldId")?.GetString() == "status")
-                        {
-                            changes.Add(new RawChange(historyId, issueId, at, ChangeFields.Status, Optional(item, "from")?.GetString(), Optional(item, "to")?.GetString()));
-                        }
+                        changes.Add(new RawChange(historyId, issueId, at, ChangeFields.Status, Optional(item, "from")?.GetString(), Optional(item, "to")?.GetString()));
                     }
                 }
             }
         }
 
         return changes;
+    }
+
+    /// <summary>
+    /// Reads Jira's answer. An answer in a shape the tool does not know (a missing field, a value of
+    /// another type, a timestamp in an unknown form) stops the run with a plain message. The message
+    /// names only the kind of failure, never a value from the answer.
+    /// </summary>
+    private static T Read<T>(string what, Func<T> parse)
+    {
+        try
+        {
+            return parse();
+        }
+        catch (Exception exception) when (exception is KeyNotFoundException or InvalidOperationException or FormatException)
+        {
+            throw new UserFacingException($"Jira's {what} answered in a shape this tool does not understand ({exception.GetType().Name}). Nothing was stored.", exception);
+        }
     }
 
     /// <summary>A property's value, or null when it is absent or JSON null. Jira uses both for "not set".</summary>

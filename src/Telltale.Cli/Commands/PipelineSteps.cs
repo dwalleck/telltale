@@ -85,7 +85,13 @@ internal sealed class PipelineSteps
     {
         try
         {
-            return StatusRoles.Parse(config.StatusRoles);
+            var roles = StatusRoles.Parse(config.StatusRoles);
+            if (!roles.HasDone)
+            {
+                throw new FormatException("no status has the role 'done', so nothing could ever be delivered.");
+            }
+
+            return roles;
         }
         catch (FormatException exception)
         {

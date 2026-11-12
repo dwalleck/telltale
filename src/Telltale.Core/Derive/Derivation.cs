@@ -8,6 +8,7 @@ namespace Telltale.Core.Derive;
 /// Rebuilds all derived data from the raw rows. It is a pure function of the raw data, the
 /// configured status roles and the as-of time, so changing a definition means rerunning it (ADR-0002).
 /// </summary>
+/// <remarks>Throws <see cref="UserFacingException"/> when an issue has been in a status that has no configured role.</remarks>
 public static class Derivation
 {
     public static DerivedData Derive(RawData raw, StatusRoles roles, DateTimeOffset asOf)
@@ -22,6 +23,7 @@ public static class Derivation
             .Select(sprint => new SprintWindow(sprint.SprintId, sprint.Start!.Value, sprint.PlannedEnd, sprint.Completed))
             .ToList();
 
+        var deliverySprints = new DeliverySprints(windows, asOf);
         var intervals = new List<IssueStatusInterval>();
         var cycles = new List<IssueCycle>();
 
@@ -32,9 +34,19 @@ public static class Derivation
 
             cycles.Add(Delivery.Of(timeline.Intervals, roles) switch
             {
-                Delivered delivered => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, DeliverySprint.For(delivered.At, windows, asOf)),
+                Delivered delivered => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At)),
                 NotDelivered => new IssueCycle(issue.IssueId, CycleEnd: null, Delivered: false, DeliverySprintId: null),
             });
+        }
+
+        // Every status has exactly one role. Guessing one for a status the configuration does not mention
+        // (a new status, a mistyped ID) would quietly move issues in or out of the delivered count.
+        var withoutRole = intervals.Select(interval => interval.StatusId).Distinct().Where(statusId => roles.RoleOf(statusId) is null).Order(StringComparer.Ordinal).ToList();
+        if (withoutRole.Count > 0)
+        {
+            throw new UserFacingException(
+                $"These statuses have no role in statusRoles in the configuration file: {string.Join(", ", withoutRole)}. "
+                + "Give each one a role (not started, work, blocked or done) and run again.");
         }
 
         return new DerivedData(intervals, cycles);

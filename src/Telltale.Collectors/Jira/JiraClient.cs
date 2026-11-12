@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
@@ -26,31 +27,72 @@ internal sealed class JiraClient : IDisposable
     }
 
     /// <summary>GET a path relative to the site, e.g. <c>rest/api/3/status</c>.</summary>
-    public async Task<JsonDocument> GetAsync(string relativeUrl, CancellationToken cancellationToken)
-    {
-        using var response = await _http.GetAsync(relativeUrl, cancellationToken);
-        return await ReadAsync(response, "GET", relativeUrl, cancellationToken);
-    }
+    public Task<JsonDocument> GetAsync(string relativeUrl, CancellationToken cancellationToken) =>
+        SendAsync(HttpMethod.Get, relativeUrl, body: null, cancellationToken);
 
     /// <summary>POST a JSON body to a path relative to the site.</summary>
-    public async Task<JsonDocument> PostAsync(string relativeUrl, JsonObject body, CancellationToken cancellationToken)
-    {
-        using var content = JsonContent.Create(body);
-        using var response = await _http.PostAsync(relativeUrl, content, cancellationToken);
-        return await ReadAsync(response, "POST", relativeUrl, cancellationToken);
-    }
+    public Task<JsonDocument> PostAsync(string relativeUrl, JsonObject body, CancellationToken cancellationToken) =>
+        SendAsync(HttpMethod.Post, relativeUrl, body, cancellationToken);
 
     public void Dispose() => _http.Dispose();
 
-    private static async Task<JsonDocument> ReadAsync(HttpResponseMessage response, string method, string relativeUrl, CancellationToken cancellationToken)
+    /// <summary>
+    /// Sends one request and reads the JSON answer. Every way this can fail for reasons outside the
+    /// tool becomes a <see cref="UserFacingException"/> that names the request and never quotes the
+    /// response, which can hold issue or person data.
+    /// </summary>
+    private async Task<JsonDocument> SendAsync(HttpMethod method, string relativeUrl, JsonObject? body, CancellationToken cancellationToken)
     {
-        if (!response.IsSuccessStatusCode)
+        var call = $"{method} {relativeUrl}";
+        using var request = new HttpRequestMessage(method, relativeUrl);
+        if (body is not null)
         {
-            // The response body is left out on purpose: it can quote issue data.
-            throw new UserFacingException($"Jira answered {(int)response.StatusCode} ({response.StatusCode}) to {method} {relativeUrl}.");
+            request.Content = JsonContent.Create(body);
         }
 
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        HttpResponseMessage response;
+        try
+        {
+            response = await _http.SendAsync(request, cancellationToken);
+        }
+        catch (HttpRequestException exception)
+        {
+            // DNS, connection, proxy tunnel and TLS failures. The category is enough; the message can name hosts.
+            var reason = exception.HttpRequestError == HttpRequestError.Unknown ? "the connection failed" : exception.HttpRequestError.ToString();
+            throw new UserFacingException(
+                $"Could not reach Jira ({call}): {reason}. On the corporate network this usually means the proxy or the certificate: "
+                + "check that the system proxy is set and that the corporate root certificate is trusted.",
+                exception);
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Not the user's Ctrl+C: HttpClient's own timeout.
+            throw new UserFacingException($"Jira did not answer {call} in time.", exception);
+        }
+
+        using (response)
+        {
+            if (response.StatusCode == HttpStatusCode.ProxyAuthenticationRequired)
+            {
+                throw new UserFacingException(
+                    $"The proxy asked for authentication (407) on {call}, so the request never reached Jira. "
+                    + "Check the system proxy settings and that this account may use the proxy.");
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new UserFacingException($"Jira answered {(int)response.StatusCode} ({response.StatusCode}) to {call}.");
+            }
+
+            try
+            {
+                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            }
+            catch (JsonException exception)
+            {
+                throw new UserFacingException($"The answer to {call} was not JSON. A proxy or sign-in page may have been served in place of Jira's answer.", exception);
+            }
+        }
     }
 }

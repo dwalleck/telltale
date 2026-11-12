@@ -52,9 +52,12 @@ public sealed class StatusRoles
     public static StatusRoles Parse(IReadOnlyDictionary<string, string> labelsByStatusId) =>
         new(labelsByStatusId.ToDictionary(pair => pair.Key, pair => StatusRole.Parse(pair.Value), StringComparer.Ordinal));
 
+    /// <summary>True when at least one status has the done role. Without one, nothing could ever be delivered.</summary>
+    public bool HasDone => _byStatusId.Values.Any(role => role is DoneRole);
+
     /// <summary>The status's role, or null when the configuration does not mention the status.</summary>
     public StatusRole? RoleOf(string statusId) => _byStatusId.GetValueOrDefault(statusId);
 
-    /// <summary>True when the status has the done role. A status the configuration does not mention is not done.</summary>
+    /// <summary>True when the status has the done role. Derive stops the run before a status with no role can matter.</summary>
     public bool IsDone(string statusId) => RoleOf(statusId) is DoneRole;
 }

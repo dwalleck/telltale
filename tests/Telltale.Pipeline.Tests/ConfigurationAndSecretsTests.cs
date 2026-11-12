@@ -38,6 +38,95 @@ public class ConfigurationAndSecretsTests
     }
 
     [Test]
+    [Arguments("timeZone")]
+    [Arguments("statusRoles")]
+    [Arguments("jira")]
+    public async Task A_required_setting_given_as_null_is_refused_and_named(string setting)
+    {
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config[setting] = null;
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid").And.Contains($"'{setting}'").And.Contains("null");
+        await Assert.That(pipeline.Error.ToString()).DoesNotContain("   at ");
+        await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
+    }
+
+    [Test]
+    [Arguments("http://example.invalid/")]
+    [Arguments("/rest/relative")]
+    [Arguments("example.invalid")]
+    public async Task A_site_url_that_is_not_an_absolute_https_address_is_refused(string siteUrl)
+    {
+        // Over http the Jira email and API token would travel in clear text.
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config["jira"]!["siteUrl"] = siteUrl;
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid: jira.siteUrl must be an absolute https:// address.");
+        await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
+    }
+
+    [Test]
+    public async Task A_status_role_map_with_no_done_status_is_refused()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config["statusRoles"]![Workflow.Done.Id] = "work";
+        pipeline.Config["statusRoles"]![Workflow.Shipped.Id] = "work";
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid: statusRoles: no status has the role 'done', so nothing could ever be delivered.");
+        await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
+    }
+
+    [Test]
+    public async Task A_status_an_issue_has_been_in_that_has_no_role_stops_the_run_and_is_named()
+    {
+        // Every status has one role. Guessing "not done" for a new or mistyped status would quietly drop deliveries.
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config["statusRoles"]!.AsObject().Remove(Workflow.Review.Id);
+        pipeline.Config["statusRoles"]!.AsObject().Remove(Workflow.Shipped.Id);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Review)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done)
+            .Moved(Local(2026, 1, 10, 9), Workflow.Shipped);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "These statuses have no role in statusRoles in the configuration file: 600005, 600009. Give each one a role (not started, work, blocked or done) and run again.\n");
+        await Assert.That(File.Exists(Path.Combine(pipeline.ReportDirectory, "sprint-41.md"))).IsFalse();
+    }
+
+    [Test]
+    public async Task A_status_no_issue_has_been_in_needs_no_role()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config["statusRoles"]!.AsObject().Remove(Workflow.Blocked.Id);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
+    }
+
+    [Test]
     public async Task An_unknown_time_zone_is_refused()
     {
         await using var pipeline = new PipelineHarness();

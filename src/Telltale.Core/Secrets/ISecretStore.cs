@@ -22,7 +22,7 @@ public interface ISecretStore
 
 public static class SecretStoreExtensions
 {
-    /// <summary>The secret's value. Throws <see cref="UserFacingException"/> naming the secret when it is missing or blank.</summary>
+    /// <summary>The secret's value, without surrounding white space. Throws <see cref="UserFacingException"/> naming the secret when it is missing or blank.</summary>
     public static string Require(this ISecretStore secrets, SecretName name)
     {
         var value = secrets.Get(name);
@@ -31,7 +31,8 @@ public static class SecretStoreExtensions
             throw new UserFacingException($"The secret {Describe(name)} is not set in the secret store.");
         }
 
-        return value;
+        // A value pasted with a trailing newline must behave like the clean one: for the salt, it decides every hash.
+        return value.Trim();
     }
 
     private static string Describe(SecretName name) => name switch

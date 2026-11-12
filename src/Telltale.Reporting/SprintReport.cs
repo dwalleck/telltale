@@ -59,10 +59,10 @@ public static class SprintReport
     private static void AppendDeliveredCount(StringBuilder report, DeliveredRow sprint) =>
         report.Append("Delivered issues: ").Append(sprint.DeliveredCount.ToString(CultureInfo.InvariantCulture)).Append('\n');
 
-    /// <summary>A stored UTC time as a date in the team's zone, e.g. 2026-01-05.</summary>
+    /// <summary>A stored time as a date in the team's zone, e.g. 2026-01-05.</summary>
     private static string LocalDate(string storedUtc, TimeZoneInfo teamTimeZone)
     {
-        var instant = DateTimeOffset.Parse(storedUtc, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
+        var instant = StoredTime.FromStored(storedUtc);
         return TimeZoneInfo.ConvertTime(instant, teamTimeZone).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
     }
 

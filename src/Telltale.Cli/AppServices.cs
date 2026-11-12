@@ -1,3 +1,4 @@
+using System.Net;
 using Telltale.Core.Secrets;
 
 namespace Telltale.Cli;
@@ -27,8 +28,9 @@ public sealed record AppServices(
     /// <summary>The real thing, with files under the current directory.</summary>
     public static AppServices ForProduction() => new(
         // SocketsHttpHandler uses the system proxy and the operating system's certificate store by default,
-        // which is where the corporate proxy and root certificate are configured.
-        new SocketsHttpHandler(),
+        // which is where the corporate proxy and root certificate are configured. An authenticating proxy
+        // is offered the signed-in user's credentials; without them it answers 407 to every request.
+        new SocketsHttpHandler { DefaultProxyCredentials = CredentialCache.DefaultCredentials },
         TimeProvider.System,
         new EnvironmentSecretStore(),
         Console.Out,
