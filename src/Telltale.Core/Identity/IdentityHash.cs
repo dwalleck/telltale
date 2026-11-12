@@ -32,9 +32,16 @@ public static class IdentityHash
     /// under two salts, one person is two distinct assignees, and the minimum group size counts distinct
     /// assignees (ADR-0003). <paramref name="storedFingerprint"/> is what the store records (null: it holds nobody yet).
     /// </summary>
-    public static void RequireSaltOf(string? storedFingerprint, string salt)
+    public static void RequireSaltOf(string? storedFingerprint, string salt) => RequireSameSalt(storedFingerprint, SaltFingerprint(salt));
+
+    /// <summary>
+    /// <see cref="RequireSaltOf"/> for a salt known by its fingerprint: stops when
+    /// <paramref name="fingerprint"/> is not the one the store records. This is the one comparison; the
+    /// collector asks it before it fetches, and the store asks it again of every batch it adds to its rows.
+    /// </summary>
+    public static void RequireSameSalt(string? storedFingerprint, string? fingerprint)
     {
-        if (storedFingerprint is not null && storedFingerprint != SaltFingerprint(salt))
+        if (storedFingerprint is not null && storedFingerprint != fingerprint)
         {
             throw new UserFacingException(
                 "The hashing salt in the secret store is not the one the people in the database were hashed with, so one person would count as two. "

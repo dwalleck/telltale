@@ -95,7 +95,8 @@ public sealed class JiraCollector
         var salt = _secrets.Require(SecretName.HashingSalt);
 
         // A sync adds to what the store holds, so it must hash with the salt the stored people were hashed with.
-        // A backfill fetches everyone again, and the store checks that it did (ITelltaleStore.WriteRawAsync).
+        // Asked here so a sync under another salt stops before it fetches; the store asks again when it
+        // writes. A backfill fetches everyone again and replaces every stored row, so it may bring a new salt.
         if (mode == CollectionMode.Incremental)
         {
             IdentityHash.RequireSaltOf(await store.ReadSaltFingerprintAsync(cancellationToken), salt);

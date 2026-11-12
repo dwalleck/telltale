@@ -7,6 +7,7 @@ using Dapper;
 using Microsoft.Data.Sqlite;
 using SQLitePCL;
 using Telltale.Core;
+using Telltale.Core.Identity;
 using Telltale.Core.Storage;
 
 namespace Telltale.Storage.Sqlite;
@@ -102,6 +103,14 @@ public sealed class SqliteStore : ITelltaleStore
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
         var hashedWithBefore = await ReadSaltFingerprintAsync(connection, transaction, cancellationToken);
+
+        // A batch added to the stored rows must be hashed with their salt, whoever the caller is: the rows it
+        // does not touch keep their hashes, and two salts make one person two. A batch that replaces every
+        // row brings its own salt. A batch that says nothing of a salt brings nobody under another one.
+        if (!replaceAll && batch.SaltFingerprint is not null)
+        {
+            IdentityHash.RequireSameSalt(hashedWithBefore, batch.SaltFingerprint);
+        }
 
         // A backfill's batch is everything Jira holds now, so whatever else the raw tables hold has left Jira,
         // or was fetched under settings or a salt that no longer apply (owner decision D4). Inside the
@@ -243,8 +252,8 @@ public sealed class SqliteStore : ITelltaleStore
     /// <summary>
     /// Records the salt a batch was hashed with, after the batch's rows are written. A batch under another
     /// salt than the store's people were hashed with comes only from a backfill, which replaces every issue
-    /// (<see cref="ReplaceRawAsync"/>), so no row is left with a hash of the old salt. A sync never brings one:
-    /// the collector refuses to fetch under another salt than the store's.
+    /// (<see cref="ReplaceRawAsync"/>), so no row is left with a hash of the old salt. A batch that is added
+    /// under another salt was refused before anything was written.
     /// </summary>
     private static async Task RecordSaltAsync(DbConnection connection, DbTransaction transaction, RawData batch, string? hashedWithBefore, CancellationToken cancellationToken)
     {

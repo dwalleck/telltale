@@ -1,5 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Telltale.Core;
+using Telltale.Core.Identity;
+using Telltale.Core.Storage;
 using Telltale.Pipeline.Tests.Harness;
 using Telltale.Reporting;
 using Telltale.Storage.Sqlite;
@@ -216,6 +218,36 @@ public class StoreTests
         await Assert.That(await pipeline.QueryAsync<string>("SELECT name FROM schema_migration ORDER BY name;"))
             .IsEquivalentTo(recordedBefore.Append("0005_sprint_change_form.sql").Order(StringComparer.Ordinal), CollectionOrdering.Matching);
         await Assert.That(await pipeline.QueryAsync<string>("SELECT DISTINCT to_value FROM change WHERE field = 'sprint';")).IsEquivalentTo(new[] { "41,42" });
+    }
+
+    [Test]
+    public async Task The_store_itself_refuses_a_batch_added_under_another_salt_than_its_people_were_hashed_with()
+    {
+        // B10 of the final review: the collector checks the salt before it fetches, but the store is where
+        // both fingerprints meet, so a caller that skipped the collector cannot leave people under two salts.
+        await using var pipeline = new PipelineHarness();
+        var store = new SqliteStore(pipeline.DatabasePath);
+        await store.InitializeAsync();
+        var at = Local(2026, 1, 6, 9);
+        var reached = new Watermark("synthetic-collector", new CollectionScope("https://example.invalid/", FakeJira.BoardId, FakeJira.ProjectKey, new DateOnly(2025, 1, 1), "status"), UpdatedThrough: at);
+        RawData Batch(string issueId, string salt) => new(
+            Issues: [new RawIssue(issueId, FakeJira.IssueTypeStoryId, at, Workflow.New.Id, ResolutionId: null, StoryPoints: null, AssigneeHash: IdentityHash.Of("fake-account-0001", salt), Updated: at, SprintIds: "")],
+            Changes: [],
+            Sprints: [],
+            Statuses: [])
+        { SaltFingerprint = IdentityHash.SaltFingerprint(salt) };
+        await store.WriteRawAsync(Batch("1", "synthetic-salt-one"), reached);
+
+        await Assert.That(async () => await store.WriteRawAsync(Batch("2", "synthetic-salt-two"), reached)).Throws<UserFacingException>().WithMessage(
+            "The hashing salt in the secret store is not the one the people in the database were hashed with, so one person would count as two. "
+            + "Restore the original salt, or run backfill to hash everyone again with this one.");
+        await Assert.That(await pipeline.QueryAsync<string>("SELECT issue_id FROM issue;")).IsEquivalentTo(new[] { "1" });
+
+        // The same salt is added, and a batch that replaces everything may come under another.
+        await store.WriteRawAsync(Batch("3", "synthetic-salt-one"), reached);
+        await store.ReplaceRawAsync(Batch("4", "synthetic-salt-two"), reached);
+        await Assert.That(await pipeline.QueryAsync<string>("SELECT issue_id FROM issue;")).IsEquivalentTo(new[] { "4" });
+        await Assert.That(await store.ReadSaltFingerprintAsync()).IsEqualTo(IdentityHash.SaltFingerprint("synthetic-salt-two"));
     }
 
     private static void AddSprintAndIssue(FakeJira jira)

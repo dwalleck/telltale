@@ -15,8 +15,9 @@ public interface ITelltaleStore
     /// collector's watermark to <paramref name="reached"/>: the watermark advances only when the whole batch
     /// is written, and no batch is written without saying how far it reaches.
     /// The batch must be hashed with the salt the store's people were hashed with
-    /// (<see cref="ReadSaltFingerprintAsync"/>): the rows it does not touch keep their hashes. The caller checks
-    /// that before fetching; only <see cref="ReplaceRawAsync"/> takes a batch under another salt.
+    /// (<see cref="ReadSaltFingerprintAsync"/>): the rows it does not touch keep their hashes. A batch under
+    /// another salt throws <see cref="UserFacingException"/> and nothing is written; only
+    /// <see cref="ReplaceRawAsync"/> takes one.
     /// </summary>
     Task WriteRawAsync(RawData batch, Watermark reached, CancellationToken cancellationToken = default);
 
