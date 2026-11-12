@@ -43,13 +43,16 @@ public interface IWritableSecretStore : ISecretStore
 
 public static class SecretStoreExtensions
 {
+    /// <summary>How every message says that a secret is missing, up to the full stop: what follows differs with what the reader can do about it.</summary>
+    public static string NotSet(this ISecretStore secrets, SecretName name) => $"The secret {SecretInfo.Of(name).Label} is not set in the secret store";
+
     /// <summary>The secret's value, without surrounding white space. Throws <see cref="UserFacingException"/> naming the secret and how to set it when it is missing or blank.</summary>
     public static string Require(this ISecretStore secrets, SecretName name)
     {
         var value = secrets.Get(name);
         if (string.IsNullOrWhiteSpace(value))
         {
-            throw new UserFacingException($"The secret {SecretInfo.Of(name).Label} is not set in the secret store. {secrets.HowToSet(name)}");
+            throw new UserFacingException($"{secrets.NotSet(name)}. {secrets.HowToSet(name)}");
         }
 
         // A value pasted with a trailing newline must behave like the clean one: for the salt, it decides every hash.

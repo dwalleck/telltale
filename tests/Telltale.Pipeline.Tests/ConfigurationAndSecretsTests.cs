@@ -508,6 +508,40 @@ public class ConfigurationAndSecretsTests
         await Assert.That(store.Get(SecretName.HashingSalt)).IsNull();
     }
 
+    [Test]
+    public async Task A_run_reads_each_secret_from_the_secret_store_once()
+    {
+        // Cross-ticket finding 8: the secrets were read when the command started, again by the collector, and
+        // the salt once more by derive and by report. On the work laptop each read is a call to Credential Manager.
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        var counting = new CountingSecretStore(new InMemorySecretStore(pipeline.Secrets));
+        pipeline.SecretStore = counting;
+
+        await pipeline.RunAllAsync(["run", "--sprint", "41"]);
+
+        await Assert.That(counting.Reads).IsEquivalentTo(new Dictionary<SecretName, int>
+        {
+            [SecretName.JiraEmail] = 1,
+            [SecretName.JiraApiToken] = 1,
+            [SecretName.HashingSalt] = 1,
+        });
+    }
+
+    /// <summary>A secret store that counts how often each secret is read.</summary>
+    private sealed class CountingSecretStore(ISecretStore inner) : ISecretStore
+    {
+        public Dictionary<SecretName, int> Reads { get; } = [];
+
+        public string? Get(SecretName name)
+        {
+            Reads[name] = Reads.GetValueOrDefault(name) + 1;
+            return inner.Get(name);
+        }
+
+        public string HowToSet(SecretName name) => inner.HowToSet(name);
+    }
+
     private static void AddOneSprint(FakeJira jira) =>
         jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
 }

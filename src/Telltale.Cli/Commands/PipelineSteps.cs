@@ -23,9 +23,15 @@ internal sealed class PipelineSteps : IDisposable
     private readonly TelltaleSettings _settings;
     private readonly ITelltaleStore _store;
     private readonly IDisposable _storeLock;
+    private readonly CollectionSecrets? _secrets;
+    private readonly Lazy<string?> _saltAtHand;
 
-    private PipelineSteps(AppServices services, TelltaleSettings settings, ITelltaleStore store, IDisposable storeLock)
+    private PipelineSteps(AppServices services, TelltaleSettings settings, CollectionSecrets? secrets, ITelltaleStore store, IDisposable storeLock)
     {
+        _secrets = secrets;
+
+        // Read at most once in a command, whichever steps ask for it: a command that fetches has read it already.
+        _saltAtHand = new Lazy<string?>(() => secrets?.HashingSalt ?? (services.Secrets.Get(SecretName.HashingSalt) is { } salt && !string.IsNullOrWhiteSpace(salt) ? salt.Trim() : null));
         _storeLock = storeLock;
         _services = services;
         _settings = settings;
@@ -43,9 +49,10 @@ internal sealed class PipelineSteps : IDisposable
     {
         var settings = await ConfigFile.LoadAsync(services.ConfigPath, cancellationToken);
 
+        CollectionSecrets? secrets = null;
         if (needsJira)
         {
-            await RequireSecretsAsync(services, cancellationToken);
+            secrets = await CollectionSecrets.ReadAsync(services.Secrets, services.StoreHoldsHashedPeopleAsync, cancellationToken);
         }
         else if (!File.Exists(services.DatabasePath))
         {
@@ -57,7 +64,7 @@ internal sealed class PipelineSteps : IDisposable
         {
             var store = new SqliteStore(services.DatabasePath);
             await store.InitializeAsync(cancellationToken);
-            return new PipelineSteps(services, settings, store, storeLock);
+            return new PipelineSteps(services, settings, secrets, store, storeLock);
         }
         catch
         {
@@ -89,7 +96,8 @@ internal sealed class PipelineSteps : IDisposable
     public Task SyncAsync(CancellationToken cancellationToken) => CollectAsync(CollectionMode.Incremental, allowEmpty: false, cancellationToken);
 
     private Task CollectAsync(CollectionMode mode, bool allowEmpty, CancellationToken cancellationToken) =>
-        new JiraCollector(_services.HttpHandler, _settings.Jira, _services.Secrets, _services.Clock, _services.Error).BringUpToDateAsync(_store, mode, allowEmpty, cancellationToken);
+        new JiraCollector(_services.HttpHandler, _settings.Jira, _secrets ?? throw new InvalidOperationException("This command was started without the secrets a collection needs."), _services.Clock, _services.Error)
+            .BringUpToDateAsync(_store, mode, allowEmpty, cancellationToken);
 
     /// <summary>
     /// Rebuilds every derived table and metric view from the raw tables, and logs the changelog anomalies it
@@ -164,9 +172,9 @@ internal sealed class PipelineSteps : IDisposable
     /// </summary>
     private async Task RequireStoredSaltAsync(CancellationToken cancellationToken)
     {
-        if (_services.Secrets.Get(SecretName.HashingSalt) is { } salt && !string.IsNullOrWhiteSpace(salt))
+        if (_saltAtHand.Value is { } salt)
         {
-            IdentityHash.RequireSaltOf(await _store.ReadSaltFingerprintAsync(cancellationToken), salt.Trim());
+            IdentityHash.RequireSaltOf(await _store.ReadSaltFingerprintAsync(cancellationToken), salt);
         }
     }
 
@@ -326,35 +334,4 @@ internal sealed class PipelineSteps : IDisposable
     /// <summary>The moment from which the store holds every issue: the start date it was last filled from. Null when it names none.</summary>
     private async Task<DateTimeOffset?> CompleteFromAsync(CancellationToken cancellationToken) =>
         await _store.ReadWatermarkAsync(JiraCollector.WatermarkName, cancellationToken) is { } filled ? JiraCollector.CompleteFrom(filled.Scope) : null;
-
-    /// <summary>
-    /// Stops with a message naming the first secret that is not set and how to set it. A missing hashing salt
-    /// is two different situations: on a database that holds nobody yet, any salt will do and one can be
-    /// generated; once people are stored under a salt, only that salt keeps each of them one person, until a
-    /// backfill under a new one hashes them all again.
-    /// </summary>
-    private static async Task RequireSecretsAsync(AppServices services, CancellationToken cancellationToken)
-    {
-        foreach (var secret in SecretInfo.All)
-        {
-            if (secret.Name != SecretName.HashingSalt || !string.IsNullOrWhiteSpace(services.Secrets.Get(secret.Name)))
-            {
-                services.Secrets.Require(secret.Name);
-                continue;
-            }
-
-            var howToSet = services.Secrets.HowToSet(secret.Name);
-            if (await SqliteStore.HoldsHashedPeopleAsync(services.DatabasePath, cancellationToken))
-            {
-                throw new UserFacingException(
-                    $"The secret {secret.Label} is not set in the secret store, and the database already holds people hashed with the salt that was there before. "
-                    + "Restore the original salt, or set a new one and run backfill, which hashes everyone again with it; "
-                    + $"until that backfill every other command stops, because a second salt would make each person count as two. {howToSet}");
-            }
-
-            // Only a store 'secrets set' can write to can be given a generated salt.
-            var generate = services.Secrets is IWritableSecretStore ? " Add --generate to have a new random salt made." : string.Empty;
-            throw new UserFacingException($"The secret {secret.Label} is not set in the secret store. {howToSet}{generate}");
-        }
-    }
 }

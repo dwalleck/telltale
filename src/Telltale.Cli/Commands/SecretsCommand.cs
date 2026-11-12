@@ -2,7 +2,6 @@ using System.CommandLine;
 using System.Security.Cryptography;
 using Telltale.Core;
 using Telltale.Core.Secrets;
-using Telltale.Storage.Sqlite;
 
 namespace Telltale.Cli.Commands;
 
@@ -106,7 +105,7 @@ internal static class SecretsCommand
         }
         catch (StoredSecretUnusableException)
         {
-            if (await SqliteStore.HoldsHashedPeopleAsync(services.DatabasePath, cancellationToken))
+            if (await services.StoreHoldsHashedPeopleAsync(cancellationToken))
             {
                 throw new UserFacingException(
                     "The stored hashing salt is not text this tool stored, so it cannot be used, and the database already holds people hashed with a salt. "
@@ -123,7 +122,7 @@ internal static class SecretsCommand
                 "A hashing salt is already stored. A different salt gives every person a different hash, so the hashes already in the database would stop matching new ones. To replace it anyway, add --replace.");
         }
 
-        if (generate && await SqliteStore.HoldsHashedPeopleAsync(services.DatabasePath, cancellationToken))
+        if (generate && await services.StoreHoldsHashedPeopleAsync(cancellationToken))
         {
             throw new UserFacingException(
                 "The database already holds people hashed with an earlier salt. A new salt would give every person a second hash, so each would count as two. "

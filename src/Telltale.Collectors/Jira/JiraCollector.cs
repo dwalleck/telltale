@@ -64,13 +64,14 @@ public sealed class JiraCollector
 
     private readonly HttpMessageHandler _handler;
     private readonly JiraConfig _config;
-    private readonly ISecretStore _secrets;
+    private readonly CollectionSecrets _secrets;
     private readonly TimeProvider _clock;
     private readonly TextWriter _notices;
 
+    /// <param name="secrets">The Jira account's email and API token, and the salt assignees are hashed with.</param>
     /// <param name="clock">Times the waits Jira asks for when it limits the rate of requests.</param>
     /// <param name="notices">Where each such wait is announced: standard error.</param>
-    public JiraCollector(HttpMessageHandler handler, JiraConfig config, ISecretStore secrets, TimeProvider clock, TextWriter notices)
+    public JiraCollector(HttpMessageHandler handler, JiraConfig config, CollectionSecrets secrets, TimeProvider clock, TextWriter notices)
     {
         _clock = clock;
         _notices = notices;
@@ -95,8 +96,8 @@ public sealed class JiraCollector
             watermark?.Scope.RequireSameAs(scope);
         }
 
-        // All three secrets are checked before the first call, so a missing salt cannot surface after a long fetch.
-        var salt = _secrets.Require(SecretName.HashingSalt);
+        // All three secrets were read before the collector was made, so a missing salt cannot surface after a long fetch.
+        var salt = _secrets.HashingSalt;
 
         // A sync adds to what the store holds, so it must hash with the salt the stored people were hashed with.
         // Asked here so a sync under another salt stops before it fetches; the store asks again when it
@@ -106,7 +107,7 @@ public sealed class JiraCollector
             IdentityHash.RequireSaltOf(await store.ReadSaltFingerprintAsync(cancellationToken), salt);
         }
 
-        using var jira = new JiraClient(_handler, _config.SiteUrl, _secrets.Require(SecretName.JiraEmail), _secrets.Require(SecretName.JiraApiToken), _clock, _notices);
+        using var jira = new JiraClient(_handler, _config.SiteUrl, _secrets.JiraEmail, _secrets.JiraApiToken, _clock, _notices);
 
         var statuses = await FetchStatusesAsync(jira, cancellationToken);
         await RequireConfiguredFieldsAsync(jira, cancellationToken);
