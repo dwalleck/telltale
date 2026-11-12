@@ -333,6 +333,25 @@ public class PointBucketTests
     }
 
     [Test]
+    public async Task A_negative_zero_estimate_is_stored_and_shown_as_zero()
+    {
+        // B16 of the final review: "-0" parses as a number that is not negative, and was stored and labelled as "-0".
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(-0.0)
+            .AddHistory(Local(2026, 1, 5, 10), FakeJira.StoryPointFieldId, "Fake Story Points", null, "3", null, "-0")
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done);
+
+        await pipeline.RunAllAsync(["run", "--sprint", "41"]);
+
+        await Assert.That(await pipeline.QueryAsync<string>("SELECT DISTINCT to_value FROM change WHERE field = 'points';")).IsEquivalentTo(new[] { "0" });
+        await Assert.That(await pipeline.QueryAsync<string>("SELECT DISTINCT CAST(story_points AS TEXT) FROM issue;")).IsEquivalentTo(new[] { "0.0" });
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 0 | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
+    }
+
+    [Test]
     public async Task Nothing_but_numbers_is_stored_from_story_point_history()
     {
         // Owner decision: story point history values are numbers only. Each is kept in one form however Jira

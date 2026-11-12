@@ -281,7 +281,7 @@ public sealed class JiraCollector
                 JiraTime.Parse(fields.GetProperty("created")),
                 Text(fields.GetProperty("status"), "id"),
                 Optional(fields, "resolution") is { } resolution ? Text(resolution, "id") : null,
-                Optional(fields, _config.StoryPointFieldId)?.GetDouble(),
+                Optional(fields, _config.StoryPointFieldId) is { } points ? WithoutSign(points.GetDouble()) : null,
                 Optional(fields, "assignee") is { } assignee ? IdentityHash.Of(Text(assignee, "accountId"), salt) : null,
                 JiraTime.Parse(fields.GetProperty("updated")),
                 Optional(fields, _config.SprintFieldId) is { } sprints ? SprintIds(sprints) : "");
@@ -345,8 +345,11 @@ public sealed class JiraCollector
             throw NotAnEstimate();
         }
 
-        return points;
+        return WithoutSign(points);
     }
+
+    /// <summary>Zero for negative zero, which Jira can send and which would be stored and labelled as "-0"; any other number as it is.</summary>
+    private static double WithoutSign(double points) => points == 0 ? 0 : points;
 
     // Two causes look the same from here: the setting names a field that is not the story point field (its
     // history may hold names or free text), or Jira writes the number in a form not read here, such as a
