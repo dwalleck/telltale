@@ -15,7 +15,7 @@ A continuous period an issue spent in one status, identified by status ID.
 _Avoid_: Stage, phase
 
 **Sprint window**:
-The period a sprint counts for: from its start date to its completion date, or to now if not yet completed.
+The period a sprint counts for: from its start date to its completion date, or to now if not yet completed. A closed sprint with no completion date ends at its planned end.
 _Avoid_: Sprint dates, iteration
 
 **Membership interval**:
@@ -37,7 +37,7 @@ A move of an issue out of a done status category back to any earlier status.
 _Avoid_: Lead time, turnaround
 
 **Delivered**:
-An issue that is in a done status category and was not abandoned (closed with a won't-do resolution). Delivery is reaching Done; shipping to customers is a later step outside the team's control.
+An issue that is in a done status category and was not abandoned (closed with a won't-do resolution). Delivery is reaching Done; shipping to customers is a later step outside the team's control. The delivery moment is the issue's last move into a done status. An issue in a done status whose history shows no such move, or whose history ends in another status, is not delivered; it is counted as a changelog anomaly.
 _Avoid_: Completed, closed, resolved
 
 **Point bucket**:
