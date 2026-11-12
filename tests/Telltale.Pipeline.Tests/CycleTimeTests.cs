@@ -17,7 +17,7 @@ public class CycleTimeTests
     private const string TableHeader =
         "\n## Cycle time by point bucket\n\n"
         + "| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |\n"
-        + "|---|---|---|---|---|---|\n";
+        + "| --- | ---: | ---: | ---: | ---: | ---: |\n";
 
     /// <summary>What follows the cycle time section. Asserting it after the last expected row shows the table has no further row.</summary>
     private const string NextSection = "\n## Time in status\n";

@@ -21,7 +21,8 @@ public static class SprintReport
     /// </summary>
     public static async Task<string?> MostRecentlyCompletedSprintAsync(ITelltaleStore store, CancellationToken cancellationToken = default)
     {
-        var sprints = await store.QueryViewsAsync<string>(
+        var sprints = await QueryAsync<string>(
+            store,
             "SELECT sprint_id FROM delivered_per_sprint WHERE state = @closed ORDER BY ended DESC, started DESC, sprint_id DESC LIMIT 1;",
             new { closed = SprintStates.Closed },
             cancellationToken);
@@ -32,7 +33,8 @@ public static class SprintReport
     /// <summary>Renders the report. Dates are shown in <paramref name="teamTimeZone"/>.</summary>
     public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, CancellationToken cancellationToken = default)
     {
-        var rows = await store.QueryViewsAsync<DeliveredRow>(
+        var rows = await QueryAsync<DeliveredRow>(
+            store,
             "SELECT sprint_name, started, ended, delivered_count FROM delivered_per_sprint WHERE sprint_id = @sprintId;",
             new { sprintId },
             cancellationToken);
@@ -46,7 +48,8 @@ public static class SprintReport
         var report = new StringBuilder();
         AppendTitle(report, sprint, teamTimeZone);
         AppendDeliveredCount(report, sprint);
-        AppendCycleTime(report, await store.QueryViewsAsync<CycleTimeRow>(
+        AppendCycleTime(report, await QueryAsync<CycleTimeRow>(
+            store,
             """
             SELECT point_bucket, issue_count, median_business_days, p85_business_days, median_calendar_days, p85_calendar_days
             FROM cycle_time_per_sprint_and_bucket
@@ -59,13 +62,32 @@ public static class SprintReport
         return report.ToString();
     }
 
-    // Derived data an earlier version of the tool built, without this view, never gets here: the report
-    // command refuses derived data that does not say which raw data it was built from (PipelineSteps.ReportAsync).
     private static Task<IReadOnlyList<TimeInStatusRow>> ReadTimeInStatusAsync(ITelltaleStore store, string sprintId, CancellationToken cancellationToken) =>
-        store.QueryViewsAsync<TimeInStatusRow>(
+        QueryAsync<TimeInStatusRow>(
+            store,
             "SELECT status_name, issue_count, median_business_days FROM time_in_status_per_sprint WHERE sprint_id = @sprintId ORDER BY board_position;",
             new { sprintId },
             cancellationToken);
+
+    /// <summary>
+    /// Every query of the report goes through here. The report reads metric views only, so a query the
+    /// database refuses means the views are not what this version expects: derive has not run on the store,
+    /// or a version without the view built them. The report command checks the store before it gets here;
+    /// another caller gets the same plain message, not the database's.
+    /// </summary>
+    private static async Task<IReadOnlyList<T>> QueryAsync<T>(ITelltaleStore store, string sql, object parameters, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await store.QueryViewsAsync<T>(sql, parameters, cancellationToken);
+        }
+        catch (DbException exception)
+        {
+            throw new UserFacingException(
+                "The store's derived data cannot be read: it has not been built yet, or another version of this tool built it. Run derive, then report again.",
+                exception);
+        }
+    }
 
     /// <summary>Renders the report and writes it into <paramref name="directory"/>. Returns the file's path.</summary>
     public static async Task<string> WriteAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, string directory, CancellationToken cancellationToken = default)
@@ -90,7 +112,7 @@ public static class SprintReport
     }
 
     private static void AppendDeliveredCount(StringBuilder report, DeliveredRow sprint) =>
-        report.Append("Delivered issues: ").Append(sprint.DeliveredCount.ToString(CultureInfo.InvariantCulture)).Append('\n');
+        report.Append("Delivered issues: ").Append(Count(sprint.DeliveredCount)).Append('\n');
 
     /// <summary>The cycle time table: one row per point bucket, smallest estimate first and unestimated issues last.</summary>
     private static void AppendCycleTime(StringBuilder report, IReadOnlyList<CycleTimeRow> buckets)
@@ -102,18 +124,10 @@ public static class SprintReport
             return;
         }
 
-        report.Append("| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |\n");
-        report.Append("|---|---|---|---|---|---|\n");
-
+        AppendTableHead(report, "Point bucket", "Issues with a cycle time", "Median (business days)", "P85 (business days)", "Median (calendar days)", "P85 (calendar days)");
         foreach (var bucket in buckets)
         {
-            report.Append("| ").Append(BucketLabel(bucket.PointBucket))
-                .Append(" | ").Append(bucket.IssueCount.ToString(CultureInfo.InvariantCulture))
-                .Append(" | ").Append(Days(bucket.MedianBusinessDays))
-                .Append(" | ").Append(Days(bucket.P85BusinessDays))
-                .Append(" | ").Append(Days(bucket.MedianCalendarDays))
-                .Append(" | ").Append(Days(bucket.P85CalendarDays))
-                .Append(" |\n");
+            AppendTableRow(report, BucketLabel(bucket.PointBucket), Count(bucket.IssueCount), Days(bucket.MedianBusinessDays), Days(bucket.P85BusinessDays), Days(bucket.MedianCalendarDays), Days(bucket.P85CalendarDays));
         }
     }
 
@@ -127,16 +141,42 @@ public static class SprintReport
             return;
         }
 
-        report.Append("| Status | Issues | Median business days |\n| --- | ---: | ---: |\n");
+        AppendTableHead(report, "Status", "Issues", "Median (business days)");
         foreach (var row in rows)
         {
-            // A status name is Jira's text: a "|" in it would otherwise end the cell.
-            report.Append("| ").Append(row.StatusName.Replace("|", "\\|", StringComparison.Ordinal))
-                .Append(" | ").Append(row.IssueCount.ToString(CultureInfo.InvariantCulture))
-                .Append(" | ").Append(row.MedianBusinessDays.ToString("0.0", CultureInfo.InvariantCulture))
-                .Append(" |\n");
+            AppendTableRow(report, row.StatusName, Count(row.IssueCount), Days(row.MedianBusinessDays));
         }
     }
+
+    /// <summary>
+    /// The head of a table. Every table of the report has this layout: what a row is about in the first
+    /// column, and figures in the others, aligned right.
+    /// </summary>
+    private static void AppendTableHead(StringBuilder report, params ReadOnlySpan<string> columns)
+    {
+        AppendTableRow(report, columns);
+        report.Append("| ---");
+        for (var column = 1; column < columns.Length; column++)
+        {
+            report.Append(" | ---:");
+        }
+
+        report.Append(" |\n");
+    }
+
+    private static void AppendTableRow(StringBuilder report, params ReadOnlySpan<string> cells)
+    {
+        foreach (var cell in cells)
+        {
+            // A cell can hold Jira's text (a status name): a "|" in it would otherwise end the cell.
+            report.Append("| ").Append(cell.Replace("|", "\\|", StringComparison.Ordinal)).Append(' ');
+        }
+
+        report.Append("|\n");
+    }
+
+    /// <summary>A number of issues.</summary>
+    private static string Count(long issues) => issues.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>
     /// A point bucket's label: the estimate in full (3, 0.5, 2.001), so two buckets the view keeps apart
@@ -145,7 +185,7 @@ public static class SprintReport
     private static string BucketLabel(double? pointBucket) =>
         pointBucket?.ToString("R", CultureInfo.InvariantCulture) ?? "unestimated";
 
-    /// <summary>A duration in days to one decimal place, e.g. 2.5.</summary>
+    /// <summary>A duration in days to one decimal place, e.g. 2.5. Every figure in days is written by this.</summary>
     private static string Days(double days) => days.ToString("F1", CultureInfo.InvariantCulture);
 
     /// <summary>A stored time as a date in the team's zone, e.g. 2026-01-05.</summary>

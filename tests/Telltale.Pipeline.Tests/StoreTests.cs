@@ -1,5 +1,7 @@
 using Microsoft.Data.Sqlite;
+using Telltale.Core;
 using Telltale.Pipeline.Tests.Harness;
+using Telltale.Reporting;
 using Telltale.Storage.Sqlite;
 using static Telltale.Pipeline.Tests.Harness.TeamTime;
 
@@ -36,6 +38,37 @@ public class StoreTests
 
         var rows = await pipeline.QueryAsync<(string SprintId, long DeliveredCount)>("SELECT sprint_id, delivered_count FROM delivered_per_sprint;");
         await Assert.That(rows).IsEquivalentTo(new[] { ("41", 1L) });
+    }
+
+    private const string DerivedDataUnreadable =
+        "The store's derived data cannot be read: it has not been built yet, or another version of this tool built it. Run derive, then report again.";
+
+    [Test]
+    public async Task A_report_rendered_from_a_store_that_was_never_derived_says_to_run_derive()
+    {
+        // The renderer called directly, as another host would call it: no command has checked the store first.
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        await pipeline.RunAllAsync(["backfill"]);
+        var store = new SqliteStore(pipeline.DatabasePath);
+
+        await Assert.That(async () => await SprintReport.RenderAsync(store, "41", TimeZoneInfo.Utc)).Throws<UserFacingException>().WithMessage(DerivedDataUnreadable);
+        await Assert.That(async () => await SprintReport.MostRecentlyCompletedSprintAsync(store)).Throws<UserFacingException>().WithMessage(DerivedDataUnreadable);
+    }
+
+    [Test]
+    [Arguments("cycle_time_per_sprint_and_bucket")]
+    [Arguments("time_in_status_per_sprint")]
+    public async Task A_report_rendered_from_derived_data_that_lacks_a_metric_view_says_to_run_derive(string view)
+    {
+        // Derived data built by a version of the tool that did not have the view yet.
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        await pipeline.RunAllAsync(["run", "--sprint", "41"]);
+        await pipeline.ExecuteAsync($"DROP VIEW {view};");
+        var store = new SqliteStore(pipeline.DatabasePath);
+
+        await Assert.That(async () => await SprintReport.RenderAsync(store, "41", TimeZoneInfo.Utc)).Throws<UserFacingException>().WithMessage(DerivedDataUnreadable);
     }
 
     private static void AddSprintAndIssue(FakeJira jira)

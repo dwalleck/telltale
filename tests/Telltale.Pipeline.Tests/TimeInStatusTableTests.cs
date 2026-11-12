@@ -37,7 +37,7 @@ public class TimeInStatusTableTests
 
             ## Time in status
 
-            | Status | Issues | Median business days |
+            | Status | Issues | Median (business days) |
             | --- | ---: | ---: |
             | Fake New | 1 | 1.0 |
             | Fake Development | 1 | 2.0 |
