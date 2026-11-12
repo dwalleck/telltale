@@ -64,33 +64,91 @@ internal static class DiscoverCommand
         var before = root.DeepClone();
         var jira = Section(root, "jira", path);
         var statusRoles = Section(root, "statusRoles", path);
-        RefuseCredentialsInTheFile(jira, path);
-        RequireRunWouldAcceptWhatTheFileSays(root, jira, statusRoles, path);
+        RequireRunWouldAcceptRolesAndProjectKeys(jira, statusRoles, path);
 
-        // A message about a value names where the value came from: the option, or the setting in the file.
-        string From(bool option, string optionName, string setting) => option ? optionName : $"{setting} in {path}";
-        var siteFrom = From(given.SiteUrl is not null, "--site-url", "jira.siteUrl");
-        var boardFrom = From(given.Board is not null, "--board", "jira.boardId");
-        var timeZoneFrom = From(given.TimeZone is not null, "--time-zone", "timeZone");
-        var backfillFrom = From(given.BackfillStart is not null, "--backfill-start", "jira.backfillStart");
+        // The roles are proposed by the discover that finds none in the file, whether or not a file was there.
+        var fileHadNoRoles = statusRoles.Count == 0;
 
-        var siteText = given.SiteUrl ?? FileText(jira, "siteUrl", siteFrom);
-        var boardId = given.Board ?? FileNumber(jira, "boardId", boardFrom);
-        var timeZone = given.TimeZone ?? FileText(root, "timeZone", timeZoneFrom);
-        var backfillStart = given.BackfillStart ?? FileText(jira, "backfillStart", backfillFrom);
+        // Each of these settings comes from its option, or else from the file, and whichever is used is checked
+        // once, by run's rule for it. An option may replace a value in the file that run would refuse: that is
+        // how discover repairs a file. Such an old value could be a secret pasted into the wrong place, so it
+        // is never shown, and the old file is then not kept as a backup.
+        var changes = new List<string>();
+        var replacedUnshown = new List<string>();
+
+        string? Choose(string? given, string option, JsonObject section, string name, string setting, Func<string, bool, string?> problemOf)
+        {
+            var inFile = section[name];
+            var fileText = TextOf(inFile);
+            var fileProblem = inFile is null ? null : fileText is null ? " must be text." : problemOf(fileText, false);
+            if (given is null)
+            {
+                return fileProblem is null ? fileText : throw new UserFacingException($"{setting} in {path}{fileProblem}");
+            }
+
+            if (problemOf(given, true) is { } optionProblem)
+            {
+                throw new UserFacingException(option + optionProblem);
+            }
+
+            if (fileProblem is not null)
+            {
+                ReplaceUnshown(section, name, given, setting);
+            }
+
+            return given;
+        }
+
+        void ReplaceUnshown(JsonObject section, string name, JsonNode value, string setting)
+        {
+            section[name] = value;
+            replacedUnshown.Add(setting);
+            changes.Add(setting == "jira.siteUrl" ? "Changed jira.siteUrl (the old address is not shown)." : $"Changed {setting} (the old value is not shown).");
+        }
+
+        long? ChooseBoard()
+        {
+            var inFile = jira["boardId"];
+            long? fileNumber = inFile is JsonValue value && value.TryGetValue<long>(out var number) ? number : null;
+            var fileProblem = inFile is null ? null : fileNumber is null ? " must be a whole number." : BoardProblem(fileNumber.Value);
+            if (given.Board is not { } board)
+            {
+                return fileProblem is null ? fileNumber : throw new UserFacingException($"jira.boardId in {path}{fileProblem}");
+            }
+
+            if (BoardProblem(board) is { } optionProblem)
+            {
+                throw new UserFacingException("--board" + optionProblem);
+            }
+
+            if (fileProblem is not null)
+            {
+                ReplaceUnshown(jira, "boardId", board, "jira.boardId");
+            }
+
+            return board;
+        }
+
+        var siteText = Choose(given.SiteUrl, "--site-url", jira, "siteUrl", "jira.siteUrl", SiteProblem);
+        var boardId = ChooseBoard();
+        var timeZone = Choose(given.TimeZone, "--time-zone", root, "timeZone", "timeZone", TimeZoneProblem);
+        var backfillStart = Choose(given.BackfillStart, "--backfill-start", jira, "backfillStart", "jira.backfillStart", DateProblem);
+        var sprintInFile = Choose(given.SprintField, SprintField.Option, jira, SprintField.Setting, $"jira.{SprintField.Setting}", FieldIdProblem("customfield_10020"));
+        var storyPointsInFile = Choose(given.StoryPointField, StoryPointField.Option, jira, StoryPointField.Setting, $"jira.{StoryPointField.Setting}", FieldIdProblem("customfield_10016"));
         RequireAll(path, ("--site-url", siteText is null), ("--board", boardId is null), ("--time-zone", timeZone is null), ("--backfill-start", backfillStart is null));
 
-        // What the file says was checked above. These checks are for what the options say, by the same rules.
-        var site = ReadSite(siteText!, siteFrom);
-        RequireBoardId(boardId!.Value, boardFrom);
-        RequireTimeZone(timeZone!, timeZoneFrom, showValue: given.TimeZone is not null);
-        RequireDate(backfillStart!, backfillFrom);
+        var site = WithTrailingSlash(new Uri(siteText!));
+        if (replacedUnshown.Contains("jira.siteUrl"))
+        {
+            // The change is already noted. The address is written as it will be, so it is not noted twice.
+            jira["siteUrl"] = site.AbsoluteUri;
+        }
 
-        var facts = await new JiraDiscovery(services.HttpHandler, site, boardId!.Value, services.Secrets).ReadAsync(cancellationToken);
+                var facts = await new JiraDiscovery(services.HttpHandler, site, boardId!.Value, services.Secrets).ReadAsync(cancellationToken);
 
         // Whatever would make the file useless stops the command here, before anything is printed or written.
-        var sprint = ChooseField(SprintField, given.SprintField, jira, facts.SprintFields, facts, path);
-        var storyPoints = ChooseField(StoryPointField, given.StoryPointField, jira, facts.StoryPointFields, facts, path);
+        var sprint = ChooseField(SprintField, given.SprintField, sprintInFile, facts.SprintFields, facts, path);
+        var storyPoints = ChooseField(StoryPointField, given.StoryPointField, storyPointsInFile, facts.StoryPointFields, facts, path);
         var (projectKeys, projectKeySource) = ChooseProjectKeys(jira["projectKeys"], facts.ProjectKeys, boardId.Value);
 
         var output = services.Out;
@@ -106,7 +164,6 @@ internal static class DiscoverCommand
         await output.WriteLineAsync($"Story point field: {storyPoints.Id} ({storyPoints.Source})");
         await output.WriteLineAsync($"Project keys: {projectKeySource}");
 
-        var changes = new List<string>();
         Set(jira, "siteUrl", site.AbsoluteUri, "jira.siteUrl", changes, showValues: false);
         Set(jira, "boardId", boardId.Value, "jira.boardId", changes);
         Set(jira, "projectKeys", projectKeys, "jira.projectKeys", changes);
@@ -126,7 +183,7 @@ internal static class DiscoverCommand
         }
 
         var text = root.ToJsonString(Indented) + Environment.NewLine;
-        var hasDoneRole = await RequireRunWouldAcceptAsync(text, path, firstDiscover: previous is null, cancellationToken);
+        var hasDoneRole = await RequireRunWouldAcceptAsync(text, path, mayLackDoneRole: fileHadNoRoles, cancellationToken);
 
         if (JsonNode.DeepEquals(root, before))
         {
@@ -135,22 +192,30 @@ internal static class DiscoverCommand
             return;
         }
 
-        var backup = await ReplaceFileAsync(path, text, previous is not null, services.Clock, cancellationToken);
-        if (backup is null)
+        // An old file that held a value run would refuse is not kept: the copy would hold that value.
+        var backup = await ReplaceFileAsync(path, text, keepPrevious: previous is not null && replacedUnshown.Count == 0, services.Clock, cancellationToken);
+        if (previous is null)
         {
             await output.WriteLineAsync($"Wrote {path}. Before the first run, review the status roles and fill in abandonedResolutionIds and holidays.");
-            if (!hasDoneRole)
+        }
+        else if (backup is null)
+        {
+            var settings = replacedUnshown.Count == 1 ? replacedUnshown[0] : $"{string.Join(", ", replacedUnshown.Take(replacedUnshown.Count - 1))} and {replacedUnshown[^1]}";
+            var refused = replacedUnshown.Count == 1 ? "is a value" : "are values";
+            await output.WriteLineAsync($"Wrote {path}. The previous file was not kept: its {settings} {refused} run would refuse, and such a value could be a secret.");
+        }
+        else
+        {
+            await output.WriteLineAsync($"Wrote {path}. The previous file is kept as {backup}.");
+            if (HasComments(previous))
             {
-                await output.WriteLineAsync("No status has the role 'done' yet, so run will refuse this file: nothing could ever be delivered. Give the role done to at least one status in statusRoles.");
+                await output.WriteLineAsync($"The previous file had comments, and the new one has none: they are only in {backup}.");
             }
-
-            return;
         }
 
-        await output.WriteLineAsync($"Wrote {path}. The previous file is kept as {backup}.");
-        if (HasComments(previous!))
+        if (!hasDoneRole)
         {
-            await output.WriteLineAsync($"The previous file had comments, and the new one has none: they are only in {backup}.");
+            await output.WriteLineAsync("No status has the role 'done' yet, so run will refuse this file: nothing could ever be delivered. Give the role done to at least one status in statusRoles.");
         }
     }
 
@@ -173,7 +238,7 @@ internal static class DiscoverCommand
         {
             var proposal = known.TryGetValue(statusId, out var status) ? ProposeRole(status) : null;
 
-            // Every role in the file is one of the four by now (RequireRunWouldAcceptWhatTheFileSays).
+            // Every role in the file is one of the four by now (RequireRunWouldAcceptRolesAndProjectKeys).
             if (statusRoles.TryGetPropertyValue(statusId, out var inFile))
             {
                 var role = RoleText(inFile);
@@ -240,12 +305,12 @@ internal static class DiscoverCommand
     /// A field's ID and where it came from. The owner's word wins: the option, then the file. Jira's list
     /// decides only when it names exactly one field; a site often has two story point fields, and the board
     /// uses one. A field the owner names must be in Jira's field list, and hold a number where the kind says so.
+    /// <paramref name="inFile"/> is the file's value, already checked to be a custom field ID.
     /// </summary>
-    private static (string Id, string Source) ChooseField(FieldKind kind, string? given, JsonObject jira, IReadOnlyList<DiscoveredField> listed, JiraSiteFacts facts, string path)
+    private static (string Id, string Source) ChooseField(FieldKind kind, string? given, string? inFile, IReadOnlyList<DiscoveredField> listed, JiraSiteFacts facts, string path)
     {
         var names = string.Join(", ", listed.Select(field => $"{field.Id} ({field.Name})"));
         var settingInFile = $"jira.{kind.Setting} in {path}";
-        var inFile = given is null ? FileText(jira, kind.Setting, settingInFile) : null;
 
         if ((given ?? inFile) is { } named)
         {
@@ -282,7 +347,7 @@ internal static class DiscoverCommand
     {
         if (inFile is not null)
         {
-            // The keys are project keys by now (RequireRunWouldAcceptWhatTheFileSays), so they can be shown.
+            // The keys are project keys by now (RequireRunWouldAcceptRolesAndProjectKeys), so they can be shown.
             var kept = inFile.AsArray().Select(key => TextOf(key)!).ToList();
             var shown = string.Join(", ", kept);
             return (inFile.DeepClone(), kept.ToHashSet(StringComparer.Ordinal).SetEquals(listed) ? $"{shown} (from the file)" : $"{shown} (from the file; Jira lists {string.Join(", ", listed)})");
@@ -309,25 +374,21 @@ internal static class DiscoverCommand
     /// Puts the text about to be written through the checks the run makes when it loads the file, so discover
     /// never leaves a file the run refuses: a setting the tool does not know (a pasted secret, for one), a
     /// role outside the four, no done role. The run's message names the setting and never its value.
-    /// One file the run refuses is written all the same (owner decision D40): the first discover's, when the
-    /// board has no status discover can propose as done. The owner has to choose one, and needs the file to
-    /// do it in. Returns false in that case alone, so the caller can say so.
+    /// One file the run refuses is written all the same (owner decision D40), when <paramref name="mayLackDoneRole"/>
+    /// says so: the file had no roles before this discover, and the board has no status discover can propose
+    /// as done. The owner has to choose one, and needs the file to do it in. Returns whether a status has the
+    /// done role: false in that case alone, so the caller can say so.
     /// </summary>
-    private static async Task<bool> RequireRunWouldAcceptAsync(string text, string path, bool firstDiscover, CancellationToken cancellationToken)
+    private static async Task<bool> RequireRunWouldAcceptAsync(string text, string path, bool mayLackDoneRole, CancellationToken cancellationToken)
     {
         try
         {
             using var stream = new MemoryStream(Encoding.UTF8.GetBytes(text));
             var config = await ConfigFile.ReadAsync(stream, path, cancellationToken);
-            var onlyTheDoneRoleIsMissing = firstDiscover && config.StatusRoles.Values.All(IsRole) && !config.StatusRoles.Values.Contains("done");
-            if (!onlyTheDoneRoleIsMissing)
-            {
-                PipelineSteps.ReadStatusRoles(config, path);
-            }
-
+            var roles = PipelineSteps.ReadStatusRoles(config, path, requireDone: !mayLackDoneRole);
             PipelineSteps.ReadAbandonedResolutionIds(config, path);
             PipelineSteps.ReadTimeZone(config, path);
-            return !onlyTheDoneRoleIsMissing;
+            return roles.HasDone;
         }
         catch (UserFacingException exception)
         {
@@ -416,113 +477,63 @@ internal static class DiscoverCommand
     }
 
     /// <summary>
-    /// A password in the file's site address is refused even when the command line gives a new address:
-    /// the file would otherwise be copied, password and all, into the backup. The address is not shown.
+    /// The settings of the file no option can replace, and discover shows: the status roles and the project
+    /// keys. They are checked by the rule the run applies, before Jira is asked anything and before anything is
+    /// printed or copied. The messages name the setting, and for a role the status ID, never the value, which
+    /// could be a secret pasted into the wrong place. The settings discover only carries over (the abandoned
+    /// resolutions, the holidays, anything the tool does not know) are never shown, and the check of the text
+    /// about to be written refuses them.
     /// </summary>
-    private static void RefuseCredentialsInTheFile(JsonObject jira, string path)
+    private static void RequireRunWouldAcceptRolesAndProjectKeys(JsonObject jira, JsonObject statusRoles, string path)
     {
-        if (TextOf(jira["siteUrl"]) is { } inFile && Uri.TryCreate(inFile, UriKind.Absolute, out var site) && site.UserInfo.Length > 0)
+        // The IDs first: a role's message shows its status ID.
+        if (statusRoles.Any(role => !IsStatusId(role.Key)))
         {
-            throw new UserFacingException($"jira.siteUrl in {path} must not carry a user name or password. Take them out of the file, then run discover again.");
-        }
-    }
-
-    /// <summary>
-    /// Checks every value the file gives for a setting discover reads or shows, by the rule the run applies
-    /// to that setting, before Jira is asked anything and before anything is printed or copied. An option that
-    /// replaces the value does not excuse it: the old file is copied into the backup as it is, and the line
-    /// about the change shows the old value. The messages name the setting and never the value, which could
-    /// be a secret pasted into the wrong place. A setting the file leaves out is fine: discover fills it in.
-    /// The settings discover only carries over (the abandoned resolutions, the holidays, anything the tool does
-    /// not know) are never shown, and the check of the text about to be written refuses them.
-    /// </summary>
-    private static void RequireRunWouldAcceptWhatTheFileSays(JsonObject root, JsonObject jira, JsonObject statusRoles, string path)
-    {
-        string InFile(string setting) => $"{setting} in {path}";
-
-        if (FileText(jira, "siteUrl", InFile("jira.siteUrl")) is { } siteUrl)
-        {
-            ReadSite(siteUrl, InFile("jira.siteUrl"));
-        }
-
-        if (FileNumber(jira, "boardId", InFile("jira.boardId")) is { } boardId)
-        {
-            RequireBoardId(boardId, InFile("jira.boardId"));
-        }
-
-        if (FileText(root, "timeZone", InFile("timeZone")) is { } timeZone)
-        {
-            RequireTimeZone(timeZone, InFile("timeZone"), showValue: false);
-        }
-
-        if (FileText(jira, "backfillStart", InFile("jira.backfillStart")) is { } backfillStart)
-        {
-            RequireDate(backfillStart, InFile("jira.backfillStart"));
-        }
-
-        foreach (var (setting, example) in new[] { ("sprintFieldId", "customfield_10020"), ("storyPointFieldId", "customfield_10016") })
-        {
-            if (FileText(jira, setting, InFile($"jira.{setting}")) is { } fieldId && !ConfigFile.IsCustomFieldId(fieldId))
-            {
-                throw new UserFacingException($"{InFile($"jira.{setting}")} must be a custom field ID such as {example}.");
-            }
+            throw new UserFacingException($"statusRoles in {path}: every status ID must be a Jira status ID (digits only), and one is not. Correct it in the file, then run discover again.");
         }
 
         foreach (var (statusId, role) in statusRoles)
         {
-            if (TextOf(role) is not { } label || !IsRole(label))
+            if (TextOf(role) is not { } label || !StatusRole.TryParse(label, out _))
             {
-                // The status ID is shown: an ID with no role in the four is what the owner has to find.
                 throw new UserFacingException(
-                    $"{InFile("statusRoles")}: the role of status {statusId} is not one of: not started, work, blocked, done. Correct it in the file, then run discover again.");
+                    $"statusRoles in {path}: the role of status {statusId} is not one of: not started, work, blocked, done. Correct it in the file, then run discover again.");
             }
         }
 
         if (jira["projectKeys"] is { } projectKeys && !(projectKeys is JsonArray keys && keys.All(key => JiraProjectKey.IsValid(TextOf(key)))))
         {
             throw new UserFacingException(
-                $"{InFile("jira.projectKeys")} must be a list of Jira project keys (an upper-case letter followed by upper-case letters, digits or underscores), and it is not. "
+                $"jira.projectKeys in {path} must be a list of Jira project keys (an upper-case letter followed by upper-case letters, digits or underscores), and it is not. "
                 + "Correct it in the file, then run discover again.");
         }
     }
 
-    private static bool IsRole(string label)
-    {
-        try
-        {
-            StatusRole.Parse(label);
-            return true;
-        }
-        catch (FormatException)
-        {
-            return false;
-        }
-    }
+    private static bool IsStatusId(string statusId) => statusId.Length > 0 && statusId.All(char.IsAsciiDigit);
 
-    private static void RequireBoardId(long boardId, string from)
-    {
-        if (boardId <= 0)
-        {
-            throw new UserFacingException($"{from} must be a positive number.");
-        }
-    }
+    // What run would refuse in one value, as the end of a sentence that starts with where the value came from
+    // (the option, or the setting and the file), or null. The second argument says the value came from an
+    // option. Only then may a message repeat it: the command line is the owner's own, the file may hold a secret.
 
-    /// <summary>The time zone is shown only when it came from the command line: a value in the file is never repeated.</summary>
-    private static void RequireTimeZone(string timeZone, string from, bool showValue)
-    {
-        if (!TimeZoneInfo.TryFindSystemTimeZoneById(timeZone, out _))
-        {
-            throw new UserFacingException(showValue ? $"{from}: '{timeZone}' is not a known IANA time zone ID." : $"{from} is not a known IANA time zone ID.");
-        }
-    }
+    /// <summary>The rules the run applies to <c>jira.siteUrl</c>: https only, because the Jira email and API token travel with every request, and no secret in the address.</summary>
+    private static string? SiteProblem(string text, bool fromOption) =>
+        !Uri.TryCreate(text, UriKind.Absolute, out var site) || site.Scheme != Uri.UriSchemeHttps ? " must be an absolute https:// address."
+        : site.UserInfo.Length > 0 ? " must not carry a user name or password."
+        : null;
 
-    private static void RequireDate(string date, string from)
-    {
-        if (!DateOnly.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
-        {
-            throw new UserFacingException($"{from} must be a date written as yyyy-MM-dd.");
-        }
-    }
+    private static string? BoardProblem(long boardId) => boardId <= 0 ? " must be a positive number." : null;
+
+    private static string? TimeZoneProblem(string timeZone, bool fromOption) =>
+        TimeZoneInfo.TryFindSystemTimeZoneById(timeZone, out _) ? null
+        : fromOption ? $": '{timeZone}' is not a known IANA time zone ID."
+        : " is not a known IANA time zone ID.";
+
+    private static string? DateProblem(string date, bool fromOption) =>
+        DateOnly.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _) ? null : " must be a date written as yyyy-MM-dd.";
+
+    /// <summary>A field ID in the file must have the form of a custom field ID. One given by an option is looked up in Jira's field list instead.</summary>
+    private static Func<string, bool, string?> FieldIdProblem(string example) =>
+        (fieldId, fromOption) => fromOption || ConfigFile.IsCustomFieldId(fieldId) ? null : $" must be a custom field ID such as {example}.";
 
     private static void RequireAll(string path, params (string Option, bool Missing)[] options)
     {
@@ -534,25 +545,9 @@ internal static class DiscoverCommand
         }
     }
 
-    /// <summary>
-    /// The site address, under the rules the run applies to <c>jira.siteUrl</c>: https only, because the Jira
-    /// email and API token travel with every request. It ends in a slash so relative addresses keep its path.
-    /// </summary>
-    private static Uri ReadSite(string text, string from)
-    {
-        if (!Uri.TryCreate(text, UriKind.Absolute, out var site) || site.Scheme != Uri.UriSchemeHttps)
-        {
-            throw new UserFacingException($"{from} must be an absolute https:// address.");
-        }
-
-        // The address is written to the file, and the file holds no secrets.
-        if (site.UserInfo.Length > 0)
-        {
-            throw new UserFacingException($"{from} must not carry a user name or password.");
-        }
-
-        return site.AbsolutePath.EndsWith('/') ? site : new UriBuilder(site) { Path = site.AbsolutePath + "/" }.Uri;
-    }
+    /// <summary>The site address ending in a slash, so relative addresses keep its path.</summary>
+    private static Uri WithTrailingSlash(Uri site) =>
+        site.AbsolutePath.EndsWith('/') ? site : new UriBuilder(site) { Path = site.AbsolutePath + "/" }.Uri;
 
     /// <summary>
     /// Writes one setting and notes the change when the file held another value. The values are shown unless
@@ -569,16 +564,6 @@ internal static class DiscoverCommand
 
         section[name] = value;
     }
-
-    /// <summary>A text setting of the file: null when absent or null, refused when it is not text.</summary>
-    private static string? FileText(JsonObject section, string name, string from) =>
-        section[name] is not { } node ? null : TextOf(node) ?? throw new UserFacingException($"{from} must be text.");
-
-    /// <summary>A whole-number setting of the file: null when absent or null, refused when it is anything else.</summary>
-    private static long? FileNumber(JsonObject section, string name, string from) =>
-        section[name] is not { } node ? null
-        : node is JsonValue value && value.TryGetValue<long>(out var number) ? number
-        : throw new UserFacingException($"{from} must be a whole number.");
 
     private static string? TextOf(JsonNode? node) => node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
 }

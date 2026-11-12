@@ -256,6 +256,22 @@ public class ConfigurationAndSecretsTests
     }
 
     [Test]
+    public async Task A_status_id_that_is_not_digits_is_refused_and_not_shown()
+    {
+        // Jira's status IDs are digits. Anything else matches no issue, and could be a secret pasted in the wrong place.
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config["statusRoles"]!["synthetic-pasted-token"] = "work";
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid: statusRoles: every status ID must be a Jira status ID (digits only), and one is not.");
+        await Assert.That(pipeline.Error.ToString()).DoesNotContain("synthetic-pasted-token");
+        await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
+    }
+
+    [Test]
     public async Task A_status_role_map_with_no_done_status_is_refused()
     {
         await using var pipeline = new PipelineHarness();

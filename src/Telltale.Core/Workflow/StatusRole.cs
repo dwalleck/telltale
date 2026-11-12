@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Telltale.Core.Workflow;
 
 /// <summary>
@@ -7,14 +9,22 @@ namespace Telltale.Core.Workflow;
 public closed record StatusRole
 {
     /// <summary>Reads a role from its configuration label. Throws <see cref="FormatException"/> for anything else.</summary>
-    public static StatusRole Parse(string label) => label switch
+    public static StatusRole Parse(string label) =>
+        TryParse(label, out var role) ? role : throw new FormatException($"'{label}' is not a status role. Use one of: not started, work, blocked, done.");
+
+    /// <summary>Reads a role from its configuration label. False for anything that is not one of the four labels.</summary>
+    public static bool TryParse(string? label, [NotNullWhen(true)] out StatusRole? role)
     {
-        "not started" => new NotStartedRole(),
-        "work" => new WorkRole(),
-        "blocked" => new BlockedRole(),
-        "done" => new DoneRole(),
-        _ => throw new FormatException($"'{label}' is not a status role. Use one of: not started, work, blocked, done."),
-    };
+        role = label switch
+        {
+            "not started" => new NotStartedRole(),
+            "work" => new WorkRole(),
+            "blocked" => new BlockedRole(),
+            "done" => new DoneRole(),
+            _ => null,
+        };
+        return role is not null;
+    }
 }
 
 /// <summary>Waiting to be picked up: development has not started.</summary>
