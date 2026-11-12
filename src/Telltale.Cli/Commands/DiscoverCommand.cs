@@ -94,7 +94,7 @@ internal static class DiscoverCommand
             throw new UserFacingException($"{backfillFrom} must be a date written as yyyy-MM-dd.");
         }
 
-        var facts = await new JiraDiscovery(services.HttpHandler, site, boardId!.Value, services.Secrets).ReadAsync(cancellationToken);
+        var facts = await new JiraDiscovery(services.HttpHandler, site, boardId!.Value, services.Secrets, services.Clock).ReadAsync(cancellationToken);
 
         // Whatever would make the file useless stops the command here, before anything is printed or written.
         var sprint = ChooseField(SprintField, given.SprintField, jira, facts.SprintFields, facts, path);

@@ -54,9 +54,12 @@ public sealed class JiraDiscovery
     private readonly Uri _siteUrl;
     private readonly long _boardId;
     private readonly ISecretStore _secrets;
+    private readonly TimeProvider _clock;
 
-    public JiraDiscovery(HttpMessageHandler handler, Uri siteUrl, long boardId, ISecretStore secrets)
+    /// <param name="clock">Times the waits Jira asks for when it limits the rate of requests.</param>
+    public JiraDiscovery(HttpMessageHandler handler, Uri siteUrl, long boardId, ISecretStore secrets, TimeProvider clock)
     {
+        _clock = clock;
         _handler = handler;
         _siteUrl = siteUrl;
         _boardId = boardId;
@@ -69,7 +72,7 @@ public sealed class JiraDiscovery
     /// </summary>
     public async Task<JiraSiteFacts> ReadAsync(CancellationToken cancellationToken = default)
     {
-        using var jira = new JiraClient(_handler, _siteUrl, _secrets.Require(SecretName.JiraEmail), _secrets.Require(SecretName.JiraApiToken));
+        using var jira = new JiraClient(_handler, _siteUrl, _secrets.Require(SecretName.JiraEmail), _secrets.Require(SecretName.JiraApiToken), _clock);
 
         var statuses = await ReadStatusesAsync(jira, cancellationToken);
         var boardStatusIds = await ReadBoardStatusIdsAsync(jira, cancellationToken);
