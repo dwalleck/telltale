@@ -77,6 +77,20 @@ public class StoreTests
         await Assert.That(rows).IsEquivalentTo(new[] { (1L, 1L, 2L) });
     }
 
+    [Test]
+    public async Task A_query_over_the_views_can_count_a_views_rows_without_naming_a_column()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        await pipeline.RunAsync("run", "--sprint", "41");
+        var store = new SqliteStore(pipeline.DatabasePath);
+
+        var rows = await store.QueryViewsAsync<long>("SELECT COUNT(*) FROM time_in_status_per_sprint;");
+
+        // The two statuses the issues spent business time in.
+        await Assert.That(rows).IsEquivalentTo(new[] { 2L });
+    }
+
     private static void AddSprintAndIssue(FakeJira jira)
     {
         jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
