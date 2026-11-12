@@ -78,6 +78,13 @@ public static class ConfigFile
                 throw new UserFacingException($"The configuration file {path} is not valid: jira.storyPointFieldId must not be empty.");
             }
 
+            // The search asks Jira for this field by name, so it must be a custom field: a system field
+            // such as "description" would bring free text over the wire.
+            if (!IsCustomFieldId(config.Jira.StoryPointFieldId))
+            {
+                throw new UserFacingException($"The configuration file {path} is not valid: jira.storyPointFieldId must be a custom field ID such as customfield_10016.");
+            }
+
             if (string.IsNullOrWhiteSpace(config.Jira.SprintFieldId))
             {
                 throw new UserFacingException($"The configuration file {path} is not valid: jira.sprintFieldId must not be empty.");

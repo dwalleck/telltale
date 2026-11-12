@@ -24,6 +24,24 @@ public class ConfigurationAndSecretsTests
     }
 
     [Test]
+    [Arguments("description")]
+    [Arguments("customfield_")]
+    [Arguments("customfield_10016 ")]
+    public async Task A_story_point_field_id_that_is_not_a_custom_field_id_is_refused(string fieldId)
+    {
+        // The field is asked for by name: "description" would have Jira send free text.
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config["jira"]!["storyPointFieldId"] = fieldId;
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid: jira.storyPointFieldId must be a custom field ID such as customfield_10016.");
+        await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
+    }
+
+    [Test]
     public async Task A_status_role_outside_the_four_roles_is_refused()
     {
         await using var pipeline = new PipelineHarness();
