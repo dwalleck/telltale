@@ -6,15 +6,6 @@ namespace Telltale.Core.Workflow;
 /// </summary>
 public closed record StatusRole
 {
-    /// <summary>The role's name as written in the configuration file.</summary>
-    public string Label => this switch
-    {
-        NotStartedRole => "not started",
-        WorkRole => "work",
-        BlockedRole => "blocked",
-        DoneRole => "done",
-    };
-
     /// <summary>Reads a role from its configuration label. Throws <see cref="FormatException"/> for anything else.</summary>
     public static StatusRole Parse(string label) => label switch
     {

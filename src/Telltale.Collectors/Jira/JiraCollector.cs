@@ -20,7 +20,7 @@ public sealed class JiraCollector
     // The bulk changelog endpoint takes at most 1000 issues per request.
     private const int ChangelogIssuesPerRequest = 1000;
 
-    // The largest pages Jira documents for the search and bulk changelog endpoints.
+    // The largest page sizes Jira documents for the search and bulk changelog endpoints. Jira may return fewer.
     private const int SearchPageSize = 5000;
     private const int ChangelogPageSize = 10000;
 
@@ -53,17 +53,19 @@ public sealed class JiraCollector
     {
         using var document = await jira.GetAsync("rest/api/3/status", cancellationToken);
         return Read<List<RawStatus>>("status list", () => [.. document.RootElement.EnumerateArray().Select(status => new RawStatus(
-            status.GetProperty("id").GetString()!,
-            status.GetProperty("name").GetString()!,
-            status.GetProperty("statusCategory").GetProperty("key").GetString()!))]);
+            Text(status, "id"),
+            Text(status, "name"),
+            Text(status.GetProperty("statusCategory"), "key")))]);
     }
 
     private async Task<List<RawSprint>> FetchSprintsAsync(JiraClient jira, CancellationToken cancellationToken)
     {
         using var document = await jira.GetAsync($"rest/agile/1.0/board/{_config.BoardId}/sprint", cancellationToken);
-        RequireSinglePage(document.RootElement, "sprint list");
-
-        return Read<List<RawSprint>>("sprint list", () => ParseSprints(document.RootElement));
+        return Read("sprint list", () =>
+        {
+            RequireCompleteList(document.RootElement, "sprint list");
+            return ParseSprints(document.RootElement);
+        });
     }
 
     private List<RawSprint> ParseSprints(JsonElement page)
@@ -75,8 +77,8 @@ public sealed class JiraCollector
             .Select(sprint => new RawSprint(
             sprint.GetProperty("id").GetInt64().ToString(CultureInfo.InvariantCulture),
             _config.BoardId,
-            sprint.GetProperty("name").GetString()!,
-            sprint.GetProperty("state").GetString()!,
+            Text(sprint, "name"),
+            Text(sprint, "state"),
             OptionalTime(sprint, "startDate"),
             OptionalTime(sprint, "endDate"),
             OptionalTime(sprint, "completeDate")))];
@@ -93,7 +95,10 @@ public sealed class JiraCollector
         {
             ["jql"] = $"project in ({projects}) AND updated >= \"{_config.BackfillStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}\" ORDER BY updated ASC",
 
-            // The largest page Jira documents. Its default is 50, and a further page stops the run until paging is built.
+            // A request, not a promise: Jira's default is 50, and it may return fewer than asked for. The docs
+            // say the largest pages come with the ID or key alone; with named fields a real site is expected to
+            // cap a page near 100. So a board of ordinary size still has a further page, which stops the run
+            // until paging is built (ticket 10).
             ["maxResults"] = SearchPageSize,
 
             // Named fields only: the default is the ID alone, and free-text fields are never asked for.
@@ -101,23 +106,28 @@ public sealed class JiraCollector
         };
 
         using var document = await jira.PostAsync("rest/api/3/search/jql", body, cancellationToken);
-        RequireLastPage(document.RootElement, "issue search");
+        return Read("issue search", () =>
+        {
+            RequireLastPage(document.RootElement, "issue search");
+            return ParseIssues(document.RootElement, salt);
+        });
+    }
 
-        return Read<List<RawIssue>>("issue search", () => [.. document.RootElement.GetProperty("issues").EnumerateArray().Select(issue =>
+    private List<RawIssue> ParseIssues(JsonElement page, string salt) =>
+        [.. page.GetProperty("issues").EnumerateArray().Select(issue =>
         {
             var fields = issue.GetProperty("fields");
             return new RawIssue(
-                issue.GetProperty("id").GetString()!,
-                issue.GetProperty("key").GetString()!,
-                fields.GetProperty("issuetype").GetProperty("id").GetString()!,
+                Text(issue, "id"),
+                Text(issue, "key"),
+                Text(fields.GetProperty("issuetype"), "id"),
                 JiraTime.Parse(fields.GetProperty("created")),
-                fields.GetProperty("status").GetProperty("id").GetString()!,
-                Optional(fields, "resolution")?.GetProperty("id").GetString(),
+                Text(fields.GetProperty("status"), "id"),
+                Optional(fields, "resolution") is { } resolution ? Text(resolution, "id") : null,
                 Optional(fields, _config.StoryPointFieldId)?.GetDouble(),
-                Optional(fields, "assignee") is { } assignee ? IdentityHash.Of(assignee.GetProperty("accountId").GetString()!, salt) : null,
+                Optional(fields, "assignee") is { } assignee ? IdentityHash.Of(Text(assignee, "accountId"), salt) : null,
                 JiraTime.Parse(fields.GetProperty("updated")));
-        })]);
-    }
+        })];
 
     private static async Task<List<RawChange>> FetchChangesAsync(JiraClient jira, List<RawIssue> issues, CancellationToken cancellationToken)
     {
@@ -133,9 +143,11 @@ public sealed class JiraCollector
             };
 
             using var document = await jira.PostAsync("rest/api/3/changelog/bulkfetch", body, cancellationToken);
-            RequireLastPage(document.RootElement, "bulk changelog");
-
-            changes.AddRange(Read("bulk changelog", () => ParseChanges(document.RootElement)));
+            changes.AddRange(Read("bulk changelog", () =>
+            {
+                RequireLastPage(document.RootElement, "bulk changelog");
+                return ParseChanges(document.RootElement);
+            }));
         }
 
         return changes;
@@ -146,10 +158,10 @@ public sealed class JiraCollector
         var changes = new List<RawChange>();
         foreach (var log in page.GetProperty("issueChangeLogs").EnumerateArray())
         {
-            var issueId = log.GetProperty("issueId").GetString()!;
+            var issueId = Text(log, "issueId");
             foreach (var history in log.GetProperty("changeHistories").EnumerateArray())
             {
-                var historyId = history.GetProperty("id").GetString()!;
+                var historyId = Text(history, "id");
                 var at = JiraTime.Parse(history.GetProperty("created"));
 
                 foreach (var item in history.GetProperty("items").EnumerateArray())
@@ -182,6 +194,10 @@ public sealed class JiraCollector
         }
     }
 
+    /// <summary>A text value Jira must give. Absent, null or not text is an answer in an unknown shape.</summary>
+    private static string Text(JsonElement parent, string name) =>
+        parent.GetProperty(name).GetString() ?? throw new FormatException($"{name} is null.");
+
     /// <summary>A property's value, or null when it is absent or JSON null. Jira uses both for "not set".</summary>
     private static JsonElement? Optional(JsonElement parent, string name) =>
         parent.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null ? value : null;
@@ -189,12 +205,34 @@ public sealed class JiraCollector
     private static DateTimeOffset? OptionalTime(JsonElement parent, string name) =>
         Optional(parent, name) is { } value ? JiraTime.Parse(value) : null;
 
-    // Paging is not built yet. Until it is, a second page stops the run instead of being dropped silently.
+    // Paging is not built yet. Until it is, a further page stops the run instead of being dropped silently.
+    // Both checks run inside Read, so an answer that is not a JSON object is reported as an unknown shape.
 
-    /// <summary>For the Agile API's offset paging (<c>isLast</c>).</summary>
-    private static void RequireSinglePage(JsonElement page, string what)
+    /// <summary>
+    /// For the Agile API's offset paging. The list is complete when <c>isLast</c> is true, or, when Jira leaves
+    /// <c>isLast</c> out, when <c>startAt</c> plus the number of values reaches <c>total</c>. With neither, nothing
+    /// says the list is complete, and the run stops.
+    /// </summary>
+    private static void RequireCompleteList(JsonElement page, string what)
     {
-        if (page.TryGetProperty("isLast", out var isLast) && isLast.ValueKind == JsonValueKind.False)
+        var isLast = Optional(page, "isLast");
+        if (isLast?.ValueKind == JsonValueKind.True)
+        {
+            return;
+        }
+
+        if (isLast?.ValueKind == JsonValueKind.False)
+        {
+            throw new UserFacingException($"Jira's {what} has more than one page, and paging is not supported yet.");
+        }
+
+        if (Optional(page, "total") is not { } total)
+        {
+            throw new UserFacingException($"Jira's {what} does not say whether it is complete, so sprints could be missing. Paging is not supported yet.");
+        }
+
+        var seen = (Optional(page, "startAt")?.GetInt64() ?? 0) + page.GetProperty("values").GetArrayLength();
+        if (seen < total.GetInt64())
         {
             throw new UserFacingException($"Jira's {what} has more than one page, and paging is not supported yet.");
         }

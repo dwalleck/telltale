@@ -90,6 +90,34 @@ public class DeliveryTests
             .Throws<FormatException>();
     }
 
+    [Test]
+    public async Task The_current_status_decides_when_the_history_ends_in_done_but_the_issue_is_elsewhere()
+    {
+        var outcome = Outcome(Development,
+            new StatusChange("1", Local(2026, 11, 3, 9), New, Development),
+            new StatusChange("2", Local(2026, 11, 5, 9), Development, Done));
+
+        await Assert.That(outcome.Value).IsEqualTo(new NotDelivered());
+    }
+
+    [Test]
+    public async Task An_issue_in_done_whose_history_ends_elsewhere_has_no_delivery_moment()
+    {
+        var outcome = Outcome(Done,
+            new StatusChange("1", Local(2026, 11, 3, 9), New, Development));
+
+        await Assert.That(outcome.Value).IsEqualTo(new NotDelivered());
+    }
+
+    [Test]
+    public async Task An_issue_that_has_only_ever_been_in_done_statuses_has_no_delivery_moment()
+    {
+        var outcome = Outcome(Shipped,
+            new StatusChange("1", Local(2026, 11, 3, 9), Done, Shipped));
+
+        await Assert.That(outcome.Value).IsEqualTo(new NotDelivered());
+    }
+
     private static IssueOutcome Outcome(string currentStatusId, params StatusChange[] changes) =>
-        Delivery.Of(StatusTimeline.Build(Created, currentStatusId, changes).Intervals, Roles);
+        Delivery.Of(currentStatusId, StatusTimeline.Build(Created, currentStatusId, changes).Intervals, Roles);
 }

@@ -146,6 +146,81 @@ public class ConfigurationAndSecretsTests
     }
 
     [Test]
+    public async Task A_site_url_with_a_path_and_no_trailing_slash_keeps_its_path()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config["jira"]!["siteUrl"] = "https://example.invalid/tenant";
+
+        // The fake serves nothing under /tenant, so the run fails; what matters is where the request went.
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(pipeline.Jira.Handler.Requests.Select(request => request.Path)).IsEquivalentTo(new[] { "/tenant/rest/api/3/status" });
+    }
+
+    [Test]
+    public async Task A_setting_written_twice_is_refused()
+    {
+        // With two values for one setting, the reader of the file cannot tell which one is in force.
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.RawConfig = pipeline.Config.ToJsonString().Replace("\"timeZone\":", "\"timeZone\":\"Europe/Paris\",\"timeZone\":", StringComparison.Ordinal);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid").And.Contains("timeZone");
+        await Assert.That(pipeline.Error.ToString()).DoesNotContain("   at ");
+        await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
+    }
+
+    [Test]
+    [Arguments("")]
+    [Arguments("  ")]
+    public async Task An_empty_story_point_field_id_is_refused(string fieldId)
+    {
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config["jira"]!["storyPointFieldId"] = fieldId;
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid: jira.storyPointFieldId must not be empty.");
+        await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
+    }
+
+    [Test]
+    [Arguments(0L)]
+    [Arguments(-400001L)]
+    public async Task A_board_id_that_is_not_positive_is_refused(long boardId)
+    {
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config["jira"]!["boardId"] = boardId;
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid: jira.boardId must be a positive number.");
+        await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
+    }
+
+    [Test]
+    public async Task A_run_that_stops_for_a_missing_secret_leaves_no_database_behind()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Secrets.Remove(SecretName.JiraApiToken);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("The secret 'Jira API token' is not set");
+        await Assert.That(File.Exists(pipeline.DatabasePath)).IsFalse();
+    }
+
+    [Test]
     public async Task A_status_role_map_with_no_done_status_is_refused()
     {
         await using var pipeline = new PipelineHarness();

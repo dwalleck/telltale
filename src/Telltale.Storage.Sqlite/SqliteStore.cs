@@ -202,29 +202,29 @@ public sealed class SqliteStore : ITelltaleStore
             await connection.ExecuteAsync(Command(cancellationToken, sql, transaction: transaction));
         }
 
-        await connection.ExecuteAsync(Command(
-            cancellationToken,
-            "INSERT INTO status_interval (issue_id, status_id, started, ended) VALUES (@IssueId, @StatusId, @Started, @Ended);",
-            derived.StatusIntervals.Select(interval => new
-            {
-                interval.IssueId,
-                interval.StatusId,
-                Started = StoredTime.ToStored(interval.Start),
-                Ended = StoredTime.ToStored(interval.End),
-            }),
-            transaction));
+        await InsertRowsAsync(
+            connection,
+            transaction,
+            "INSERT INTO sprint_window (sprint_id, started, ended) VALUES (@sprintId, @started, @ended);",
+            ["@sprintId", "@started", "@ended"],
+            derived.SprintWindows.Select(window => new object?[] { window.SprintId, StoredTime.ToStored(window.Start), StoredTime.ToStored(window.End) }),
+            cancellationToken);
 
-        await connection.ExecuteAsync(Command(
-            cancellationToken,
-            "INSERT INTO issue_cycle (issue_id, cycle_end, delivered, delivery_sprint_id) VALUES (@IssueId, @CycleEnd, @Delivered, @DeliverySprintId);",
-            derived.IssueCycles.Select(cycle => new
-            {
-                cycle.IssueId,
-                CycleEnd = StoredTime.ToStored(cycle.CycleEnd),
-                cycle.Delivered,
-                cycle.DeliverySprintId,
-            }),
-            transaction));
+        await InsertRowsAsync(
+            connection,
+            transaction,
+            "INSERT INTO status_interval (issue_id, status_id, started, ended) VALUES (@issueId, @statusId, @started, @ended);",
+            ["@issueId", "@statusId", "@started", "@ended"],
+            derived.StatusIntervals.Select(interval => new object?[] { interval.IssueId, interval.StatusId, StoredTime.ToStored(interval.Start), StoredTime.ToStored(interval.End) }),
+            cancellationToken);
+
+        await InsertRowsAsync(
+            connection,
+            transaction,
+            "INSERT INTO issue_cycle (issue_id, cycle_end, delivered, delivery_sprint_id) VALUES (@issueId, @cycleEnd, @delivered, @deliverySprintId);",
+            ["@issueId", "@cycleEnd", "@delivered", "@deliverySprintId"],
+            derived.IssueCycles.Select(cycle => new object?[] { cycle.IssueId, StoredTime.ToStored(cycle.CycleEnd), cycle.Delivered ? 1L : 0L, cycle.DeliverySprintId }),
+            cancellationToken);
 
         foreach (var (_, sql) in Scripts.InFolder("Views"))
         {
@@ -249,6 +249,40 @@ public sealed class SqliteStore : ITelltaleStore
 
     private static CommandDefinition Command(CancellationToken cancellationToken, string sql, object? parameters = null, DbTransaction? transaction = null) =>
         new(sql, parameters, transaction, cancellationToken: cancellationToken);
+
+    /// <summary>
+    /// Inserts many rows through one command: the statement is prepared once and only the parameter
+    /// values change per row. The derived tables are rebuilt in full on every run, so this is the hot path.
+    /// </summary>
+    private static async Task InsertRowsAsync(DbConnection connection, DbTransaction transaction, string sql, string[] parameterNames, IEnumerable<object?[]> rows, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+        foreach (var name in parameterNames)
+        {
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = name;
+            command.Parameters.Add(parameter);
+        }
+
+        var prepared = false;
+        foreach (var row in rows)
+        {
+            for (var index = 0; index < row.Length; index++)
+            {
+                command.Parameters[index].Value = row[index] ?? DBNull.Value;
+            }
+
+            if (!prepared)
+            {
+                await command.PrepareAsync(cancellationToken);
+                prepared = true;
+            }
+
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
 
     private const string AllTablesAndViews = "SELECT name FROM sqlite_master WHERE type IN ('table', 'view');";
 

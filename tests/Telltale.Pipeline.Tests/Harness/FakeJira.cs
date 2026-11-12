@@ -94,6 +94,16 @@ public sealed class FakeIssue
         return this;
     }
 
+    /// <summary>
+    /// Puts the issue in <paramref name="status"/> now without recording a transition, so its current status
+    /// disagrees with its changelog (a workflow migration, a bulk move, history Jira lost).
+    /// </summary>
+    public FakeIssue NowIn(FakeStatus status)
+    {
+        Status = status;
+        return this;
+    }
+
     /// <summary>Moves the issue from its current status to <paramref name="to"/> and records the transition, made by <paramref name="by"/> (the board admin by default).</summary>
     public FakeIssue Moved(DateTimeOffset at, FakeStatus to, FakePerson? by = null)
     {

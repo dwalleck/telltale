@@ -12,7 +12,7 @@ internal static class RunCommand
         var command = new Command("run", "Sync from Jira, rebuild the derived data and write the report for a sprint.") { sprint };
         command.SetAction((parse, cancellationToken) => CliApp.GuardAsync(services, async () =>
         {
-            var pipeline = await PipelineSteps.StartAsync(services, cancellationToken);
+            var pipeline = await PipelineSteps.StartAsync(services, needsJira: true, cancellationToken);
             await pipeline.SyncAsync(cancellationToken);
             await pipeline.DeriveAsync(cancellationToken);
             await pipeline.ReportAsync(parse.GetValue(sprint), cancellationToken);

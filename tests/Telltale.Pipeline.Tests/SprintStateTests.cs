@@ -111,6 +111,31 @@ public class SprintStateTests
     }
 
     [Test]
+    public async Task Sprints_stored_for_a_board_that_is_no_longer_the_configured_one_take_no_delivery()
+    {
+        // The first run used the wrong board ID; its sprint is still in the store after the ID is corrected.
+        const long wrongBoardId = 499999;
+        await using var pipeline = new PipelineHarness(Now);
+        AddClosedAndActiveSprints(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 14, 9), Workflow.Done);
+        pipeline.Jira.Handler.On(HttpMethod.Get, $"/rest/agile/1.0/board/{wrongBoardId}/sprint", StubHttpHandler.Json(
+            """{"isLast":true,"values":[{"id":77,"state":"closed","name":"Fake Other Team Sprint","startDate":"2026-01-01T15:00:00.000Z","endDate":"2026-01-29T15:00:00.000Z","completeDate":"2026-01-29T15:00:00.000Z","originBoardId":499999}]}"""));
+        pipeline.Config["jira"]!["boardId"] = wrongBoardId;
+        await pipeline.RunAsync("run", "--sprint", "77");
+        await Assert.That(await pipeline.ReadReportAsync(77)).Contains("\nDelivered issues: 1\n");
+
+        pipeline.Config["jira"]!["boardId"] = FakeJira.BoardId;
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(0);
+        var rows = await pipeline.QueryAsync<(string SprintId, long DeliveredCount)>(
+            "SELECT sprint_id, delivered_count FROM delivered_per_sprint ORDER BY sprint_id;");
+        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 1L), ("42", 0L) }, CollectionOrdering.Matching);
+    }
+
+    [Test]
     public async Task A_sprint_whose_origin_board_jira_leaves_out_is_kept()
     {
         await using var pipeline = new PipelineHarness(Now);

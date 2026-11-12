@@ -23,7 +23,7 @@ public sealed class DeliverySprints
     {
         foreach (var (sprintId, window) in _windows)
         {
-            if (Contains(window, deliveredAt))
+            if (window.Contains(deliveredAt))
             {
                 return sprintId;
             }
@@ -31,6 +31,4 @@ public sealed class DeliverySprints
 
         return null;
     }
-
-    private static bool Contains(Interval window, DateTimeOffset moment) => window.Start <= moment && moment < window.End;
 }

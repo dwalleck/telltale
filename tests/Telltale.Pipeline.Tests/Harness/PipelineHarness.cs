@@ -61,6 +61,12 @@ public sealed class PipelineHarness : IAsyncDisposable
         ["timeZone"] = TeamTime.ZoneId,
     };
 
+    /// <summary>When set, this text is written as the configuration file in place of <see cref="Config"/>, for files a JSON object cannot express.</summary>
+    public string? RawConfig { get; set; }
+
+    /// <summary>The token the commands run under: cancelling it is the user's Ctrl+C.</summary>
+    public CancellationTokenSource Cancellation { get; } = new();
+
     /// <summary>What the commands wrote to standard output.</summary>
     public StringWriter Out { get; } = new();
 
@@ -79,7 +85,7 @@ public sealed class PipelineHarness : IAsyncDisposable
     /// <summary>Runs one command line (for example <c>"run", "--sprint", "41"</c>) and returns its exit code.</summary>
     public async Task<int> RunAsync(params string[] args)
     {
-        await File.WriteAllTextAsync(ConfigPath, Config.ToJsonString(Indented));
+        await File.WriteAllTextAsync(ConfigPath, RawConfig ?? Config.ToJsonString(Indented));
 
         var services = new AppServices(
             Jira.Handler,
@@ -91,7 +97,7 @@ public sealed class PipelineHarness : IAsyncDisposable
             DatabasePath,
             ReportDirectory);
 
-        return await CliApp.RunAsync(args, services);
+        return await CliApp.RunAsync(args, services, Cancellation.Token);
     }
 
     /// <summary>The markdown report written for a sprint, with line endings normalised to <c>\n</c>.</summary>
@@ -147,6 +153,7 @@ public sealed class PipelineHarness : IAsyncDisposable
     {
         System.IO.Directory.Delete(Directory, recursive: true);
         Out.Dispose();
+        Cancellation.Dispose();
         Error.Dispose();
         return ValueTask.CompletedTask;
     }

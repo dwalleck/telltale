@@ -168,6 +168,99 @@ public class JiraFailureTests
     }
 
     [Test]
+    public async Task A_sprint_list_that_does_not_say_it_is_the_last_page_and_holds_fewer_sprints_than_the_total_stops_the_run()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        pipeline.Jira.Handler.Override(HttpMethod.Get, $"/rest/agile/1.0/board/{FakeJira.BoardId}/sprint", _ => true,
+            StubHttpHandler.Json("""{"maxResults":1,"startAt":0,"total":2,"values":[{"id":41,"state":"closed","name":"Fake Sprint 41","startDate":"2026-01-05T15:00:00.000Z","completeDate":"2026-01-19T16:00:00.000Z"}]}"""));
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("Jira's sprint list has more than one page");
+    }
+
+    [Test]
+    public async Task A_sprint_list_that_says_neither_that_it_is_the_last_page_nor_how_many_sprints_there_are_stops_the_run()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        pipeline.Jira.Handler.Override(HttpMethod.Get, $"/rest/agile/1.0/board/{FakeJira.BoardId}/sprint", _ => true,
+            StubHttpHandler.Json("""{"values":[{"id":41,"state":"closed","name":"Fake Sprint 41","startDate":"2026-01-05T15:00:00.000Z","completeDate":"2026-01-19T16:00:00.000Z"}]}"""));
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira's sprint list does not say whether it is complete, so sprints could be missing. Paging is not supported yet.\n");
+    }
+
+    [Test]
+    public async Task A_sprint_list_without_the_last_page_flag_is_accepted_when_its_total_shows_it_is_complete()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        pipeline.Jira.Handler.Override(HttpMethod.Get, $"/rest/agile/1.0/board/{FakeJira.BoardId}/sprint", _ => true,
+            StubHttpHandler.Json("""{"maxResults":50,"startAt":0,"total":1,"values":[{"id":41,"state":"closed","name":"Fake Sprint 41","startDate":"2026-01-05T15:00:00.000Z","completeDate":"2026-01-19T16:00:00.000Z"}]}"""));
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
+    }
+
+    [Test]
+    public async Task An_answer_whose_json_is_not_an_object_is_reported_plainly()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        pipeline.Jira.Handler.Override(HttpMethod.Get, $"/rest/agile/1.0/board/{FakeJira.BoardId}/sprint", _ => true, StubHttpHandler.Json("[]"));
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira's sprint list answered in a shape this tool does not understand (InvalidOperationException). Nothing was stored.\n");
+    }
+
+    [Test]
+    public async Task A_search_answer_whose_json_is_not_an_object_is_reported_plainly()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        pipeline.Jira.Handler.Override(HttpMethod.Post, "/rest/api/3/search/jql", _ => true, StubHttpHandler.Json("\"synthetic text\""));
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira's issue search answered in a shape this tool does not understand (InvalidOperationException). Nothing was stored.\n");
+    }
+
+    [Test]
+    [Arguments("""{"issues":[{"id":"900001","key":null,"fields":{}}]}""")]
+    [Arguments("""{"issues":[{"id":"900001","key":"FAKE-1","fields":{"issuetype":{"id":"800001"},"created":"2026-01-06T15:00:00.000+0000","status":{"id":null}}}]}""")]
+    public async Task A_null_where_jira_must_give_a_value_is_reported_plainly_and_nothing_is_stored(string searchAnswer)
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        pipeline.Jira.Handler.Override(HttpMethod.Post, "/rest/api/3/search/jql", _ => true, StubHttpHandler.Json(searchAnswer));
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira's issue search answered in a shape this tool does not understand (FormatException). Nothing was stored.\n");
+
+        // "Nothing was stored": the store holds no issue key, and the status and sprint lists fetched before the search are not in it either.
+        var files = await pipeline.ReadAllFilesAsync();
+        await Assert.That(files.Keys).Contains("store.db");
+        await Assert.That(files["store.db"]).DoesNotContain("FAKE-1").And.DoesNotContain("Fake Sprint 41");
+    }
+
+    [Test]
     public async Task The_issue_search_is_bounded_to_the_configured_projects_and_asks_for_no_free_text()
     {
         await using var pipeline = new PipelineHarness();

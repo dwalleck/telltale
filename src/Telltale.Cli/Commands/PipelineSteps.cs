@@ -3,6 +3,7 @@ using Telltale.Collectors.Jira;
 using Telltale.Core;
 using Telltale.Core.Configuration;
 using Telltale.Core.Derive;
+using Telltale.Core.Secrets;
 using Telltale.Core.Storage;
 using Telltale.Core.Workflow;
 using Telltale.Reporting;
@@ -31,12 +32,23 @@ internal sealed class PipelineSteps
         _store = store;
     }
 
-    /// <summary>Loads and checks the configuration and opens the store.</summary>
-    public static async Task<PipelineSteps> StartAsync(AppServices services, CancellationToken cancellationToken)
+    /// <summary>
+    /// Loads and checks the configuration and opens the store. With <paramref name="needsJira"/> (the command will
+    /// sync), the secrets are checked first, so a run that cannot start leaves no empty database behind.
+    /// </summary>
+    public static async Task<PipelineSteps> StartAsync(AppServices services, bool needsJira, CancellationToken cancellationToken)
     {
         var config = await ConfigFile.LoadAsync(services.ConfigPath, cancellationToken);
         var roles = ReadStatusRoles(config, services.ConfigPath);
         var timeZone = ReadTimeZone(config, services.ConfigPath);
+
+        if (needsJira)
+        {
+            foreach (var secret in Enum.GetValues<SecretName>())
+            {
+                services.Secrets.Require(secret);
+            }
+        }
 
         var store = new SqliteStore(services.DatabasePath);
         await store.InitializeAsync(cancellationToken);
@@ -52,7 +64,7 @@ internal sealed class PipelineSteps
     public async Task DeriveAsync(CancellationToken cancellationToken)
     {
         var raw = await _store.ReadRawAsync(cancellationToken);
-        await _store.ReplaceDerivedAsync(Derivation.Derive(raw, _roles, AsOf(raw)), cancellationToken);
+        await _store.ReplaceDerivedAsync(Derivation.Derive(raw, _config.Jira.BoardId, _roles, AsOf(raw)), cancellationToken);
     }
 
     /// <summary>
@@ -63,15 +75,15 @@ internal sealed class PipelineSteps
     /// </summary>
     private DateTimeOffset AsOf(RawData raw)
     {
-        var asOf = _services.Clock.GetUtcNow();
-        foreach (var moment in raw.Changes.Select(change => change.At).Concat(raw.Issues.Select(issue => issue.Updated)))
-        {
-            // Windows are half-open, so the as-of time must be after the newest moment, not equal to it.
-            // Stored times have millisecond precision.
-            asOf = moment >= asOf ? moment.AddMilliseconds(1) : asOf;
-        }
+        var now = _services.Clock.GetUtcNow();
+        var newest = raw.Changes.Select(change => change.At)
+            .Concat(raw.Issues.Select(issue => issue.Updated))
+            .DefaultIfEmpty(DateTimeOffset.MinValue)
+            .Max();
 
-        return asOf;
+        // Windows are half-open, so the as-of time must be after the newest moment, not equal to it.
+        // Stored times have millisecond precision.
+        return newest >= now ? newest.AddMilliseconds(1) : now;
     }
 
     /// <summary>Writes one sprint's report and says where.</summary>

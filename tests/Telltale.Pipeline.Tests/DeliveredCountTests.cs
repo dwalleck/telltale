@@ -122,6 +122,42 @@ public class DeliveredCountTests
     }
 
     [Test]
+    public async Task An_issue_whose_history_ends_in_done_but_which_is_not_in_a_done_status_now_is_not_delivered()
+    {
+        // The issue's current status decides, not the last entry of its changelog.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done)
+            .NowIn(Workflow.Development);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 0\n");
+    }
+
+    [Test]
+    public async Task An_issue_in_a_done_status_with_no_move_into_done_in_its_history_is_not_delivered()
+    {
+        // Without a transition into done there is no delivery moment, so no sprint to count it in.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 8, 9), createdIn: Workflow.Done);
+        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 6, 9))
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .NowIn(Workflow.Done);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(0);
+        var rows = await pipeline.QueryAsync<(string SprintId, long DeliveredCount)>(
+            "SELECT sprint_id, delivered_count FROM delivered_per_sprint ORDER BY sprint_id;");
+        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 0L), ("42", 0L) }, CollectionOrdering.Matching);
+    }
+
+    [Test]
     public async Task Renaming_statuses_changes_no_figure()
     {
         await using var pipeline = new PipelineHarness();
@@ -138,12 +174,10 @@ public class DeliveredCountTests
             .Moved(Local(2026, 1, 12, 9), Workflow.Development);
         pipeline.Jira.AddIssue("FAKE-3", Local(2026, 1, 6, 9));
 
-        // No history at all: only the issue's current status says where it is.
-        pipeline.Jira.AddIssue("FAKE-4", Local(2026, 1, 8, 9), createdIn: Workflow.Done);
-
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 2\n");
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
     }
 
     [Test]
