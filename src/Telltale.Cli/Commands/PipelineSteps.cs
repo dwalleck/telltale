@@ -25,13 +25,15 @@ internal sealed class PipelineSteps : IDisposable
     private readonly TelltaleConfig _config;
     private readonly StatusRoles _roles;
     private readonly IReadOnlySet<string> _abandonedResolutionIds;
+    private readonly IReadOnlySet<string> _baselineSprintIds;
     private readonly TimeZoneInfo _timeZone;
     private readonly ITelltaleStore _store;
     private readonly IDisposable _storeLock;
 
-    private PipelineSteps(AppServices services, TelltaleConfig config, StatusRoles roles, IReadOnlySet<string> abandonedResolutionIds, TimeZoneInfo timeZone, ITelltaleStore store, IDisposable storeLock)
+    private PipelineSteps(AppServices services, TelltaleConfig config, StatusRoles roles, IReadOnlySet<string> abandonedResolutionIds, IReadOnlySet<string> baselineSprintIds, TimeZoneInfo timeZone, ITelltaleStore store, IDisposable storeLock)
     {
         _abandonedResolutionIds = abandonedResolutionIds;
+        _baselineSprintIds = baselineSprintIds;
         _storeLock = storeLock;
         _services = services;
         _config = config;
@@ -52,6 +54,7 @@ internal sealed class PipelineSteps : IDisposable
         var config = await ConfigFile.LoadAsync(services.ConfigPath, cancellationToken);
         var roles = ReadStatusRoles(config, services.ConfigPath);
         var abandonedResolutionIds = ReadAbandonedResolutionIds(config, services.ConfigPath);
+        var baselineSprintIds = ReadBaselineSprintIds(config, services.ConfigPath);
         var timeZone = ReadTimeZone(config, services.ConfigPath);
 
         if (needsJira)
@@ -68,7 +71,7 @@ internal sealed class PipelineSteps : IDisposable
         {
             var store = new SqliteStore(services.DatabasePath);
             await store.InitializeAsync(cancellationToken);
-            return new PipelineSteps(services, config, roles, abandonedResolutionIds, timeZone, store, storeLock);
+            return new PipelineSteps(services, config, roles, abandonedResolutionIds, baselineSprintIds, timeZone, store, storeLock);
         }
         catch
         {
@@ -113,6 +116,7 @@ internal sealed class PipelineSteps : IDisposable
     {
         await RequireStoredSaltAsync(cancellationToken);
         var raw = await _store.ReadRawAsync(cancellationToken);
+        await RequireBaselineSprintsAsync(raw, cancellationToken);
         var derived = Derivation.Derive(raw, _config.Jira.BoardId, _roles, _abandonedResolutionIds, new BusinessCalendar(_timeZone, _config.Holidays), AsOf(raw));
         var previous = await _store.ReadAnomaliesAsync(cancellationToken);
         await _store.ReplaceDerivedAsync(derived, SourceOf(raw), cancellationToken);
@@ -134,7 +138,11 @@ internal sealed class PipelineSteps : IDisposable
 
     /// <summary>What a rebuild from <paramref name="raw"/> under the current configuration is built from.</summary>
     private DerivedSource SourceOf(RawData raw) =>
-        new(DigestOf(raw), _config.TimeZone, string.Join(",", _config.Holidays.Order().Select(day => day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))));
+        new(
+            DigestOf(raw),
+            _config.TimeZone,
+            string.Join(",", _config.Holidays.Order().Select(day => day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))),
+            DerivedSource.BaselineSprintIdsOf(_baselineSprintIds));
 
     /// <summary>
     /// Derive and report need no secret. But when the salt is at hand and is not the one the stored people
@@ -202,6 +210,23 @@ internal sealed class PipelineSteps : IDisposable
             throw new UserFacingException("The time zone or the holidays in the configuration changed since the derived data was built. Run derive first.");
         }
 
+        // The baseline views were built from the list as it was at the last derive. A report under another
+        // list would print the old baseline as if it were the configured one. This is the one check: a list
+        // equal to the derived one passed derive's checks against this same raw data.
+        if (derivedFrom.BaselineSprintIds != current.BaselineSprintIds)
+        {
+            // Deriving again is the remedy only for a list derive would accept; otherwise say what derive would.
+            await RequireBaselineSprintsAsync(raw, cancellationToken);
+            var teamsOfFive = await _store.QueryViewsAsync<string>("SELECT sprint_id FROM sprint_team WHERE suppressed = 0;", cancellationToken: cancellationToken);
+            var shortOfFive = _baselineSprintIds.Except(teamsOfFive, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+            if (shortOfFive.Count > 0)
+            {
+                throw BaselineSprintRules.ShortOfFiveAssignees(shortOfFive);
+            }
+
+            throw new UserFacingException("baselineSprintIds in the configuration file changed since the derived data was built. Run derive first.");
+        }
+
         var sprint = sprintId?.ToString(CultureInfo.InvariantCulture)
             ?? await SprintReport.MostRecentlyCompletedSprintAsync(_store, cancellationToken);
         if (sprint is null)
@@ -216,9 +241,27 @@ internal sealed class PipelineSteps : IDisposable
         }
 
         await RequireSprintWithinWhatWasFetchedAsync(raw, sprint, cancellationToken);
-        var path = await SprintReport.WriteAsync(_store, sprint, _timeZone, _services.ReportDirectory, cancellationToken);
+        var path = await SprintReport.WriteAsync(_store, sprint, _timeZone, [.. _baselineSprintIds.Order(StringComparer.Ordinal)], _services.ReportDirectory, cancellationToken);
         await _services.Out.WriteLineAsync($"Wrote {path}");
     }
+
+    /// <summary>
+    /// What the raw data can say against the baseline sprint list: every baseline sprint is a completed sprint
+    /// of the board, and none started before the start date the store was last filled from. The third rule, a
+    /// team of five, is the views' and is asked by the rebuild itself (<see cref="ITelltaleStore.ReplaceDerivedAsync"/>).
+    /// </summary>
+    private async Task RequireBaselineSprintsAsync(RawData raw, CancellationToken cancellationToken)
+    {
+        BaselineSprintRules.RequireCompleted(raw.Sprints, _config.Jira.BoardId, _baselineSprintIds);
+        if (_baselineSprintIds.Count > 0)
+        {
+            BaselineSprintRules.RequireWithinWhatWasFetched(raw.Sprints, _baselineSprintIds, await CompleteFromAsync(cancellationToken));
+        }
+    }
+
+    /// <summary>The moment from which the store holds every issue: the start date it was last filled from. Null when it names none.</summary>
+    private async Task<DateTimeOffset?> CompleteFromAsync(CancellationToken cancellationToken) =>
+        await _store.ReadWatermarkAsync(JiraCollector.WatermarkName, cancellationToken) is { } filled ? JiraCollector.CompleteFrom(filled.Covers) : null;
 
     /// <summary>
     /// Refuses a sprint that started before the start date the store was last filled from. The store holds
@@ -227,9 +270,7 @@ internal sealed class PipelineSteps : IDisposable
     /// </summary>
     private async Task RequireSprintWithinWhatWasFetchedAsync(RawData raw, string sprintId, CancellationToken cancellationToken)
     {
-        var filled = await _store.ReadWatermarkAsync(JiraCollector.WatermarkName, cancellationToken);
-        if (filled is not null
-            && JiraCollector.CompleteFrom(filled.Covers) is { } completeFrom
+        if (await CompleteFromAsync(cancellationToken) is { } completeFrom
             && raw.Sprints.FirstOrDefault(sprint => sprint.SprintId == sprintId)?.Start < completeFrom)
         {
             throw new UserFacingException(
@@ -310,6 +351,24 @@ internal sealed class PipelineSteps : IDisposable
         {
             throw new UserFacingException(
                 $"The configuration file {path} is not valid: abandonedResolutionIds: every entry must be a Jira resolution ID (digits only), and one is not.");
+        }
+
+        return ids;
+    }
+
+    /// <summary>
+    /// The baseline sprint IDs, trimmed, each once. Jira's sprint IDs are digits, so anything else (a sprint's
+    /// name, an empty entry) is refused. Whether each is a completed sprint of the board is checked against the
+    /// store, by derive and report.
+    /// </summary>
+    internal static HashSet<string> ReadBaselineSprintIds(TelltaleConfig config, string path)
+    {
+        // The element type says "not null", but JSON can still carry a null entry.
+        var ids = config.BaselineSprintIds.Select(id => id?.Trim() ?? "").ToHashSet(StringComparer.Ordinal);
+        if (ids.Any(id => id.Length == 0 || !id.All(char.IsAsciiDigit)))
+        {
+            throw new UserFacingException(
+                $"The configuration file {path} is not valid: baselineSprintIds: every entry must be a Jira sprint ID (digits only), and one is not.");
         }
 
         return ids;

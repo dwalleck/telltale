@@ -386,6 +386,7 @@ internal static class DiscoverCommand
             var config = await ConfigFile.ReadAsync(stream, path, cancellationToken);
             var roles = PipelineSteps.ReadStatusRoles(config, path, requireDone: !mayLackDoneRole);
             PipelineSteps.ReadAbandonedResolutionIds(config, path);
+            PipelineSteps.ReadBaselineSprintIds(config, path);
             PipelineSteps.ReadTimeZone(config, path);
             return roles.HasDone;
         }

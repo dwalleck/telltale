@@ -68,6 +68,9 @@ public sealed class PipelineHarness : IAsyncDisposable
         ["abandonedResolutionIds"] = new JsonArray(),
         ["timeZone"] = TeamTime.ZoneId,
         ["holidays"] = new JsonArray(),
+
+        // No baseline: the setting may also be left out. A test about the baseline lists sprint IDs here.
+        ["baselineSprintIds"] = new JsonArray(),
     };
 
     /// <summary>When set, this text is written as the configuration file in place of <see cref="Config"/>, for files a JSON object cannot express.</summary>

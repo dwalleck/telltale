@@ -83,9 +83,16 @@ public sealed record IssueAnomaly(string IssueId, ChangelogAnomalyKind Kind)
 /// <summary>
 /// What a rebuild of the derived data was built from, besides its as-of time: a digest that identifies the raw
 /// data it read, and the settings its business days were counted with. <see cref="Holidays"/> is the holiday
-/// list as ISO dates in order, separated by commas. When any of the three no longer matches, the derived data is stale.
+/// list as ISO dates in order, separated by commas. <see cref="BaselineSprintIds"/> is the baseline sprint list
+/// the baseline views pool over, as a JSON array of the IDs in order, e.g. <c>["41","42"]</c>; <c>[]</c> when
+/// there is no baseline. When any of the four no longer matches, the derived data is stale.
 /// </summary>
-public sealed record DerivedSource(string RawDigest, string TimeZone, string Holidays);
+public sealed record DerivedSource(string RawDigest, string TimeZone, string Holidays, string BaselineSprintIds)
+{
+    /// <summary><see cref="BaselineSprintIds"/> for a list of sprint IDs: the form the store keeps and the views read.</summary>
+    public static string BaselineSprintIdsOf(IEnumerable<string> sprintIds) =>
+        System.Text.Json.JsonSerializer.Serialize(sprintIds.Order(StringComparer.Ordinal));
+}
 
 /// <summary>Everything derive computes. It replaces the previous derived data as a whole (ADR-0002).</summary>
 public sealed record DerivedData(
