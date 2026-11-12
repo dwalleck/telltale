@@ -89,9 +89,12 @@ public class RealDeliveriesTests
     [Arguments("[null]")]
     [Arguments("[\"\"]")]
     [Arguments("[\"300002\", \" \"]")]
-    public async Task An_abandoned_resolution_id_that_is_null_or_blank_is_refused(string ids)
+    [Arguments("[\"Fake Won't Do\"]")]
+    [Arguments("[\"30 0002\"]")]
+    public async Task An_abandoned_resolution_entry_that_is_not_a_jira_id_is_refused(string ids)
     {
-        // A blank entry is a slip of the hand; read as an ID it would match nothing, or every unresolved issue.
+        // Jira's resolution IDs are digits. A name or a slip of the hand would match no issue, and abandoned
+        // work would count as delivered with nothing to show for it.
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
         pipeline.Config["abandonedResolutionIds"] = JsonNode.Parse(ids);
@@ -100,8 +103,50 @@ public class RealDeliveriesTests
 
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).EndsWith(
-            "telltale.json is not valid: abandonedResolutionIds must hold resolution IDs, and one entry is empty.\n");
+            "telltale.json is not valid: abandonedResolutionIds: every entry must be a Jira resolution ID (digits only), and one is not.\n");
         await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
+    }
+
+    [Test]
+    public async Task An_abandoned_resolution_id_with_spaces_around_it_still_matches()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+        pipeline.Config["abandonedResolutionIds"] = new JsonArray($" {ResolutionWontDo}  ");
+        FinishedInSprint(pipeline.Jira, "FAKE-1").Resolved(ResolutionFinished);
+        FinishedInSprint(pipeline.Jira, "FAKE-2").Resolved(ResolutionWontDo);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(await DeliveredPerSprintAsync(pipeline)).IsEquivalentTo(new[] { ("41", 1L) }, CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task An_abandoned_issue_keeps_its_cycle_end_but_is_not_delivered_and_has_no_delivery_sprint()
+    {
+        // Spec, metric rules: delivered is "has a cycle end and its resolution is not in the abandoned list".
+        // issue_cycle is a derived table, not a view; later views filter on its delivered flag, so its content is pinned here.
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+        pipeline.Config["abandonedResolutionIds"] = new JsonArray(ResolutionWontDo);
+        FinishedInSprint(pipeline.Jira, "FAKE-1").Resolved(ResolutionFinished);
+        FinishedInSprint(pipeline.Jira, "FAKE-2").Resolved(ResolutionWontDo);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        var rows = await pipeline.QueryAsync<(string IssueKey, string? CycleEnd, long Delivered, string? DeliverySprintId)>(
+            "SELECT i.issue_key, c.cycle_end, c.delivered, c.delivery_sprint_id FROM issue_cycle c JOIN issue i ON i.issue_id = c.issue_id ORDER BY i.issue_key;");
+
+        // Both were moved to Done on 9 January at 15:00 in the team's zone, which is 21:00 UTC.
+        await Assert.That(rows).IsEquivalentTo(
+            new (string, string?, long, string?)[]
+            {
+                ("FAKE-1", "2026-01-09T21:00:00.000Z", 1L, "41"),
+                ("FAKE-2", "2026-01-09T21:00:00.000Z", 0L, null),
+            },
+            CollectionOrdering.Matching);
     }
 
     [Test]
@@ -134,13 +179,56 @@ public class RealDeliveriesTests
     [Arguments(false, -1)]
     [Arguments(false, 1)]
     [Arguments(false, 2)]
-    public async Task An_issue_type_jira_marks_as_a_sub_task_or_places_off_the_standard_level_is_left_out(bool subtask, int hierarchyLevel)
+    [Arguments(true, null)]
+    public async Task An_issue_type_jira_marks_as_a_sub_task_or_places_off_the_standard_level_is_left_out(bool subtask, int? hierarchyLevel)
     {
-        // Either sign is enough on its own, and a level above epics is a container too.
+        // Either sign is enough on its own (the flag even without a level), and a level above epics is a container too.
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
         FinishedInSprint(pipeline.Jira, "FAKE-1");
         FinishedInSprint(pipeline.Jira, "FAKE-2").OfType(new FakeIssueType("800009", "Fake Odd Type", subtask, hierarchyLevel));
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(await DeliveredPerSprintAsync(pipeline)).IsEquivalentTo(new[] { ("41", 1L) }, CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task Nothing_of_an_epic_or_a_sub_task_is_stored_and_no_history_is_asked_for_it()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+        var story = FinishedInSprint(pipeline.Jira, "FAKE-11");
+        FinishedInSprint(pipeline.Jira, "FAKE-12").OfType(FakeIssueType.Epic).AssignedTo(People.Two);
+        FinishedInSprint(pipeline.Jira, "FAKE-13").OfType(FakeIssueType.SubTask).AssignedTo(People.Three);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(0);
+        var store = (await pipeline.ReadAllFilesAsync())["store.db"];
+        await Assert.That(store).Contains("FAKE-11").And.DoesNotContain("FAKE-12").And.DoesNotContain("FAKE-13");
+        await Assert.That(store).DoesNotContain(FakeIssueType.Epic.Id).And.DoesNotContain(FakeIssueType.SubTask.Id);
+        var request = pipeline.Jira.Handler.Requests.Single(request => request.Path == "/rest/api/3/changelog/bulkfetch");
+        using var body = System.Text.Json.JsonDocument.Parse(request.Body);
+        var asked = body.RootElement.GetProperty("issueIdsOrKeys").EnumerateArray().Select(id => id.GetString() ?? "").ToList();
+        await Assert.That(asked).IsEquivalentTo(new[] { story.Id });
+    }
+
+    [Test]
+    public async Task An_epic_whose_other_fields_have_an_unknown_shape_does_not_stop_the_run()
+    {
+        // The epic is out of scope, so nothing else of it is read: not its status, its dates or its assignee.
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+        var story = FinishedInSprint(pipeline.Jira, "FAKE-1");
+        pipeline.Jira.Handler.Override(HttpMethod.Post, "/rest/api/3/search/jql", _ => true, StubHttpHandler.Json($$"""
+            {"issues":[
+              {"id":"{{story.Id}}","key":"FAKE-1","fields":{"issuetype":{"id":"800001","subtask":false,"hierarchyLevel":0},"created":"2026-01-06T15:00:00.000+0000","updated":"2026-01-09T21:00:00.000+0000","status":{"id":"{{Workflow.Done.Id}}"} } },
+              {"id":"900099","key":null,"fields":{"issuetype":{"id":"800003","subtask":false,"hierarchyLevel":1},"created":"synthetic text that is not a time","status":null,"assignee":{} } }
+            ]}
+            """));
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 

@@ -20,11 +20,13 @@ internal sealed class PipelineSteps
     private readonly AppServices _services;
     private readonly TelltaleConfig _config;
     private readonly StatusRoles _roles;
+    private readonly IReadOnlySet<string> _abandonedResolutionIds;
     private readonly TimeZoneInfo _timeZone;
     private readonly ITelltaleStore _store;
 
-    private PipelineSteps(AppServices services, TelltaleConfig config, StatusRoles roles, TimeZoneInfo timeZone, ITelltaleStore store)
+    private PipelineSteps(AppServices services, TelltaleConfig config, StatusRoles roles, IReadOnlySet<string> abandonedResolutionIds, TimeZoneInfo timeZone, ITelltaleStore store)
     {
+        _abandonedResolutionIds = abandonedResolutionIds;
         _services = services;
         _config = config;
         _roles = roles;
@@ -40,6 +42,7 @@ internal sealed class PipelineSteps
     {
         var config = await ConfigFile.LoadAsync(services.ConfigPath, cancellationToken);
         var roles = ReadStatusRoles(config, services.ConfigPath);
+        var abandonedResolutionIds = ReadAbandonedResolutionIds(config, services.ConfigPath);
         var timeZone = ReadTimeZone(config, services.ConfigPath);
 
         if (needsJira)
@@ -53,7 +56,7 @@ internal sealed class PipelineSteps
         var store = new SqliteStore(services.DatabasePath);
         await store.InitializeAsync(cancellationToken);
 
-        return new PipelineSteps(services, config, roles, timeZone, store);
+        return new PipelineSteps(services, config, roles, abandonedResolutionIds, timeZone, store);
     }
 
     /// <summary>Brings the raw tables up to date with Jira.</summary>
@@ -64,7 +67,7 @@ internal sealed class PipelineSteps
     public async Task DeriveAsync(CancellationToken cancellationToken)
     {
         var raw = await _store.ReadRawAsync(cancellationToken);
-        await _store.ReplaceDerivedAsync(Derivation.Derive(raw, _config.Jira.BoardId, _roles, _config.AbandonedResolutionIds.ToHashSet(StringComparer.Ordinal), AsOf(raw)), cancellationToken);
+        await _store.ReplaceDerivedAsync(Derivation.Derive(raw, _config.Jira.BoardId, _roles, _abandonedResolutionIds, AsOf(raw)), cancellationToken);
     }
 
     /// <summary>
@@ -109,6 +112,24 @@ internal sealed class PipelineSteps
         {
             throw new UserFacingException($"The configuration file {path} is not valid: statusRoles: {exception.Message}", exception);
         }
+    }
+
+    /// <summary>
+    /// The abandoned resolution IDs, trimmed. Jira's resolution IDs are digits, so anything else (a resolution's
+    /// name, a stray character, an empty entry) is refused: it could match no issue, and the abandoned work it
+    /// was meant to exclude would count as delivered.
+    /// </summary>
+    private static HashSet<string> ReadAbandonedResolutionIds(TelltaleConfig config, string path)
+    {
+        // The element type says "not null", but JSON can still carry a null entry.
+        var ids = config.AbandonedResolutionIds.Select(id => id?.Trim() ?? "").ToHashSet(StringComparer.Ordinal);
+        if (ids.Any(id => id.Length == 0 || !id.All(char.IsAsciiDigit)))
+        {
+            throw new UserFacingException(
+                $"The configuration file {path} is not valid: abandonedResolutionIds: every entry must be a Jira resolution ID (digits only), and one is not.");
+        }
+
+        return ids;
     }
 
     private static TimeZoneInfo ReadTimeZone(TelltaleConfig config, string path)

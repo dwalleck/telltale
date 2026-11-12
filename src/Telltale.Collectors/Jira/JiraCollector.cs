@@ -115,8 +115,9 @@ public sealed class JiraCollector
 
     /// <summary>
     /// The page's issues that are in scope: every issue type except epics and sub-tasks (system design, "Scope").
-    /// The others are dropped here, so nothing of them is stored, no history is fetched for them, and they can
-    /// appear in no figure.
+    /// The others are dropped here, before anything else of them is read, so nothing of them is stored, no
+    /// history is fetched for them, they can appear in no figure, and a field of theirs in an unknown shape
+    /// cannot stop the run.
     /// </summary>
     private List<RawIssue> ParseIssues(JsonElement page, string salt)
     {
@@ -124,21 +125,22 @@ public sealed class JiraCollector
         foreach (var issue in page.GetProperty("issues").EnumerateArray())
         {
             var fields = issue.GetProperty("fields");
-            var parsed = new RawIssue(
+            var issueType = fields.GetProperty("issuetype");
+            if (!IsInScope(issueType))
+            {
+                continue;
+            }
+
+            issues.Add(new RawIssue(
                 Text(issue, "id"),
                 Text(issue, "key"),
-                Text(fields.GetProperty("issuetype"), "id"),
+                Text(issueType, "id"),
                 JiraTime.Parse(fields.GetProperty("created")),
                 Text(fields.GetProperty("status"), "id"),
                 Optional(fields, "resolution") is { } resolution ? Text(resolution, "id") : null,
                 Optional(fields, _config.StoryPointFieldId)?.GetDouble(),
                 Optional(fields, "assignee") is { } assignee ? IdentityHash.Of(Text(assignee, "accountId"), salt) : null,
-                JiraTime.Parse(fields.GetProperty("updated")));
-
-            if (IsInScope(fields.GetProperty("issuetype")))
-            {
-                issues.Add(parsed);
-            }
+                JiraTime.Parse(fields.GetProperty("updated"))));
         }
 
         return issues;
@@ -147,12 +149,13 @@ public sealed class JiraCollector
     /// <summary>
     /// True for a standard issue type. Jira gives each type a hierarchy level: negative for sub-tasks, 0 for
     /// standard types, 1 for epics and more for what sits above epics; those are containers too. A sub-task
-    /// also carries <c>subtask: true</c>, which is honoured on its own. A type without a level is an answer in
-    /// an unknown shape: guessing would let an epic or a sub-task into the figures unnoticed.
+    /// also carries <c>subtask: true</c>, which decides on its own, with or without a level. A type that is
+    /// not flagged as a sub-task and has no level is an answer in an unknown shape: guessing would let an epic
+    /// into the figures unnoticed.
     /// </summary>
     private static bool IsInScope(JsonElement issueType) =>
-        issueType.GetProperty("hierarchyLevel").GetInt32() == 0
-        && Optional(issueType, "subtask")?.GetBoolean() != true;
+        Optional(issueType, "subtask")?.GetBoolean() != true
+        && issueType.GetProperty("hierarchyLevel").GetInt32() == 0;
 
     private static async Task<List<RawChange>> FetchChangesAsync(JiraClient jira, List<RawIssue> issues, CancellationToken cancellationToken)
     {

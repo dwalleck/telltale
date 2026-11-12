@@ -68,12 +68,6 @@ public static class ConfigFile
                 throw new UserFacingException($"The configuration file {path} is not valid: jira.projectKeys: {exception.Message}", exception);
             }
 
-            // The element type says "not null", but JSON can still carry a null entry.
-            if (config.AbandonedResolutionIds.Any(string.IsNullOrWhiteSpace))
-            {
-                throw new UserFacingException($"The configuration file {path} is not valid: abandonedResolutionIds must hold resolution IDs, and one entry is empty.");
-            }
-
             // Relative addresses are resolved against the site URL, and a base address without a trailing
             // slash loses its last path segment: https://host/tenant + rest/api would become https://host/rest/api.
             return siteUrl.AbsolutePath.EndsWith('/')
