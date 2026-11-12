@@ -321,6 +321,7 @@ internal static class DiscoverCommand
             var config = await ConfigFile.ReadAsync(stream, path, cancellationToken);
             PipelineSteps.ReadStatusRoles(config, path);
             PipelineSteps.ReadAbandonedResolutionIds(config, path);
+            PipelineSteps.ReadBaselineSprintIds(config, path);
             PipelineSteps.ReadTimeZone(config, path);
         }
         catch (UserFacingException exception)

@@ -16,7 +16,7 @@ namespace Telltale.Core.Derive;
 /// </remarks>
 public static class Derivation
 {
-    public static DerivedData Derive(RawData raw, long boardId, StatusRoles roles, IReadOnlySet<string> abandonedResolutionIds, BusinessCalendar calendar, DateTimeOffset asOf)
+    public static DerivedData Derive(RawData raw, long boardId, StatusRoles roles, IReadOnlySet<string> abandonedResolutionIds, BusinessCalendar calendar, DateTimeOffset asOf, IReadOnlySet<string>? baselineSprintIds = null)
     {
         // Unknown is not "in no sprint": deriving anyway would leave these issues out of every sprint's time in status.
         var sprintsUnknown = raw.Issues.Count(issue => issue.SprintIds is null);
@@ -26,6 +26,9 @@ public static class Derivation
                 ? "1 issue in the store was fetched before the Sprint field was kept, so the sprints it belonged to are unknown. Run a backfill to fetch it again. No figures were derived."
                 : $"{sprintsUnknown} issues in the store were fetched before the Sprint field was kept, so the sprints they belonged to are unknown. Run a backfill to fetch them again. No figures were derived.");
         }
+
+        baselineSprintIds ??= new HashSet<string>();
+        RequireBaselineSprintsOfBoard(raw.Sprints, boardId, baselineSprintIds);
 
         var sprintChanges = raw.Changes
             .Where(change => change.Field == ChangeFields.Sprint)
@@ -101,7 +104,27 @@ public static class Derivation
             cycles,
             memberships,
             sprintStatusTimes,
-            [.. roles.StatusIds.Select((statusId, index) => new BoardStatus(statusId, index + 1, roles.IsDone(statusId)))]);
+            [.. roles.StatusIds.Select((statusId, index) => new BoardStatus(statusId, index + 1, roles.IsDone(statusId)))])
+        {
+            BaselineSprintIds = [.. baselineSprintIds.Order(StringComparer.Ordinal)],
+        };
+    }
+
+    /// <summary>
+    /// Stops with a message naming the setting when a baseline sprint ID is not a sprint of the configured
+    /// board in the store: a mistyped ID would otherwise leave its sprint out of the baseline without a sign.
+    /// The IDs are digits (the configuration's checks), so the message can quote them.
+    /// </summary>
+    public static void RequireBaselineSprintsOfBoard(IReadOnlyList<RawSprint> sprints, long boardId, IReadOnlySet<string> baselineSprintIds)
+    {
+        var ofBoard = sprints.Where(sprint => sprint.BoardId == boardId).Select(sprint => sprint.SprintId).ToHashSet(StringComparer.Ordinal);
+        var unknown = baselineSprintIds.Where(sprintId => !ofBoard.Contains(sprintId)).Order(StringComparer.Ordinal).ToList();
+        if (unknown.Count > 0)
+        {
+            throw new UserFacingException(
+                $"baselineSprintIds in the configuration file lists {string.Join(", ", unknown)}, and the store holds no such sprint of board {boardId}. "
+                + "Correct the list, or run backfill if the sprint is new, and run again.");
+        }
     }
 
     /// <summary>

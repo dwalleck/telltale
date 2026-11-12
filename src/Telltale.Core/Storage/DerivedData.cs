@@ -51,4 +51,8 @@ public sealed record DerivedData(
     IReadOnlyList<IssueCycle> IssueCycles,
     IReadOnlyList<IssueMembershipInterval> MembershipIntervals,
     IReadOnlyList<SprintStatusTime> SprintStatusTimes,
-    IReadOnlyList<BoardStatus> BoardStatuses);
+    IReadOnlyList<BoardStatus> BoardStatuses)
+{
+    /// <summary>The IDs of the sprints the baseline is drawn from, each a sprint of the configured board. Empty when no baseline is configured.</summary>
+    public IReadOnlyList<string> BaselineSprintIds { get; init; } = [];
+}

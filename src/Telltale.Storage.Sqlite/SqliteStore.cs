@@ -336,6 +336,14 @@ public sealed class SqliteStore : ITelltaleStore
             derived.BoardStatuses.Select(status => new object?[] { status.StatusId, (long)status.Position, status.IsDone ? 1L : 0L }),
             cancellationToken);
 
+        await InsertRowsAsync(
+            connection,
+            transaction,
+            "INSERT INTO baseline_sprint (sprint_id) VALUES (@sprintId);",
+            ["@sprintId"],
+            derived.BaselineSprintIds.Select(sprintId => new object?[] { sprintId }),
+            cancellationToken);
+
         await connection.ExecuteAsync(Command(cancellationToken, "INSERT INTO derived_source (raw_digest, objects_version) VALUES (@rawDigest, @DerivedObjectsVersion);", new { rawDigest, DerivedObjectsVersion }, transaction));
 
         foreach (var (_, sql) in Scripts.InFolder("Views"))

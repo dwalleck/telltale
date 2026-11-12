@@ -676,6 +676,54 @@ public class DiscoverTests
     }
 
     [Test]
+    public async Task Discover_never_writes_the_baseline_sprints_and_a_rerun_keeps_the_ones_the_owner_pinned()
+    {
+        // The baseline is the owner's to pin, once, before the pilot (GLOSSARY: Baseline). Discover proposes nothing for it.
+        await using var pipeline = new PipelineHarness();
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        var first = await ReadWrittenConfigAsync(pipeline);
+        await EditWrittenConfigAsync(pipeline, config => config["baselineSprintIds"] = new JsonArray("41", "42"));
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover", "--time-zone", "Europe/London");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(first.AsObject().ContainsKey("baselineSprintIds")).IsFalse();
+        var written = await ReadWrittenConfigAsync(pipeline);
+        await Assert.That(written["timeZone"]!.GetValue<string>()).IsEqualTo("Europe/London");
+        await Assert.That(written["baselineSprintIds"]!.ToJsonString()).IsEqualTo("""["41","42"]""");
+    }
+
+    [Test]
+    public async Task A_rerun_without_baseline_sprints_in_the_file_writes_none()
+    {
+        await using var pipeline = new PipelineHarness();
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover", "--time-zone", "Europe/London");
+
+        await Assert.That(exit).IsEqualTo(0);
+        var written = await ReadWrittenConfigAsync(pipeline);
+        await Assert.That(written["timeZone"]!.GetValue<string>()).IsEqualTo("Europe/London");
+        await Assert.That(written.AsObject().ContainsKey("baselineSprintIds")).IsFalse();
+    }
+
+    [Test]
+    public async Task A_baseline_sprint_id_run_would_refuse_stops_a_rerun()
+    {
+        await using var pipeline = new PipelineHarness();
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        await EditWrittenConfigAsync(pipeline, config => config["baselineSprintIds"] = new JsonArray("Fake Sprint 41"));
+        var edited = await File.ReadAllTextAsync(pipeline.ConfigPath);
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover", "--time-zone", "Europe/London");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("run would refuse it").And.Contains("baselineSprintIds: every entry must be a Jira sprint ID");
+        await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(edited);
+    }
+
+    [Test]
     public async Task An_abandoned_resolution_run_would_refuse_stops_a_rerun()
     {
         // A resolution's name where its ID belongs would match no issue.

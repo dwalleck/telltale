@@ -18,6 +18,9 @@ public static class SprintReport
     /// </summary>
     private const string Suppressed = "suppressed";
 
+    /// <summary>What a baseline cell says when the baseline sprints have no issue in the row's bucket or status.</summary>
+    private const string NoBaseline = "none";
+
     /// <summary>The report's file name for a sprint: reports are named by sprint ID.</summary>
     public static string FileName(string sprintId) => $"sprint-{sprintId}.md";
 
@@ -35,6 +38,13 @@ public static class SprintReport
         return sprints is [var sprintId] ? sprintId : null;
     }
 
+    /// <summary>
+    /// The IDs of the sprints the store's baseline figures are pooled over: the configured list as it was when
+    /// the derived data was built. Empty when there is no baseline.
+    /// </summary>
+    public static Task<IReadOnlyList<string>> BaselineSprintIdsAsync(ITelltaleStore store, CancellationToken cancellationToken = default) =>
+        store.QueryViewsAsync<string>("SELECT sprint_id FROM baseline_sprints ORDER BY sprint_id;", cancellationToken: cancellationToken);
+
     /// <summary>Renders the report. Dates are shown in <paramref name="teamTimeZone"/>.</summary>
     public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, CancellationToken cancellationToken = default)
     {
@@ -49,19 +59,24 @@ public static class SprintReport
         }
 
         // Each section is one block of the report, in order. A new section is a new method and a line here.
+        // The baseline columns appear once a baseline is configured, and not before.
+        var withBaseline = (await BaselineSprintIdsAsync(store, cancellationToken)).Count > 0;
+
         var report = new StringBuilder();
         AppendTitle(report, sprint, teamTimeZone);
         AppendDeliveredCount(report, sprint);
-        AppendCycleTime(report, await store.QueryViewsAsync<CycleTimeRow>(
+        AppendCycleTime(report, withBaseline, await store.QueryViewsAsync<CycleTimeRow>(
             """
-            SELECT point_bucket, issue_count, median_business_days, p85_business_days, median_calendar_days, p85_calendar_days, suppressed
-            FROM cycle_time_per_sprint_and_bucket
-            WHERE sprint_id = @sprintId
-            ORDER BY point_bucket IS NULL, point_bucket;
+            SELECT v.point_bucket, v.issue_count, v.median_business_days, v.p85_business_days, v.median_calendar_days, v.p85_calendar_days, v.suppressed,
+                   b.median_business_days AS baseline_median_business_days, b.p85_business_days AS baseline_p85_business_days, b.suppressed AS baseline_suppressed
+            FROM cycle_time_per_sprint_and_bucket v
+            LEFT JOIN baseline_cycle_time_per_bucket b ON b.point_bucket IS v.point_bucket
+            WHERE v.sprint_id = @sprintId
+            ORDER BY v.point_bucket IS NULL, v.point_bucket;
             """,
             new { sprintId },
             cancellationToken));
-        AppendTimeInStatus(report, await ReadTimeInStatusAsync(store, sprintId, cancellationToken));
+        AppendTimeInStatus(report, withBaseline, await ReadTimeInStatusAsync(store, sprintId, cancellationToken));
         return report.ToString();
     }
 
@@ -69,7 +84,14 @@ public static class SprintReport
     // command refuses derived data that does not say which raw data it was built from (PipelineSteps.ReportAsync).
     private static Task<IReadOnlyList<TimeInStatusRow>> ReadTimeInStatusAsync(ITelltaleStore store, string sprintId, CancellationToken cancellationToken) =>
         store.QueryViewsAsync<TimeInStatusRow>(
-            "SELECT status_name, issue_count, median_business_days, suppressed FROM time_in_status_per_sprint WHERE sprint_id = @sprintId ORDER BY board_position;",
+            """
+            SELECT v.status_name, v.issue_count, v.median_business_days, v.suppressed,
+                   b.median_business_days AS baseline_median_business_days, b.suppressed AS baseline_suppressed
+            FROM time_in_status_per_sprint v
+            LEFT JOIN baseline_time_in_status b ON b.status_id = v.status_id
+            WHERE v.sprint_id = @sprintId
+            ORDER BY v.board_position;
+            """,
             new { sprintId },
             cancellationToken);
 
@@ -99,7 +121,7 @@ public static class SprintReport
         report.Append("Delivered issues: ").Append(Figure(sprint.Suppressed, sprint.DeliveredCount?.ToString(CultureInfo.InvariantCulture))).Append('\n');
 
     /// <summary>The cycle time table: one row per point bucket, smallest estimate first and unestimated issues last.</summary>
-    private static void AppendCycleTime(StringBuilder report, IReadOnlyList<CycleTimeRow> buckets)
+    private static void AppendCycleTime(StringBuilder report, bool withBaseline, IReadOnlyList<CycleTimeRow> buckets)
     {
         report.Append("\n## Cycle time by point bucket\n\n");
         if (buckets.Count == 0)
@@ -108,8 +130,9 @@ public static class SprintReport
             return;
         }
 
-        report.Append("| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |\n");
-        report.Append("|---|---|---|---|---|---|\n");
+        report.Append("| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |");
+        report.Append(withBaseline ? " Baseline median (business days) | Baseline P85 (business days) |\n" : "\n");
+        report.Append(withBaseline ? "|---|---|---|---|---|---|---|---|\n" : "|---|---|---|---|---|---|\n");
 
         foreach (var bucket in buckets)
         {
@@ -118,13 +141,19 @@ public static class SprintReport
                 .Append(" | ").Append(Days(bucket.Suppressed, bucket.MedianBusinessDays))
                 .Append(" | ").Append(Days(bucket.Suppressed, bucket.P85BusinessDays))
                 .Append(" | ").Append(Days(bucket.Suppressed, bucket.MedianCalendarDays))
-                .Append(" | ").Append(Days(bucket.Suppressed, bucket.P85CalendarDays))
-                .Append(" |\n");
+                .Append(" | ").Append(Days(bucket.Suppressed, bucket.P85CalendarDays));
+            if (withBaseline)
+            {
+                report.Append(" | ").Append(BaselineDays(bucket.BaselineSuppressed, bucket.BaselineMedianBusinessDays))
+                    .Append(" | ").Append(BaselineDays(bucket.BaselineSuppressed, bucket.BaselineP85BusinessDays));
+            }
+
+            report.Append(" |\n");
         }
     }
 
     /// <summary>One row per status issues spent time in during the sprint, in board order. A status nobody was in has no row.</summary>
-    private static void AppendTimeInStatus(StringBuilder report, IReadOnlyList<TimeInStatusRow> rows)
+    private static void AppendTimeInStatus(StringBuilder report, bool withBaseline, IReadOnlyList<TimeInStatusRow> rows)
     {
         report.Append("\n## Time in status\n\n");
         if (rows.Count == 0)
@@ -133,14 +162,21 @@ public static class SprintReport
             return;
         }
 
-        report.Append("| Status | Issues | Median business days |\n| --- | ---: | ---: |\n");
+        report.Append(withBaseline
+            ? "| Status | Issues | Median business days | Baseline median business days |\n| --- | ---: | ---: | ---: |\n"
+            : "| Status | Issues | Median business days |\n| --- | ---: | ---: |\n");
         foreach (var row in rows)
         {
             // A status name is Jira's text: a "|" in it would otherwise end the cell.
             report.Append("| ").Append(row.StatusName.Replace("|", "\\|", StringComparison.Ordinal))
                 .Append(" | ").Append(row.IssueCount?.ToString(CultureInfo.InvariantCulture) ?? Suppressed)
-                .Append(" | ").Append(Days(row.Suppressed, row.MedianBusinessDays))
-                .Append(" |\n");
+                .Append(" | ").Append(Days(row.Suppressed, row.MedianBusinessDays));
+            if (withBaseline)
+            {
+                report.Append(" | ").Append(BaselineDays(row.BaselineSuppressed, row.BaselineMedianBusinessDays));
+            }
+
+            report.Append(" |\n");
         }
     }
 
@@ -153,6 +189,12 @@ public static class SprintReport
 
     /// <summary>A duration in days to one decimal place, e.g. 2.5, or <see cref="Suppressed"/> (see <see cref="Figure"/>).</summary>
     private static string Days(long suppressed, double? days) => Figure(suppressed, days?.ToString("F1", CultureInfo.InvariantCulture));
+
+    /// <summary>
+    /// A baseline cell. A row the baseline view does not have (no issue of a baseline sprint is in this bucket
+    /// or status) carries no flag: nothing is withheld there, so the cell says there is nothing, not "suppressed".
+    /// </summary>
+    private static string BaselineDays(long? suppressed, double? days) => suppressed is { } flag ? Days(flag, days) : NoBaseline;
 
     /// <summary>
     /// A cell's text. The figure is printed only when its row says it is not suppressed (0) and carries it;
@@ -175,6 +217,9 @@ public static class SprintReport
         public long? IssueCount { get; init; }
         public double? MedianBusinessDays { get; init; }
         public long Suppressed { get; init; } = 1;
+        public double? BaselineMedianBusinessDays { get; init; }
+        /// <summary>Null when the baseline has no row for the status.</summary>
+        public long? BaselineSuppressed { get; init; }
     }
 
     private sealed class DeliveredRow
@@ -197,5 +242,9 @@ public static class SprintReport
         public double? MedianCalendarDays { get; init; }
         public double? P85CalendarDays { get; init; }
         public long Suppressed { get; init; } = 1;
+        public double? BaselineMedianBusinessDays { get; init; }
+        public double? BaselineP85BusinessDays { get; init; }
+        /// <summary>Null when the baseline has no row for the bucket.</summary>
+        public long? BaselineSuppressed { get; init; }
     }
 }
