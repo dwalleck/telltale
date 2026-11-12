@@ -524,6 +524,27 @@ public class TimeInStatusTableTests
     }
 
     [Test]
+    public async Task Markdown_typed_into_a_sprint_or_status_name_in_jira_is_shown_as_text_in_the_title_and_the_table()
+    {
+        // Final review C12: both names are free text typed in Jira. Unescaped, a name could add a heading, a
+        // link, an image or raw HTML to the report, or run two lines together.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.AddSprint(41, "Fake *Sprint* [41](https://example.invalid/x) <b>_y_</b> `z`\n# ~q~ !\\ &amp;", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
+        pipeline.Jira.RenameStatus(Workflow.Development, "Fake <i>Dev</i> ![x](https://example.invalid/y)\r\n| *Build*");
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41)
+            .Moved(Local(2026, 1, 7, 9), Workflow.Done);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        var report = await pipeline.ReadReportAsync(41);
+        await Assert.That(report).StartsWith(
+            @"# Fake \*Sprint\* \[41\](https://example.invalid/x) \<b\>\_y\_\</b\> \`z\` \# \~q\~ \!\\ \&amp; (2026-01-05 to 2026-01-19)" + "\n\n");
+        await Assert.That(TimeInStatusRows(report)).IsEquivalentTo(
+            new[] { @"| Fake \<i\>Dev\</i\> \!\[x\](https://example.invalid/y) \| \*Build\* | 5 | 2.0 |" }, CollectionOrdering.Matching);
+    }
+
+    [Test]
     public async Task A_report_from_derived_data_built_before_the_time_in_status_view_existed_says_to_rebuild_it()
     {
         await using var pipeline = new PipelineHarness();

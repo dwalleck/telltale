@@ -123,7 +123,7 @@ public static class SprintReport
             : sprint.PlannedEnd is null ? $"from {start}, still running"
             : $"from {start}, still running; planned end {LocalDate(sprint.PlannedEnd, teamTimeZone)}";
 
-        report.Append("# ").Append(sprint.SprintName).Append(" (").Append(dates).Append(")\n\n");
+        report.Append("# ").Append(AsText(sprint.SprintName)).Append(" (").Append(dates).Append(")\n\n");
     }
 
     private static void AppendDeliveredCount(StringBuilder report, DeliveredRow sprint) =>
@@ -263,11 +263,46 @@ public static class SprintReport
         foreach (var cell in cells)
         {
             // A cell can hold Jira's text (a status name): a "|" in it would otherwise end the cell.
-            report.Append("| ").Append(cell.Replace("|", "\\|", StringComparison.Ordinal)).Append(' ');
+            report.Append("| ").Append(AsText(cell)).Append(' ');
         }
 
         report.Append("|\n");
     }
+
+    /// <summary>
+    /// Text from Jira (a sprint name, a status name) as markdown that shows it as it was typed: every
+    /// character markdown or HTML gives a meaning is escaped, and a line break or other control character
+    /// becomes one space, so the text can add no heading, link, image, tag or table cell and stays on its line.
+    /// The report's own cells (figures, "suppressed") hold none of these characters and pass through unchanged.
+    /// </summary>
+    private static string AsText(string text)
+    {
+        var escaped = new StringBuilder(text.Length);
+        foreach (var character in text)
+        {
+            if (char.IsControl(character))
+            {
+                // A run of them (a CR and an LF) is one space.
+                if (escaped.Length == 0 || escaped[^1] != ' ')
+                {
+                    escaped.Append(' ');
+                }
+
+                continue;
+            }
+
+            if (MarkdownCharacters.Contains(character))
+            {
+                escaped.Append('\\');
+            }
+
+            escaped.Append(character);
+        }
+
+        return escaped.ToString();
+    }
+
+    private static readonly System.Buffers.SearchValues<char> MarkdownCharacters = System.Buffers.SearchValues.Create("\\`*_[]<>|#~!&");
 
     /// <summary>A number of issues, or <see cref="Suppressed"/> when the view withholds it.</summary>
     private static string Count(long? issues) => issues?.ToString(CultureInfo.InvariantCulture) ?? Suppressed;
