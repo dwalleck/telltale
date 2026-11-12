@@ -34,7 +34,10 @@ public static class People
     public static readonly FakePerson Five = new("fake-account-0005", "Fake Person Five", "fake.five@example.invalid");
     public static readonly FakePerson Six = new("fake-account-0006", "Fake Person Six", "fake.six@example.invalid");
 
-    public static IReadOnlyList<FakePerson> All { get; } = [One, Two, Three, Four, Five, Six];
+    /// <summary>Makes every status move unless a test names someone else, so a changelog author is never just the assignee.</summary>
+    public static readonly FakePerson BoardAdmin = new("fake-account-0099", "Fake Board Admin", "fake.admin@example.invalid");
+
+    public static IReadOnlyList<FakePerson> All { get; } = [One, Two, Three, Four, Five, Six, BoardAdmin];
 }
 
 /// <summary>Builds instants as wall-clock times in the synthetic team's zone, so tests read like the calendar.</summary>

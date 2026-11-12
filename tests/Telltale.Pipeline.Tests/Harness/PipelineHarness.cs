@@ -53,15 +53,11 @@ public sealed class PipelineHarness : IAsyncDisposable
         {
             ["siteUrl"] = FakeJira.SiteUrl,
             ["boardId"] = FakeJira.BoardId,
-            ["sprintFieldId"] = FakeJira.SprintFieldId,
             ["storyPointFieldId"] = FakeJira.StoryPointFieldId,
             ["backfillStart"] = "2025-01-01",
         },
         ["statusRoles"] = new JsonObject(Workflow.BoardOrder.Select(status => KeyValuePair.Create(status.Id, (JsonNode?)status.Role))),
-        ["abandonedResolutionIds"] = new JsonArray(),
         ["timeZone"] = TeamTime.ZoneId,
-        ["holidays"] = new JsonArray(),
-        ["baselineSprintIds"] = new JsonArray(),
     };
 
     /// <summary>What the commands wrote to standard output.</summary>
@@ -120,6 +116,15 @@ public sealed class PipelineHarness : IAsyncDisposable
         await using var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync();
         return (await connection.QueryAsync<T>(sql, parameters)).AsList();
+    }
+
+    /// <summary>Runs a statement against the store with a writable connection, as the owner could from any SQLite client.</summary>
+    public async Task ExecuteAsync(string sql)
+    {
+        var connectionString = new SqliteConnectionStringBuilder { DataSource = DatabasePath, Pooling = false }.ToString();
+        await using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync();
+        await connection.ExecuteAsync(sql);
     }
 
     /// <summary>

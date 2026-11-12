@@ -20,9 +20,13 @@ public enum JiraShapes
 }
 
 /// <summary>One entry in an issue's changelog: a single field changing at one moment.</summary>
-public sealed record FakeHistory(string Id, DateTimeOffset At, string FieldId, string FieldName, string? From, string? FromText, string? To, string? ToText);
+public sealed record FakeHistory(string Id, DateTimeOffset At, FakePerson Author, string FieldId, string FieldName, string? From, string? FromText, string? To, string? ToText);
 
-public sealed record FakeSprint(long Id, string Name, DateTimeOffset Start, DateTimeOffset PlannedEnd, DateTimeOffset? Completed);
+/// <summary>A sprint as the board lists it. <see cref="State"/> is Jira's: future, active or closed. A null <see cref="OriginBoardId"/> leaves the field out.</summary>
+public sealed record FakeSprint(long Id, string Name, string State, DateTimeOffset? Start, DateTimeOffset? PlannedEnd, DateTimeOffset? Completed, long? OriginBoardId)
+{
+    public string Goal => $"Synthetic goal of sprint {Id} that must never be stored";
+}
 
 /// <summary>
 /// A synthetic issue and its history. Build it with the fluent methods, in time order:
@@ -44,6 +48,7 @@ public sealed class FakeIssue
         Updated = created;
         Status = createdIn;
         Summary = $"Synthetic summary of {key} that must never be stored";
+        Description = $"Synthetic description of {key} that must never be stored";
     }
 
     public string Id { get; }
@@ -51,6 +56,8 @@ public sealed class FakeIssue
     public string Key { get; }
 
     public string Summary { get; }
+
+    public string Description { get; }
 
     public DateTimeOffset Created { get; }
 
@@ -87,18 +94,18 @@ public sealed class FakeIssue
         return this;
     }
 
-    /// <summary>Moves the issue from its current status to <paramref name="to"/> and records the transition.</summary>
-    public FakeIssue Moved(DateTimeOffset at, FakeStatus to)
+    /// <summary>Moves the issue from its current status to <paramref name="to"/> and records the transition, made by <paramref name="by"/> (the board admin by default).</summary>
+    public FakeIssue Moved(DateTimeOffset at, FakeStatus to, FakePerson? by = null)
     {
-        AddHistory(at, "status", "status", Status.Id, _jira.NameOf(Status), to.Id, _jira.NameOf(to));
+        AddHistory(at, "status", "status", Status.Id, _jira.NameOf(Status), to.Id, _jira.NameOf(to), by);
         Status = to;
         return this;
     }
 
     /// <summary>Appends one changelog entry with the next history ID.</summary>
-    public FakeIssue AddHistory(DateTimeOffset at, string fieldId, string fieldName, string? from, string? fromText, string? to, string? toText)
+    public FakeIssue AddHistory(DateTimeOffset at, string fieldId, string fieldName, string? from, string? fromText, string? to, string? toText, FakePerson? author = null)
     {
-        _histories.Add(new FakeHistory(_jira.NextHistoryId(), at, fieldId, fieldName, from, fromText, to, toText));
+        _histories.Add(new FakeHistory(_jira.NextHistoryId(), at, author ?? People.BoardAdmin, fieldId, fieldName, from, fromText, to, toText));
         Updated = at > Updated ? at : Updated;
         return this;
     }
@@ -123,6 +130,9 @@ public sealed class FakeJira
     public const string SprintFieldId = "customfield_10020";
     public const string StoryPointFieldId = "customfield_10016";
     public const string IssueTypeStoryId = "800001";
+    public const string ProjectName = "Fake Project Name that must never be stored";
+    public const string ResolutionDescription = "Synthetic resolution description that must never be stored";
+    public const string StatusDescription = "Synthetic status description that must never be stored";
 
     private readonly Lock _gate = new();
     private readonly List<FakeSprint> _sprints = [];
@@ -143,6 +153,9 @@ public sealed class FakeJira
 
     public StubHttpHandler Handler { get; }
 
+    /// <summary>Runs before each of the site's own answers, for example to move the clock as if the fetch took time.</summary>
+    public Action? BeforeResponse { get; set; }
+
     /// <summary>Which of the two documented response shapes to serve.</summary>
     public JiraShapes Shapes { get; set; } = JiraShapes.AsSchemas;
 
@@ -158,25 +171,48 @@ public sealed class FakeJira
     }
 
     /// <summary>
-    /// Every piece of personal or free text the site can serve: account IDs, display names, emails
-    /// and issue summaries. None of it may appear in the database, a report or the console output.
+    /// Every piece of personal or free text the site can serve: account IDs, display names and emails
+    /// (assignees and changelog authors alike), issue summaries and descriptions, sprint goals, and the
+    /// project name and the resolution and status descriptions. None of it may appear in the database,
+    /// a report or the console output.
     /// </summary>
     public IReadOnlyList<string> ForbiddenText =>
     [
         .. People.All.SelectMany(person => new[] { person.AccountId, person.DisplayName, person.Email }),
-        .. Issues.Select(issue => issue.Summary),
+        .. Issues.SelectMany(issue => new[] { issue.Summary, issue.Description }),
+        .. SprintList().Select(sprint => sprint.Goal),
+        ProjectName,
+        ResolutionDescription,
+        StatusDescription,
     ];
 
-    /// <summary>Adds a sprint. With <paramref name="completed"/> it is closed; without, it is the active sprint.</summary>
-    public FakeSprint AddSprint(long id, string name, DateTimeOffset start, DateTimeOffset plannedEnd, DateTimeOffset? completed = null)
+    /// <summary>
+    /// Adds a sprint that has started. With <paramref name="completed"/> it is closed; without, it is the active sprint.
+    /// <paramref name="originBoardId"/> is the board the sprint was created on; null leaves the field out of the response.
+    /// </summary>
+    public FakeSprint AddSprint(long id, string name, DateTimeOffset start, DateTimeOffset plannedEnd, DateTimeOffset? completed = null, long? originBoardId = BoardId) =>
+        Add(new FakeSprint(id, name, completed is null ? "active" : "closed", start, plannedEnd, completed, originBoardId));
+
+    /// <summary>Adds a sprint that has not started. Jira lets a future sprint carry planned dates, or none.</summary>
+    public FakeSprint AddFutureSprint(long id, string name, DateTimeOffset? plannedStart = null, DateTimeOffset? plannedEnd = null) =>
+        Add(new FakeSprint(id, name, "future", plannedStart, plannedEnd, Completed: null, BoardId));
+
+    private FakeSprint Add(FakeSprint sprint)
     {
-        var sprint = new FakeSprint(id, name, start, plannedEnd, completed);
         lock (_gate)
         {
             _sprints.Add(sprint);
         }
 
         return sprint;
+    }
+
+    private List<FakeSprint> SprintList()
+    {
+        lock (_gate)
+        {
+            return [.. _sprints];
+        }
     }
 
     /// <summary>Adds an unassigned issue created in <paramref name="createdIn"/> (New by default). Chain <see cref="FakeIssue"/> methods to give it history.</summary>
@@ -215,8 +251,11 @@ public sealed class FakeJira
         }
     }
 
-    private static HttpResponseMessage Respond(JsonNode body) =>
-        new(HttpStatusCode.OK) { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
+    private HttpResponseMessage Respond(JsonNode body)
+    {
+        BeforeResponse?.Invoke();
+        return new(HttpStatusCode.OK) { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
+    }
 
     private static JsonObject BoardProjects() => new()
     {
@@ -229,7 +268,7 @@ public sealed class FakeJira
             ["self"] = $"{SiteUrl}rest/api/3/project/{ProjectKey}",
             ["id"] = "100001",
             ["key"] = ProjectKey,
-            ["name"] = "Fake Project",
+            ["name"] = ProjectName,
             ["projectTypeKey"] = "software",
             ["simplified"] = false,
         }),
@@ -237,11 +276,7 @@ public sealed class FakeJira
 
     private JsonObject Sprints()
     {
-        List<FakeSprint> sprints;
-        lock (_gate)
-        {
-            sprints = [.. _sprints];
-        }
+        var sprints = SprintList();
 
         var values = new JsonArray();
         foreach (var sprint in sprints)
@@ -250,17 +285,30 @@ public sealed class FakeJira
             {
                 ["id"] = sprint.Id,
                 ["self"] = $"{SiteUrl}rest/agile/1.0/sprint/{sprint.Id}",
-                ["state"] = sprint.Completed is null ? "active" : "closed",
+                ["state"] = sprint.State,
                 ["name"] = sprint.Name,
-                ["startDate"] = AgileTime(sprint.Start),
-                ["endDate"] = AgileTime(sprint.PlannedEnd),
-                ["createdDate"] = AgileTime(sprint.Start.AddDays(-3)),
-                ["originBoardId"] = BoardId,
-                ["goal"] = $"Synthetic goal of sprint {sprint.Id}",
+                ["goal"] = sprint.Goal,
             };
+
+            // Jira leaves unset fields out of a sprint instead of sending null.
+            if (sprint.Start is { } start)
+            {
+                value["startDate"] = AgileTime(start);
+            }
+
+            if (sprint.PlannedEnd is { } plannedEnd)
+            {
+                value["endDate"] = AgileTime(plannedEnd);
+            }
+
             if (sprint.Completed is { } completed)
             {
                 value["completeDate"] = AgileTime(completed);
+            }
+
+            if (sprint.OriginBoardId is { } originBoardId)
+            {
+                value["originBoardId"] = originBoardId;
             }
 
             values.Add(value);
@@ -292,9 +340,10 @@ public sealed class FakeJira
                 ["fields"] = new JsonObject
                 {
                     ["summary"] = issue.Summary,
+                    ["description"] = issue.Description,
                     ["issuetype"] = new JsonObject { ["id"] = IssueTypeStoryId, ["name"] = "Story", ["subtask"] = false, ["hierarchyLevel"] = 0 },
                     ["status"] = StatusDetails(issue.Status),
-                    ["resolution"] = issue.ResolutionId is null ? null : new JsonObject { ["id"] = issue.ResolutionId, ["name"] = "Fake Resolution", ["description"] = "synthetic" },
+                    ["resolution"] = issue.ResolutionId is null ? null : new JsonObject { ["id"] = issue.ResolutionId, ["name"] = "Fake Resolution", ["description"] = ResolutionDescription },
                     ["assignee"] = issue.Assignee is null ? null : UserDetails(issue.Assignee),
                     ["created"] = PlatformTime(issue.Created),
                     ["updated"] = PlatformTime(issue.Updated),
@@ -326,7 +375,7 @@ public sealed class FakeJira
                 histories.Add(new JsonObject
                 {
                     ["id"] = history.Id,
-                    ["author"] = UserDetails(issue.Assignee ?? People.One),
+                    ["author"] = UserDetails(history.Author),
                     ["created"] = Shapes == JiraShapes.AsExamples ? history.At.ToUnixTimeMilliseconds() : PlatformTime(history.At),
                     ["items"] = new JsonArray(new JsonObject
                     {
@@ -365,7 +414,7 @@ public sealed class FakeJira
         ["self"] = $"{SiteUrl}rest/api/3/status/{status.Id}",
         ["id"] = status.Id,
         ["name"] = NameOf(status),
-        ["description"] = "synthetic",
+        ["description"] = StatusDescription,
         ["statusCategory"] = new JsonObject { ["id"] = status.CategoryKey switch { "new" => 2, "done" => 3, _ => 4 }, ["key"] = status.CategoryKey, ["name"] = status.CategoryKey },
     };
 

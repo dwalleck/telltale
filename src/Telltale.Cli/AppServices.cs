@@ -7,7 +7,7 @@ namespace Telltale.Cli;
 /// <see cref="ForProduction"/>; each test builds its own, so nothing is static or shared.
 /// </summary>
 /// <param name="HttpHandler">Carries every HTTP call.</param>
-/// <param name="Clock">The source of "now". Each command reads it once, as its as-of time.</param>
+/// <param name="Clock">The source of "now", read by derive as the as-of time.</param>
 /// <param name="Secrets">Where the Jira email, the API token and the hashing salt are kept.</param>
 /// <param name="Out">Standard output. Commands never write to the console directly.</param>
 /// <param name="Error">Standard error.</param>

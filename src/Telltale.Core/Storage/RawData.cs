@@ -27,8 +27,19 @@ public static class ChangeFields
     public const string Status = "status";
 }
 
-/// <summary>A sprint of the board. A future sprint has no start; an uncompleted one has no completion time.</summary>
+/// <summary>
+/// A sprint of the board. <see cref="State"/> is Jira's: one of <see cref="SprintStates"/>. Whether a sprint
+/// has started is its state, not its dates: a future sprint may carry planned dates.
+/// </summary>
 public sealed record RawSprint(string SprintId, long BoardId, string Name, string State, DateTimeOffset? Start, DateTimeOffset? PlannedEnd, DateTimeOffset? Completed);
+
+/// <summary>The values of <see cref="RawSprint.State"/>.</summary>
+public static class SprintStates
+{
+    public const string Future = "future";
+    public const string Active = "active";
+    public const string Closed = "closed";
+}
 
 /// <summary>A workflow status: its ID, its current name and Jira's category key for it.</summary>
 public sealed record RawStatus(string StatusId, string Name, string Category);

@@ -16,9 +16,9 @@ public static class Derivation
             .Where(change => change.Field == ChangeFields.Status && change.To is not null)
             .ToLookup(change => change.IssueId, change => new StatusChange(change.HistoryId, change.At, change.From, change.To!));
 
-        // A sprint that has not started (a future sprint) has no window yet.
+        // A future sprint has no window yet, even when it carries planned dates.
         var windows = raw.Sprints
-            .Where(sprint => sprint.Start is not null)
+            .Where(sprint => sprint.State != SprintStates.Future && sprint.Start is not null)
             .Select(sprint => new SprintWindow(sprint.SprintId, sprint.Start!.Value, sprint.PlannedEnd, sprint.Completed))
             .ToList();
 

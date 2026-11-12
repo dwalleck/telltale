@@ -60,7 +60,11 @@ public sealed class JiraCollector
         using var document = await jira.GetAsync($"rest/agile/1.0/board/{_config.BoardId}/sprint", cancellationToken);
         RequireSinglePage(document.RootElement, "sprint list");
 
-        return [.. document.RootElement.GetProperty("values").EnumerateArray().Select(sprint => new RawSprint(
+        // The board also lists sprints created on other boards when one of their issues matches its filter.
+        // Those are another team's sprints; counting deliveries in them would take them from this team's.
+        return [.. document.RootElement.GetProperty("values").EnumerateArray()
+            .Where(sprint => Optional(sprint, "originBoardId") is not { } origin || origin.GetInt64() == _config.BoardId)
+            .Select(sprint => new RawSprint(
             sprint.GetProperty("id").GetInt64().ToString(CultureInfo.InvariantCulture),
             _config.BoardId,
             sprint.GetProperty("name").GetString()!,
