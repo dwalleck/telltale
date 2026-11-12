@@ -13,6 +13,45 @@ namespace Telltale.Pipeline.Tests;
 public class BackfillRebuildTests
 {
     [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task A_lost_or_corrupt_database_costs_one_backfill(bool corrupt)
+    {
+        // Story 47: the database is disposable. The store was built up over a backfill and a later sync.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddTeam(41, 42);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9)).AssignedTo(People.One).Estimated(3).InSprints(42)
+            .Moved(Local(2026, 1, 21, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 22, 9), Workflow.Done);
+        var later = pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 20, 9)).AssignedTo(People.Two).InSprints(42)
+            .Moved(Local(2026, 1, 21, 9), Workflow.Development);
+        await pipeline.RunAllAsync(["backfill"]);
+        later.Moved(Local(2026, 1, 30, 9), Workflow.Done);
+        await pipeline.RunAllAsync(["sync"], ["derive"], ["report", "--sprint", "42"]);
+        var storeBefore = await pipeline.ReadStoreContentAsync(withoutAsOf: true);
+        var reportBefore = await pipeline.ReadReportBytesAsync(42, withoutAsOf: true);
+
+        if (corrupt)
+        {
+            // What is left of a file after a bad copy. Every command says the file cannot be used and changes nothing.
+            await File.WriteAllTextAsync(pipeline.DatabasePath, "Synthetic bytes that are not a database, long enough to be read as a header by SQLite.");
+            var refused = await pipeline.RunAsync("backfill");
+            await Assert.That(refused).IsEqualTo(1);
+            await Assert.That(pipeline.Error.ToString()).StartsWith($"The database {pipeline.DatabasePath} could not be used: ");
+        }
+
+        File.Delete(pipeline.DatabasePath);
+        File.Delete(Path.Combine(pipeline.ReportDirectory, "sprint-42.md"));
+        pipeline.Clock.Advance(TimeSpan.FromDays(1));
+        await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "42"]);
+
+        await Assert.That(storeBefore).Contains(pipeline.Jira.StoredRowOf("FAKE-2"));
+        await Assert.That(await pipeline.ReadStoreContentAsync(withoutAsOf: true)).IsEqualTo(storeBefore);
+        await Assert.That(await pipeline.ReadReportBytesAsync(42, withoutAsOf: true)).IsEqualTo(reportBefore);
+    }
+
+    [Test]
     public async Task An_issue_deleted_in_jira_is_still_counted_after_a_sync_and_no_longer_after_a_backfill()
     {
         await using var pipeline = new PipelineHarness();
