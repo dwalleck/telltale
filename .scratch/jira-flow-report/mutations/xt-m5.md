@@ -17,3 +17,4 @@ Expected red: `An_issue_delivered_in_the_active_sprint_counts_in_it` and `An_act
 - Verified 2026-11-12 at 73ad3e6: red, 2 failed of 13 (Pipeline, filter /*/*/SprintStateTests/*); restored.
 - Verified 2026-11-12 at 1e8622b: red, 2 failed of 13 (Pipeline, filter /*/*/SprintStateTests/*); restored.
 - Verified 2026-11-12 at baeaf03: red, 2 failed of 13 (Pipeline, filter /*/*/SprintStateTests/*); restored.
+- Verified 2026-11-12 at 2fa24b9: red, 2 failed of 13 (Pipeline, filter /*/*/SprintStateTests/*); restored.
