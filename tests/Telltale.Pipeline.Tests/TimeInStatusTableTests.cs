@@ -388,14 +388,17 @@ public class TimeInStatusTableTests
         AddTwoSprints(pipeline.Jira);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41);
         await pipeline.RunAsync("run", "--sprint", "41");
+        File.Delete(Path.Combine(pipeline.ReportDirectory, "sprint-41.md"));
 
-        // The store as an earlier version of the tool derived it: no time in status view.
-        await pipeline.ExecuteAsync("DROP VIEW time_in_status_per_sprint;");
-        var store = new SqliteStore(pipeline.DatabasePath);
+        // The store as an earlier version of the tool derived it: no time in status view, and no record of
+        // the raw data the derived tables were built from.
+        await pipeline.ExecuteAsync("DROP VIEW time_in_status_per_sprint; DROP TABLE derived_source; DELETE FROM derived_object WHERE name IN ('time_in_status_per_sprint', 'derived_source');");
 
-        await Assert.That(async () => await SprintReport.RenderAsync(store, "41", TimeZoneInfo.FindSystemTimeZoneById(ZoneId)))
-            .Throws<UserFacingException>()
-            .WithMessage("The store's derived data has no time in status figures: it was built by an earlier version of this tool. Rebuild the derived data, then report again.");
+        var exit = await pipeline.RunAsync("report", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo("The store has no derived data yet. Run derive first.\n");
+        await Assert.That(File.Exists(Path.Combine(pipeline.ReportDirectory, "sprint-41.md"))).IsFalse();
     }
 
     [Test]

@@ -405,7 +405,7 @@ public class CycleTimeTests
             BoardStatuses: [])
         {
             AsOf = end,
-        });
+        }, rawDigest: "synthetic-digest");
 
         var rows = await CycleTimeRowsAsync(pipeline, 41);
         await Assert.That(rows.Select(row => (row.PointBucket, row.IssueCount, row.P85BusinessDays, row.P85CalendarDays)))
