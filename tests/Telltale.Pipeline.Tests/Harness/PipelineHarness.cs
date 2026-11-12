@@ -95,7 +95,15 @@ public sealed class PipelineHarness : IAsyncDisposable
     public async Task<int> RunAsync(params string[] args)
     {
         await File.WriteAllTextAsync(ConfigPath, RawConfig ?? Config.ToJsonString(Indented));
+        return await RunWithFilesAsTheyAreAsync(args);
+    }
 
+    /// <summary>
+    /// Runs one command line without writing <see cref="Config"/> first, so the configuration file is whatever
+    /// is on disk: nothing before the first <c>discover</c>, and afterwards the file <c>discover</c> wrote.
+    /// </summary>
+    public async Task<int> RunWithFilesAsTheyAreAsync(params string[] args)
+    {
         var services = new AppServices(
             Jira.Handler,
             Clock,

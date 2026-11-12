@@ -10,7 +10,7 @@ namespace Telltale.Core.Derive;
 /// configured board, status roles, abandoned resolutions and business calendar, and the as-of time, so changing a definition means rerunning it (ADR-0002).
 /// </summary>
 /// <remarks>
-/// Throws <see cref="UserFacingException"/> when an issue has been in a status that has no configured role, when
+/// Throws <see cref="UserFacingException"/> when an issue is in, or its timeline entered, a status that has no configured role, when
 /// a closed sprint of the board has neither a completion time nor a planned end, or when an issue was stored
 /// before its Sprint field was fetched.
 /// </remarks>
@@ -35,13 +35,40 @@ public static class Derivation
             .Where(change => change.Field == ChangeFields.Status && change.To is not null)
             .ToLookup(change => change.IssueId, change => new StatusChange(change.HistoryId, change.At, change.From, change.To!));
 
+        var pointChanges = raw.Changes
+            .Where(change => change.Field == ChangeFields.Points)
+            .ToLookup(change => change.IssueId, change => PointChange.FromRaw(change.HistoryId, change.At, change.From, change.To));
+
         // Which sprints count is decided here and nowhere else. Only the configured board's: the store can
         // still hold sprints of a board ID that was since corrected. And only sprints that have started:
         // a future sprint has no window yet, even when it carries planned dates.
         var windows = raw.Sprints
             .Where(sprint => sprint.BoardId == boardId && sprint.State != SprintStates.Future && sprint.Start is not null)
-            .Select(sprint => new SprintWindow(sprint.SprintId, sprint.Start!.Value, sprint.PlannedEnd, WindowEnd(sprint)))
+            .Select(sprint => new SprintWindow(sprint.SprintId, sprint.Start!.Value, WindowEnd(sprint)))
             .ToList();
+
+        // Every status has exactly one role. Guessing one for a status the configuration does not mention
+        // (a new status, a mistyped ID) would quietly move issues in or out of the delivered count. Checked
+        // before anything reads a role, over exactly what the rules read: the status each issue is in now and
+        // every entry of its timeline. The entries, not the intervals: a status entered and left at the same
+        // instant has no interval, and is still a move the delivery and reopen rules read. A later change's
+        // "from" that the timeline was not in is an anomaly, and no rule reads it.
+        var timelines = raw.Issues.ToDictionary(
+            issue => issue.IssueId,
+            issue => StatusTimeline.Build(issue.Created, issue.StatusId, statusChanges[issue.IssueId]),
+            StringComparer.Ordinal);
+        var withoutRole = raw.Issues
+            .SelectMany(issue => timelines[issue.IssueId].Entries.Select(entry => entry.StatusId).Append(issue.StatusId))
+            .Distinct(StringComparer.Ordinal)
+            .Where(statusId => roles.RoleOf(statusId) is null)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        if (withoutRole.Count > 0)
+        {
+            throw new UserFacingException(
+                $"These statuses have no role in statusRoles in the configuration file: {string.Join(", ", withoutRole)}. "
+                + "Give each one a role (not started, work, blocked or done) and run again.");
+        }
 
         var deliverySprints = new DeliverySprints(windows, asOf);
         var intervals = new List<IssueStatusInterval>();
@@ -52,7 +79,7 @@ public static class Derivation
 
         foreach (var issue in raw.Issues)
         {
-            var timeline = StatusTimeline.Build(issue.Created, issue.StatusId, statusChanges[issue.IssueId]);
+            var timeline = timelines[issue.IssueId];
             intervals.AddRange(timeline.Intervals.Select(interval => new IssueStatusInterval(issue.IssueId, interval.StatusId, interval.Start, interval.End)));
 
             var reopens = Cycles.ReopenCount(timeline.Entries, roles);
@@ -62,10 +89,8 @@ public static class Derivation
                 Delivered delivered => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At), reopens)
                 {
                     Cycle = Cycles.Measure(timeline.Entries, roles, delivered.At, calendar),
-
-                    // The point bucket is the issue's current estimate.
                     PointBucket = issue.StoryPoints,
-                },
+                }.WithBucketFromHistory(delivered, pointChanges[issue.IssueId]),
 
                 // An abandoned issue reached done, so it has a cycle end, but it is not a delivery: it belongs to
                 // no delivery sprint and has no cycle time.
@@ -77,23 +102,15 @@ public static class Derivation
             anomalies.AddRange(ChangelogAnomalies.Of(issue, timeline, membership, outcome, roles));
             memberships.AddRange(membership.Intervals.Select(interval => new IssueMembershipInterval(issue.IssueId, interval.SprintId, interval.Start, interval.End)));
 
-            // Only sprints that count (the windows above) have time in status. A sprint the issue was never in gives nothing.
-            foreach (var window in windows)
+            // Only sprints that count (the windows above) have time in status. A sprint the issue was never in
+            // gives nothing, so it is not measured at all: most issues were in one or two of the board's sprints.
+            var memberOf = membership.Intervals.Select(interval => interval.SprintId).ToHashSet(StringComparer.Ordinal);
+            foreach (var window in windows.Where(counted => memberOf.Contains(counted.SprintId)))
             {
                 sprintStatusTimes.AddRange(TimeInStatus.ForSprint(window, timeline.Intervals, membership.Intervals, calendar, asOf)
                     .OrderBy(pair => pair.Key, StringComparer.Ordinal)
                     .Select(pair => new SprintStatusTime(issue.IssueId, window.SprintId, pair.Key, pair.Value.CalendarTime, pair.Value.BusinessTime, pair.Value.BusinessDays)));
             }
-        }
-
-        // Every status has exactly one role. Guessing one for a status the configuration does not mention
-        // (a new status, a mistyped ID) would quietly move issues in or out of the delivered count.
-        var withoutRole = intervals.Select(interval => interval.StatusId).Concat(raw.Issues.Select(issue => issue.StatusId)).Distinct().Where(statusId => roles.RoleOf(statusId) is null).Order(StringComparer.Ordinal).ToList();
-        if (withoutRole.Count > 0)
-        {
-            throw new UserFacingException(
-                $"These statuses have no role in statusRoles in the configuration file: {string.Join(", ", withoutRole)}. "
-                + "Give each one a role (not started, work, blocked or done) and run again.");
         }
 
         return new DerivedData(
@@ -108,6 +125,20 @@ public static class Derivation
             Anomalies = anomalies,
         };
     }
+
+    /// <summary>
+    /// Puts a delivered issue in the bucket of its estimate at the start of its cycle, so a later re-estimate
+    /// does not move it (ADR-0006). An issue that never entered a work status has no cycle start; its bucket
+    /// is its estimate at the delivery moment (owner decision D35). <paramref name="cycle"/> comes with the
+    /// current estimate as its bucket.
+    /// </summary>
+    private static IssueCycle WithBucketFromHistory(this IssueCycle cycle, Delivered delivered, IEnumerable<PointChange> pointChanges) =>
+        cycle with
+        {
+            PointBucket = cycle.Cycle is { } measured
+                ? PointHistory.EstimateAt(measured.Start, measured.StartHistoryId, cycle.PointBucket, pointChanges)
+                : PointHistory.EstimateAt(delivered.At, delivered.HistoryId, cycle.PointBucket, pointChanges),
+        };
 
     /// <summary>
     /// When a sprint's window ends: at its completion; for a closed sprint Jira gives no completion time,

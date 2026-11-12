@@ -32,7 +32,7 @@ public class DeliveryTests
             new StatusChange("1", Local(2026, 11, 3, 9), New, Development),
             new StatusChange("2", Local(2026, 11, 5, 9), Development, Done));
 
-        await Assert.That(outcome.Value).IsEqualTo(new Delivered(Local(2026, 11, 5, 9)));
+        await Assert.That(outcome.Value).IsEqualTo(new Delivered(Local(2026, 11, 5, 9)) { HistoryId = "2" });
     }
 
     [Test]
@@ -52,7 +52,7 @@ public class DeliveryTests
             new StatusChange("2", Local(2026, 11, 5, 9), Development, Done),
             new StatusChange("3", Local(2026, 11, 20, 9), Done, Shipped));
 
-        await Assert.That(outcome.Value).IsEqualTo(new Delivered(Local(2026, 11, 5, 9)));
+        await Assert.That(outcome.Value).IsEqualTo(new Delivered(Local(2026, 11, 5, 9)) { HistoryId = "2" });
     }
 
     [Test]
@@ -64,7 +64,7 @@ public class DeliveryTests
             new StatusChange("3", Local(2026, 11, 6, 9), Done, Development),
             new StatusChange("4", Local(2026, 11, 12, 9), Development, Done));
 
-        await Assert.That(outcome.Value).IsEqualTo(new Delivered(Local(2026, 11, 12, 9)));
+        await Assert.That(outcome.Value).IsEqualTo(new Delivered(Local(2026, 11, 12, 9)) { HistoryId = "4" });
     }
 
     [Test]
@@ -78,7 +78,7 @@ public class DeliveryTests
             new StatusChange("3", Local(2026, 11, 12, 9), Done, Development),
             new StatusChange("4", Local(2026, 11, 12, 9), Development, Done));
 
-        await Assert.That(outcome.Value).IsEqualTo(new Delivered(Local(2026, 11, 12, 9)));
+        await Assert.That(outcome.Value).IsEqualTo(new Delivered(Local(2026, 11, 12, 9)) { HistoryId = "4" });
     }
 
     [Test]
@@ -87,7 +87,7 @@ public class DeliveryTests
         var outcome = Outcome(Done,
             new StatusChange("1", Created, New, Done));
 
-        await Assert.That(outcome.Value).IsEqualTo(new Delivered(Created));
+        await Assert.That(outcome.Value).IsEqualTo(new Delivered(Created) { HistoryId = "1" });
     }
 
     [Test]
@@ -111,10 +111,10 @@ public class DeliveryTests
     }
 
     [Test]
-    public async Task A_role_name_outside_the_four_roles_is_refused()
+    public async Task A_role_name_outside_the_four_roles_is_refused_and_the_status_is_named_not_the_role()
     {
         await Assert.That(() => StatusRoles.Parse(new Dictionary<string, string> { [New] = "finished" }))
-            .Throws<FormatException>();
+            .Throws<FormatException>().WithMessage($"the role of status {New} is not one of: not started, work, blocked, done.");
     }
 
     [Test]
@@ -174,7 +174,7 @@ public class DeliveryTests
             new StatusChange("1", Local(2026, 11, 3, 9), New, Development),
             new StatusChange("2", Local(2026, 11, 5, 9), Development, Done));
 
-        await Assert.That(outcome.Value).IsEqualTo(new Delivered(Local(2026, 11, 5, 9)));
+        await Assert.That(outcome.Value).IsEqualTo(new Delivered(Local(2026, 11, 5, 9)) { HistoryId = "2" });
     }
 
     [Test]

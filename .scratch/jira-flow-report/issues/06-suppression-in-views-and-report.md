@@ -2,20 +2,41 @@
 
 **What to build:** Figures that could reveal one person's work are suppressed (ADR-0003). In the cycle time and time in status views, a row with fewer than three distinct assignees behind it, or any row in a sprint with fewer than five distinct assignees, has null figures and a suppressed flag. The delivered count is subject to the five-person check only. The report prints "suppressed" for such cells. The rule lives inside the views, so ad hoc SQL against them cannot bypass it. An issue counts toward its assignee at the time of the sync; unassigned issues count toward nobody.
 
-Owner decisions (2026-11-12): a suppressed row still shows its issue count; only the figures are withheld. The five-person check counts the distinct assignees of every issue in the sprint, not only the delivered ones.
+Owner decisions (2026-11-12): a suppressed row still shows its issue count; only the figures are withheld. The five-person check counts the distinct assignees of every issue in the sprint, not only the delivered ones: issues that were members of the sprint, plus issues delivered in its window whether members or not (D36). Abandoned issues still count in the time in status table (D39). When a sprint fails the five-person check, every issue count for that sprint is withheld as well as every figure, in the views and the report; when only a row's three-assignee check fails, its issue count is still shown (D41, which narrows D5). A bot or duplicate Jira account counts as a person; there is no setting to leave accounts out (D42).
 
 Carried over from the ticket 01 review: the delivered count view has no guard yet, and the path the report uses to query views opens the store read-only but can still read any table. This ticket adds the guard and limits that path to the metric views.
 
 **Blocked by:** 03, 05
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A point bucket with two distinct assignees reads "suppressed" in the report
-- [ ] A direct SQL query of the cycle time view returns null figures and a suppressed flag for that bucket
-- [ ] A sprint with four distinct assignees suppresses every figure, including the delivered count
-- [ ] A bucket with three distinct assignees in a sprint with five is reported
-- [ ] Unassigned issues do not raise an assignee count
-- [ ] The report never shows a blank or zero in place of a suppressed figure
-- [ ] A suppressed row shows its issue count beside "suppressed", in the view and in the report
-- [ ] A sprint with five distinct assignees across all its issues, but only four among delivered issues, is not suppressed by the five-person check
-- [ ] The report's view-query path refuses to read a raw or derived table
+- [x] A point bucket with two distinct assignees reads "suppressed" in the report
+- [x] A direct SQL query of the cycle time view returns null figures and a suppressed flag for that bucket
+- [x] A sprint with four distinct assignees suppresses every figure, including the delivered count
+- [x] A bucket with three distinct assignees in a sprint with five is reported
+- [x] Unassigned issues do not raise an assignee count
+- [x] The report never shows a blank or zero in place of a suppressed figure
+- [x] A suppressed row shows its issue count beside "suppressed", in the view and in the report
+- [x] A sprint with five distinct assignees across all its issues, but only four among delivered issues, is not suppressed by the five-person check
+- [x] The report's view-query path refuses to read a raw or derived table
+
+## Comments
+
+Resolved 2026-11-12. Merged into `spec/jira-flow-report` as bec4581 (source `ticket/06-suppression-in-views-and-report` at af7d92f).
+
+- Checks: the merged tree equals the source tree, so the implementer's full check on af7d92f stands (record `ticket06-r1-record.json`, base 5081b92): Core 82 and Pipeline 481 passed, 0 failed, 0 skipped, 0 warnings, format and line endings pass. Line endings were checked again at merge.
+- Mutations: 21 records (06-m1 to 06-m21), all active and red: 06-m20 and 06-m21 at 98d9e59 (after D41 and the merge of tickets 04 and 10), 06-m9 to 06-m19 at c330fa2 or later, the others at 59372ea or later. None rerun at merge, because the merge changed no file relative to the source. Records of other tickets re-pointed and rerun red: 01-m4 (the delivered count's line in the view), 03-m7 (now mutates the join to `sprint_team` alone), 03-m16 (the filter line is shorter), 05-m4 (the report's query selects `suppressed`). The implementer reran every active record filtered on a test class this ticket touched (95, then 66 after the review, then 61 after the last merge): all red. All 214 records validate at af7d92f.
+- Review: 12 findings. Fixed here: 1, 3, 4, 6, 7, 8, 10, 11. Settled by owner decisions: 2 (D41) and 5 (D42). No change: 9 (a CTE named like a view reaches the authorizer as the innermost accessor exactly as a view does, so a rule that trusts the accessor lets a raw read through; the temporary copies stay). Done by root: 12 (GLOSSARY.md, 5081b92).
+- Deferred findings of earlier tickets closed here: ticket 01 findings 11 (the delivered count view had no guard) and 12 (the report's query path could read any table), ticket 03 finding 4, ticket 05 finding 1.
+- D5 and D41: a row that fails only the three-assignee check has null figures, `suppressed` 1 and keeps its `issue_count`. In a sprint that fails the five-person check `issue_count` is null too, in both views, and the report prints `suppressed` for it; `delivered_count` is null. The report prints a figure only from a row that says `suppressed` 0 and carries one.
+- D6 and D36: the team of a sprint is the distinct assignees of every issue that spent time in the sprint as a member, plus every issue delivered in its window, member or not. It is written once, in the view `sprint_team` (`sprint_id`, `suppressed`), which the three metric views join. A sprint nobody is in has no team, so its delivered count reads `suppressed`, not 0.
+- D39: abandoned issues still count in time in status; nothing changed.
+- D42: any distinct Jira account counts as a person, a bot or a second account included. No code and no setting.
+- The query path: `QueryViewsAsync` copies the rows of each metric view the query's text names into the connection's temporary schema, then sets a SQLite authorizer that allows SELECT, functions and reads of the temporary schema only. A raw or derived table, the schema, a pragma, a write, an ATTACH, a view the owner saved, and a view named with `main.` are all refused (`InvalidOperationException`, "This query reads only the metric views ..."). The metric views are the `derived_object` rows of kind `view`.
+- Derived data from another build: a rebuild stores `derived_source.objects_version`, a SHA-256 over the names and text of every script in `Sql/Derived` and `Sql/Views`. A view query refuses, with "Run derive first", when the stored value differs or the column is absent, when a recorded view is missing, and when a view cannot be evaluated.
+- The salt: migration `0004_person_hashing.sql` records a fingerprint of the salt the stored hashes were made with: HMAC-SHA256 of the fixed text "telltale salt fingerprint" keyed by the salt, the construction of a person hash. `sync` and `run` stop before any call to Jira under another salt; `derive` and `report` stop when a salt is set and is another one (with no salt set they run, as ticket 09 requires). A backfill under a new salt must bring back every stored issue that has an assignee, or it stores nothing and says to restore the salt or delete the database file. A store that holds people and records no salt counts as hashed with another salt.
+- Tests of other tickets: every figure now needs a team of five, so tests of tickets 01 to 05 and 09 to 11 got one, with no production change: `FakeJira.ServeEachIssueOncePer(People.Team)` (counts are five times what they were, medians and P85 unchanged) or `FakeJira.AddIdleTeam(sprints)` (counts unchanged). Changed assertions: the median and P85 cases of one and two values are gone and a case of three distinct values was added (finding 3: such a bucket is never shown); the rank tests give each issue its own assignee; the D21 test's Development median is now 1.0 over five values, where it was 2.8125 over two; `A_query_over_the_views_cannot_change_the_store` sees the guard's refusal, not SQLite's "readonly"; ticket 05's privacy scan asserts `| Fake Development | suppressed | suppressed |` for its one-person sprint; four raw-table reads are narrowed to the test's own issues.
+- Known and left: for a sprint under five the views still have one row per point bucket and per status that has an issue, so that a bucket or status is not empty can be read, and a sprint with no row has no issue with a cycle time. The ticket specifies these rows. The fingerprint lets someone who holds the database file test a guessed salt without knowing an account ID; a person hash already allows that to anyone who knows one.
+- Ticket 07 picks up: the footer counts and the method note follow D41 (a sprint under five shows no count anywhere) and D42 (the method note says a bot or duplicate account counts as a person). Its `run` table takes over `objects_version`: the fact is one column beside `raw_digest`, written by one insert in `ReplaceDerivedAsync` and read in `CopyMetricViewsAsync`. `data_quality.sql` is a file in `Sql/Views` and is copied like the rest; any figure in it about a sprint needs the join to `sprint_team`.
+- Ticket 08 picks up: baseline views need their own team check; `sprint_team` is per sprint. A new test that expects a figure needs `ServeEachIssueOncePer` or `AddIdleTeam`.
+- Ticket 14 picks up: a backfill that rebuilds the raw tables makes the "restore the salt or delete the database file" case unnecessary: under a new salt no row of the old one is left behind. `RecordSaltAsync` and the test `A_backfill_under_a_new_salt_stops_and_stores_nothing_when_a_stored_person_cannot_be_hashed_again` change with it.

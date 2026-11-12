@@ -4,8 +4,10 @@ using System.Text.Json.Nodes;
 using Telltale.Core;
 using Telltale.Core.Configuration;
 using Telltale.Core.Identity;
+using Telltale.Core.Intervals;
 using Telltale.Core.Secrets;
 using Telltale.Core.Storage;
+using static Telltale.Collectors.Jira.JiraJson;
 
 namespace Telltale.Collectors.Jira;
 
@@ -24,7 +26,7 @@ public enum CollectionMode
 
 /// <summary>
 /// Brings the store up to date with the configured Jira board: its sprints and statuses, the issues
-/// of the configured projects, and each issue's status and Sprint field history from the bulk changelog endpoint
+/// of the configured projects, and each issue's status, Sprint field and story point history from the bulk changelog endpoint
 /// (ADR-0004). Only selected fields are kept (ADR-0002), and the assignee's account ID is hashed
 /// before anything leaves this class (ADR-0003).
 /// </summary>
@@ -33,9 +35,16 @@ public sealed class JiraCollector
     // The bulk changelog endpoint takes at most 1000 issues per request.
     private const int ChangelogIssuesPerRequest = 1000;
 
-    // The largest page sizes Jira documents for the search and bulk changelog endpoints. Jira may return fewer.
-    private const int SearchPageSize = 5000;
+    // Page sizes asked for. Jira may return fewer on any page, so every list is read until its last page.
+    // Search: the documented 5000 holds only for pages of IDs or keys alone; with named fields a real site
+    // is reported to cap a page near 100 (undocumented), so more is not asked for.
+    // Bulk changelog: the documented maximum.
+    private const int SearchPageSize = 100;
     private const int ChangelogPageSize = 10000;
+
+    // The status field's ID, which is also the name old history gives it, and the Sprint field's name there.
+    private const string StatusFieldId = "status";
+    private const string SprintFieldName = "Sprint";
 
     /// <summary>The name of this collector's row in the store's watermarks.</summary>
     public const string WatermarkName = "jira";
@@ -49,9 +58,15 @@ public sealed class JiraCollector
     private readonly HttpMessageHandler _handler;
     private readonly JiraConfig _config;
     private readonly ISecretStore _secrets;
+    private readonly TimeProvider _clock;
+    private readonly TextWriter _notices;
 
-    public JiraCollector(HttpMessageHandler handler, JiraConfig config, ISecretStore secrets)
+    /// <param name="clock">Times the waits Jira asks for when it limits the rate of requests.</param>
+    /// <param name="notices">Where each such wait is announced: standard error.</param>
+    public JiraCollector(HttpMessageHandler handler, JiraConfig config, ISecretStore secrets, TimeProvider clock, TextWriter notices)
     {
+        _clock = clock;
+        _notices = notices;
         _handler = handler;
         _config = config;
         _secrets = secrets;
@@ -62,16 +77,30 @@ public sealed class JiraCollector
         // What the watermark stands for is checked before anything is asked of Jira. It is only true for the
         // board, projects and start date it was fetched under; continuing from it under other settings would
         // pass over every older issue the new settings bring in, without a sign.
-        var covers = Covers();
+        var covers = $"{IssueScope()}{HistoryMarker}{HistoryFields()}";
         var watermark = await store.ReadWatermarkAsync(WatermarkName, cancellationToken);
         if (mode == CollectionMode.Incremental && watermark is not null && watermark.Covers != covers)
         {
-            throw new UserFacingException("boardId, projectKeys or backfillStart in the configuration file changed since the store was last filled, so a sync could miss issues. Run backfill.");
+            // The same holds for the fields whose history is fetched. An issue already stored comes back only
+            // when it changes in Jira, so every other issue would lack the history of a newly named field, and
+            // an issue without history reads as one whose sprints or estimate never changed. A store filled
+            // before the watermark named these fields is in the same position.
+            throw new UserFacingException(watermark.Covers.Split(HistoryMarker)[0] != IssueScope()
+                ? "boardId, projectKeys or backfillStart in the configuration file changed since the store was last filled, so a sync could miss issues. Run backfill."
+                : "The store was last filled without the history of the fields that jira.sprintFieldId and jira.storyPointFieldId name now, so sprint membership and point buckets could be wrong. Run backfill.");
         }
 
         // All three secrets are checked before the first call, so a missing salt cannot surface after a long fetch.
         var salt = _secrets.Require(SecretName.HashingSalt);
-        using var jira = new JiraClient(_handler, _config.SiteUrl, _secrets.Require(SecretName.JiraEmail), _secrets.Require(SecretName.JiraApiToken));
+
+        // A sync adds to what the store holds, so it must hash with the salt the stored people were hashed with.
+        // A backfill fetches everyone again, and the store checks that it did (ITelltaleStore.WriteRawAsync).
+        if (mode == CollectionMode.Incremental)
+        {
+            IdentityHash.RequireSaltOf(await store.ReadSaltFingerprintAsync(cancellationToken), salt);
+        }
+
+        using var jira = new JiraClient(_handler, _config.SiteUrl, _secrets.Require(SecretName.JiraEmail), _secrets.Require(SecretName.JiraApiToken), _clock, _notices);
 
         var statuses = await FetchStatusesAsync(jira, cancellationToken);
         var sprints = await FetchSprintsAsync(jira, cancellationToken);
@@ -84,11 +113,17 @@ public sealed class JiraCollector
         // A fetch that found nothing reaches no further than the one before it. An out-of-scope issue's update
         // does not move it: the overlap brings that issue back, and deleting it again changes nothing.
         var reached = new Watermark(WatermarkName, covers, issues.Count > 0 ? issues.Max(issue => issue.Updated) : since);
-        await store.WriteRawAsync(new RawData(issues, changes, sprints, statuses) { OutOfScopeIssueIds = outOfScopeIssueIds }, reached, cancellationToken);
+        await store.WriteRawAsync(new RawData(issues, changes, sprints, statuses) { OutOfScopeIssueIds = outOfScopeIssueIds, SaltFingerprint = IdentityHash.SaltFingerprint(salt) }, reached, cancellationToken);
     }
 
-    /// <summary>What a fetch under the current configuration covers: the settings that decide which issues and sprints are asked for.</summary>
-    private string Covers() =>
+    // Separates the two parts of what a watermark covers. A project key cannot hold it.
+    private const string HistoryMarker = "; history ";
+
+    /// <summary>The fields whose history a fetch under the current configuration asks for.</summary>
+    private string HistoryFields() => $"status,{_config.SprintFieldId},{_config.StoryPointFieldId}";
+
+    /// <summary>The settings that decide which issues and sprints a fetch under the current configuration asks for.</summary>
+    private string IssueScope() =>
         $"board {_config.BoardId.ToString(CultureInfo.InvariantCulture)}; projects {string.Join(",", _config.ProjectKeys.Order(StringComparer.Ordinal))}; from {_config.BackfillStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}";
 
     /// <summary>
@@ -110,30 +145,40 @@ public sealed class JiraCollector
             Text(status.GetProperty("statusCategory"), "key")))]);
     }
 
+    /// <summary>
+    /// The board's sprints, from every page of the list (owner decision D11). A list that cannot be followed
+    /// to its end for certain stops the run (<see cref="OffsetPaging.StopsWhenInDoubt"/>).
+    /// </summary>
     private async Task<List<RawSprint>> FetchSprintsAsync(JiraClient jira, CancellationToken cancellationToken)
     {
-        using var document = await jira.GetAsync($"rest/agile/1.0/board/{_config.BoardId}/sprint", cancellationToken);
-        return Read("sprint list", () =>
-        {
-            RequireCompleteList(document.RootElement, "sprint list");
-            return ParseSprints(document.RootElement);
-        });
-    }
+        var listed = await OffsetPages.ReadAllAsync(
+            jira,
+            $"rest/agile/1.0/board/{_config.BoardId.ToString(CultureInfo.InvariantCulture)}/sprint",
+            pageSize: null,
+            OffsetPaging.StopsWhenInDoubt,
+            "sprint list",
+            "Nothing was stored.",
+            page => Read("sprint list", page),
+            ParseSprint,
+            sprint => sprint.SprintId,
+            cancellationToken);
 
-    private List<RawSprint> ParseSprints(JsonElement page)
-    {
         // The board also lists sprints created on other boards when one of their issues matches its filter.
         // Those are another team's sprints; counting deliveries in them would take them from this team's.
-        return [.. page.GetProperty("values").EnumerateArray()
-            .Where(sprint => Optional(sprint, "originBoardId") is not { } origin || origin.GetInt64() == _config.BoardId)
-            .Select(sprint => new RawSprint(
-            sprint.GetProperty("id").GetInt64().ToString(CultureInfo.InvariantCulture),
+        return [.. listed.Where(sprint => sprint.OriginBoardId is not { } origin || origin == _config.BoardId).Select(sprint => sprint.Sprint)];
+    }
+
+    private (string SprintId, long? OriginBoardId, RawSprint Sprint) ParseSprint(JsonElement sprint)
+    {
+        var sprintId = sprint.GetProperty("id").GetInt64().ToString(CultureInfo.InvariantCulture);
+        return (sprintId, Optional(sprint, "originBoardId")?.GetInt64(), new RawSprint(
+            sprintId,
             _config.BoardId,
             Text(sprint, "name"),
             Text(sprint, "state"),
             OptionalTime(sprint, "startDate"),
             OptionalTime(sprint, "endDate"),
-            OptionalTime(sprint, "completeDate")))];
+            OptionalTime(sprint, "completeDate")));
     }
 
     private async Task<(List<RawIssue> InScope, List<string> OutOfScopeIssueIds)> FetchIssuesAsync(JiraClient jira, string salt, string updatedSince, CancellationToken cancellationToken)
@@ -144,24 +189,22 @@ public sealed class JiraCollector
         var projects = string.Join(", ", _config.ProjectKeys.Select(key => $"\"{key}\""));
         var body = new JsonObject
         {
-            ["jql"] = $"project in ({projects}) AND updated >= {updatedSince} ORDER BY updated ASC",
+            ["jql"] = $"project in ({projects}) AND updated >= {updatedSince} ORDER BY updated ASC, id ASC",
 
-            // A request, not a promise: Jira's default is 50, and it may return fewer than asked for. The docs
-            // say the largest pages come with the ID or key alone; with named fields a real site is expected to
-            // cap a page near 100. So a board of ordinary size still has a further page, which stops the run
-            // until paging is built (ticket 10).
+            // A request, not a promise: Jira may return fewer than asked for, and the rest comes on further pages.
             ["maxResults"] = SearchPageSize,
 
             // Named fields only: the default is the ID alone, and free-text fields are never asked for.
             ["fields"] = new JsonArray("issuetype", "status", "resolution", "assignee", "created", "updated", _config.SprintFieldId, _config.StoryPointFieldId),
         };
 
-        using var document = await jira.PostAsync("rest/api/3/search/jql", body, cancellationToken);
-        return Read("issue search", () =>
-        {
-            RequireLastPage(document.RootElement, "issue search");
-            return ParseIssues(document.RootElement, salt);
-        });
+        // By issue ID, the issue as it was last seen, or null when it was out of scope then. The search is
+        // ordered by update time and then by ID, so issues updated in the same instant keep their places
+        // between pages. An issue updated while the pages are read moves to the end and is met again on a
+        // later page; the later sighting is the newer one.
+        var seen = new Dictionary<string, RawIssue?>(StringComparer.Ordinal);
+        await ForEachPageAsync(jira, "rest/api/3/search/jql", body, "issue search", page => ParseIssues(page, salt, seen), cancellationToken);
+        return ([.. seen.Values.OfType<RawIssue>()], [.. seen.Where(issue => issue.Value is null).Select(issue => issue.Key)]);
     }
 
     /// <summary>
@@ -170,22 +213,22 @@ public sealed class JiraCollector
     /// appear in no figure, and a field of theirs in an unknown shape cannot stop the run. Only their ID is
     /// read, so the store can delete an issue it holds from the time before it was converted (owner decision D13).
     /// </summary>
-    private (List<RawIssue> InScope, List<string> OutOfScopeIssueIds) ParseIssues(JsonElement page, string salt)
+    private int ParseIssues(JsonElement page, string salt, Dictionary<string, RawIssue?> seen)
     {
-        var issues = new List<RawIssue>();
-        var outOfScopeIssueIds = new List<string>();
-        foreach (var issue in page.GetProperty("issues").EnumerateArray())
+        var issues = page.GetProperty("issues");
+        foreach (var issue in issues.EnumerateArray())
         {
             var fields = issue.GetProperty("fields");
             var issueType = fields.GetProperty("issuetype");
+            var issueId = IssueId(issue);
             if (!IsInScope(issueType))
             {
-                outOfScopeIssueIds.Add(IssueId(issue));
+                seen[issueId] = null;
                 continue;
             }
 
-            issues.Add(new RawIssue(
-                IssueId(issue),
+            seen[issueId] = new RawIssue(
+                issueId,
                 Text(issue, "key"),
                 Text(issueType, "id"),
                 JiraTime.Parse(fields.GetProperty("created")),
@@ -194,10 +237,10 @@ public sealed class JiraCollector
                 Optional(fields, _config.StoryPointFieldId)?.GetDouble(),
                 Optional(fields, "assignee") is { } assignee ? IdentityHash.Of(Text(assignee, "accountId"), salt) : null,
                 JiraTime.Parse(fields.GetProperty("updated")),
-                Optional(fields, _config.SprintFieldId) is { } sprints ? SprintIds(sprints) : ""));
+                Optional(fields, _config.SprintFieldId) is { } sprints ? SprintIds(sprints) : "");
         }
 
-        return (issues, outOfScopeIssueIds);
+        return issues.GetArrayLength();
     }
 
     /// <summary>
@@ -212,20 +255,65 @@ public sealed class JiraCollector
         && issueType.GetProperty("hierarchyLevel").GetInt32() == 0;
 
     /// <summary>
-    /// The Sprint field's value as the comma-separated IDs a Sprint change carries. The field is an array with
+    /// The Sprint field's value in the stored form of sprint IDs (<see cref="SprintMembership.StoredSprintIds"/>),
+    /// which a stored Sprint change has too. The field is an array with
     /// one object per sprint; only the IDs are kept. An issue in no sprint (no value, or an empty array) gives
     /// an empty text, never null: null is kept for issues stored before the field was fetched.
     /// </summary>
     private static string SprintIds(JsonElement sprints) =>
-        string.Join(",", sprints.EnumerateArray().Select(sprint => sprint.GetProperty("id").GetInt64().ToString(CultureInfo.InvariantCulture)));
+        SprintMembership.StoredSprintIds(sprints.EnumerateArray().Select(sprint => sprint.GetProperty("id").GetInt64().ToString(CultureInfo.InvariantCulture)));
+
+    /// <summary>True when a status change's value is what the status field's history holds: nothing, or a status ID (digits).</summary>
+    private static bool IsStatusId(string? value) => string.IsNullOrEmpty(value) || value.All(char.IsAsciiDigit);
 
     /// <summary>
-    /// True when a Sprint change's value is what the Sprint field's history holds: nothing, or sprint IDs
-    /// (digits) separated by commas. Anything else means the configured field is another field, whose
-    /// history may hold account IDs or free text.
+    /// One side of a story point change as the store keeps it: the number in round-trip form, or null for no
+    /// estimate. <paramref name="id"/> is the item's <c>from</c> or <c>to</c> and <paramref name="text"/> its
+    /// <c>fromString</c> or <c>toString</c>. The estimate may be in either or in both; in both, they must be
+    /// the same number, because a select list also has a number (its option ID) beside a name. Anything that is
+    /// not an estimate stops the run before anything is kept, and the message quotes no value.
     /// </summary>
-    private static bool IsSprintIdList(string? value) =>
-        value is null || value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).All(id => id.All(char.IsAsciiDigit));
+    private static string? PointValue(string? id, string? text)
+    {
+        var fromId = Estimate(id);
+        var fromText = Estimate(text);
+        if (fromId is not null && fromText is not null && fromId != fromText)
+        {
+            throw NotAnEstimate();
+        }
+
+        return (fromId ?? fromText)?.ToString("R", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>The estimate a text holds: null for an empty one, a number that is finite and not negative otherwise.</summary>
+    private static double? Estimate(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var points) || !double.IsFinite(points) || points < 0)
+        {
+            throw NotAnEstimate();
+        }
+
+        return points;
+    }
+
+    // Two causes look the same from here: the setting names a field that is not the story point field (its
+    // history may hold names or free text), or Jira writes the number in a form not read here, such as a
+    // decimal comma. The real form is confirmed on the work laptop (ticket 13).
+    private static UserFacingException NotAnEstimate() => new(
+        "The history of the field named by jira.storyPointFieldId in the configuration file holds a value that is not a story point number this tool reads. "
+        + "Either the setting names another field, or Jira writes the number in another form. Nothing was stored.");
+
+    /// <summary>One of the four values of a story point changelog item: text, as the schema says, or a JSON number.</summary>
+    private static string? PointText(JsonElement item, string name) => Optional(item, name) switch
+    {
+        { ValueKind: JsonValueKind.Number } number => number.GetRawText(),
+        var value => value?.GetString(),
+    };
 
     private async Task<List<RawChange>> FetchChangesAsync(JiraClient jira, List<RawIssue> issues, CancellationToken cancellationToken)
     {
@@ -236,25 +324,21 @@ public sealed class JiraCollector
             var body = new JsonObject
             {
                 ["issueIdsOrKeys"] = new JsonArray([.. chunk.Select(issue => (JsonNode)issue.IssueId)]),
-                ["fieldIds"] = new JsonArray("status", _config.SprintFieldId),
+                ["fieldIds"] = new JsonArray(StatusFieldId, _config.SprintFieldId, _config.StoryPointFieldId),
                 ["maxResults"] = ChangelogPageSize,
             };
 
-            using var document = await jira.PostAsync("rest/api/3/changelog/bulkfetch", body, cancellationToken);
-            changes.AddRange(Read("bulk changelog", () =>
-            {
-                RequireLastPage(document.RootElement, "bulk changelog");
-                return ParseChanges(document.RootElement);
-            }));
+            // One issue's history can be spread over several pages: entries come oldest first, not issue by issue.
+            await ForEachPageAsync(jira, "rest/api/3/changelog/bulkfetch", body, "bulk changelog", page => ParseChanges(page, changes), cancellationToken);
         }
 
         return changes;
     }
 
-    private List<RawChange> ParseChanges(JsonElement page)
+    private int ParseChanges(JsonElement page, List<RawChange> changes)
     {
-        var changes = new List<RawChange>();
-        foreach (var log in page.GetProperty("issueChangeLogs").EnumerateArray())
+        var logs = page.GetProperty("issueChangeLogs");
+        foreach (var log in logs.EnumerateArray())
         {
             var issueId = Text(log, "issueId");
             foreach (var history in log.GetProperty("changeHistories").EnumerateArray())
@@ -264,23 +348,43 @@ public sealed class JiraCollector
 
                 foreach (var item in history.GetProperty("items").EnumerateArray())
                 {
-                    var field = Optional(item, "fieldId")?.GetString() switch
-                    {
-                        "status" => ChangeFields.Status,
-                        { } fieldId when fieldId == _config.SprintFieldId => ChangeFields.Sprint,
-                        _ => null,
-                    };
+                    var field = FieldOf(item);
 
                     if (field is null)
                     {
                         continue;
                     }
 
+                    if (field == ChangeFields.Points)
+                    {
+                        // A number field's history is expected to carry its numbers in fromString and toString and
+                        // leave from and to empty; the documentation does not settle it, so both places are read.
+                        // Only a number is ever kept from them.
+                        changes.Add(new RawChange(
+                            historyId,
+                            issueId,
+                            at,
+                            field,
+                            PointValue(PointText(item, "from"), PointText(item, "fromString")),
+                            PointValue(PointText(item, "to"), PointText(item, "toString"))));
+                        continue;
+                    }
+
                     var from = Optional(item, "from")?.GetString();
                     var to = Optional(item, "to")?.GetString();
 
-                    // Checked before anything is kept, and the message quotes no value.
-                    if (field == ChangeFields.Sprint && !(IsSprintIdList(from) && IsSprintIdList(to)))
+                    // Checked before anything is kept, and no message quotes a value. A status change holds
+                    // status IDs, which are digits: anything else is not the status field's history.
+                    if (field == ChangeFields.Status && !(IsStatusId(from) && IsStatusId(to)))
+                    {
+                        throw new FormatException("A status change holds a value that is not a status ID.");
+                    }
+
+                    // A Sprint change's value is what the Sprint field's history holds: nothing, or sprint IDs
+                    // (digits) separated by commas, which Jira writes as "41, 42" and the store keeps as "41,42".
+                    // Anything else means the configured field is another field, whose history may hold account
+                    // IDs or free text.
+                    if (field == ChangeFields.Sprint && !(SprintMembership.TryNormalizeSprintIds(from, out from) && SprintMembership.TryNormalizeSprintIds(to, out to)))
                     {
                         throw new UserFacingException(
                             "The history of the field named by jira.sprintFieldId in the configuration file holds values that are not sprint IDs, so it is not the Sprint field. Nothing was stored.");
@@ -291,7 +395,35 @@ public sealed class JiraCollector
             }
         }
 
-        return changes;
+        return logs.GetArrayLength();
+    }
+
+    /// <summary>
+    /// Which kept field a changelog item is about, or null for any other field. The item's <c>fieldId</c>
+    /// decides. Old history carries none, only the field's name and whether it is a system field
+    /// (<c>fieldtype</c> "jira") or a custom one ("custom"): there the status field is the system field named
+    /// "status", and the Sprint field is the custom field named "Sprint", Jira Software's own name for it. An
+    /// item that does not say which kind it is, is neither. A site that renamed its Sprint field loses the
+    /// sprint changes of that old history, and one with a second custom field named "Sprint" stops on that
+    /// field's values: the name is all such an item has. The story point field has no name to go by (sites
+    /// name it differently), so an old item of it is not read.
+    /// </summary>
+    private string? FieldOf(JsonElement item)
+    {
+        if (Optional(item, "fieldId")?.GetString() is { } fieldId)
+        {
+            return fieldId == StatusFieldId ? ChangeFields.Status
+                : fieldId == _config.SprintFieldId ? ChangeFields.Sprint
+                : fieldId == _config.StoryPointFieldId ? ChangeFields.Points
+                : null;
+        }
+
+        return (Optional(item, "field")?.GetString(), Optional(item, "fieldtype")?.GetString()) switch
+        {
+            (StatusFieldId, "jira") => ChangeFields.Status,
+            (SprintFieldName, "custom") => ChangeFields.Sprint,
+            _ => null,
+        };
     }
 
     /// <summary>
@@ -311,10 +443,6 @@ public sealed class JiraCollector
         }
     }
 
-    /// <summary>A text value Jira must give. Absent, null or not text is an answer in an unknown shape.</summary>
-    private static string Text(JsonElement parent, string name) =>
-        parent.GetProperty(name).GetString() ?? throw new FormatException($"{name} is null.");
-
     /// <summary>
     /// An issue's ID. Jira's issue IDs are digits; anything else is an answer in an unknown shape. The ID is
     /// stored and written to the anomaly log as it is, so no other text may travel in it.
@@ -325,52 +453,58 @@ public sealed class JiraCollector
         return id.Length > 0 && id.All(char.IsAsciiDigit) ? id : throw new FormatException("The issue ID is not digits.");
     }
 
-    /// <summary>A property's value, or null when it is absent or JSON null. Jira uses both for "not set".</summary>
-    private static JsonElement? Optional(JsonElement parent, string name) =>
-        parent.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null ? value : null;
-
     private static DateTimeOffset? OptionalTime(JsonElement parent, string name) =>
         Optional(parent, name) is { } value ? JiraTime.Parse(value) : null;
 
-    // Paging is not built yet. Until it is, a further page stops the run instead of being dropped silently.
-    // Both checks run inside Read, so an answer that is not a JSON object is reported as an unknown shape.
-
     /// <summary>
-    /// For the Agile API's offset paging. The list is complete when <c>isLast</c> is true, or, when Jira leaves
-    /// <c>isLast</c> out, when <c>startAt</c> plus the number of values reaches <c>total</c>. With neither, nothing
-    /// says the list is complete, and the run stops.
+    /// Asks a token-paged endpoint for every page: the same request again, each time with the token the page
+    /// before gave, until a page gives none. <paramref name="read"/> takes what it keeps from each page and
+    /// returns how many entries the page held; the page itself is released before the next is asked for.
     /// </summary>
-    private static void RequireCompleteList(JsonElement page, string what)
+    private static async Task ForEachPageAsync(JiraClient jira, string relativeUrl, JsonObject body, string what, Func<JsonElement, int> read, CancellationToken cancellationToken)
     {
-        var isLast = Optional(page, "isLast");
-        if (isLast?.ValueKind == JsonValueKind.True)
+        var tokens = new HashSet<string>(StringComparer.Ordinal);
+        while (true)
         {
-            return;
-        }
+            using var document = await jira.PostAsync(relativeUrl, body, cancellationToken);
+            var (entries, next) = Read(what, () => (read(document.RootElement), NextPageToken(document.RootElement, what)));
+            if (next is null)
+            {
+                return;
+            }
 
-        if (isLast?.ValueKind == JsonValueKind.False)
-        {
-            throw new UserFacingException($"Jira's {what} has more than one page, and paging is not supported yet.");
-        }
+            // A site that keeps giving new tokens and nothing else would otherwise be asked forever.
+            if (entries == 0)
+            {
+                throw new UserFacingException($"Jira's {what} gave an empty page and says more follow, so entries could be missing. Nothing was stored.");
+            }
 
-        if (Optional(page, "total") is not { } total)
-        {
-            throw new UserFacingException($"Jira's {what} does not say whether it is complete, so sprints could be missing. Paging is not supported yet.");
-        }
+            // Jira would have to repeat itself for this, but then the run would never end.
+            if (!tokens.Add(next))
+            {
+                throw new UserFacingException($"Jira's {what} gave the same page token twice, so its pages would never end. Nothing was stored.");
+            }
 
-        var seen = (Optional(page, "startAt")?.GetInt64() ?? 0) + page.GetProperty("values").GetArrayLength();
-        if (seen < total.GetInt64())
-        {
-            throw new UserFacingException($"Jira's {what} has more than one page, and paging is not supported yet.");
+            body["nextPageToken"] = next;
         }
     }
 
-    /// <summary>For token paging. A last page has no <c>nextPageToken</c>, or a null one; both are documented.</summary>
-    private static void RequireLastPage(JsonElement page, string what)
+    /// <summary>
+    /// The token for the page after this one, or null on the last page. A last page has no
+    /// <c>nextPageToken</c>, or a null one; both are documented. The search also says <c>isLast</c>; when it
+    /// does, it must agree with the token, or nothing says for certain whether issues are still to come.
+    /// </summary>
+    private static string? NextPageToken(JsonElement page, string what)
     {
-        if (Optional(page, "nextPageToken") is not null)
+        var token = Optional(page, "nextPageToken")?.GetString();
+        var isLast = Optional(page, "isLast")?.GetBoolean();
+        if (isLast is { } last && last != (token is null))
         {
-            throw new UserFacingException($"Jira's {what} has more than one page, and paging is not supported yet.");
+            throw new UserFacingException(last
+                ? $"Jira's {what} says a page is the last one and also gives a token for a further page. Nothing was stored."
+                : $"Jira's {what} says a further page follows but gives no token for it. Nothing was stored.");
         }
+
+        return token;
     }
 }

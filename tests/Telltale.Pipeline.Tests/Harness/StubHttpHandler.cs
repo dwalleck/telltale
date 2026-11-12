@@ -63,6 +63,52 @@ public sealed class StubHttpHandler : HttpMessageHandler
     public static Func<StubRequest, HttpResponseMessage> Json(string json, HttpStatusCode status = HttpStatusCode.OK) =>
         _ => new HttpResponseMessage(status) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
 
+    /// <summary>
+    /// A rate-limited answer (429) as research note 05 describes it. <paramref name="retryAfterSeconds"/> is the
+    /// <c>Retry-After</c> header in its seconds form; null leaves the header out. The body is one a careless
+    /// tool might quote.
+    /// </summary>
+    public static Func<StubRequest, HttpResponseMessage> RateLimited(int? retryAfterSeconds) => _ =>
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+        {
+            Content = new StringContent("""{"errorMessages":["Synthetic rate limit message quoting Fake Person One"],"errors":{}}""", Encoding.UTF8, "application/json"),
+        };
+        if (retryAfterSeconds is { } seconds)
+        {
+            response.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(seconds));
+        }
+
+        return response;
+    };
+
+    /// <summary>A rate-limited answer (429) whose <c>Retry-After</c> header is exactly <paramref name="retryAfter"/>, readable or not.</summary>
+    public static Func<StubRequest, HttpResponseMessage> RateLimitedWithHeader(string retryAfter) => _ =>
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+        response.Headers.TryAddWithoutValidation("Retry-After", retryAfter);
+        return response;
+    };
+
+    /// <summary>A rate-limited answer (429) whose <c>Retry-After</c> header is in its other form, an HTTP date.</summary>
+    public static Func<StubRequest, HttpResponseMessage> RateLimitedUntil(DateTimeOffset retryAfter) => _ =>
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+        response.Headers.RetryAfter = new RetryConditionHeaderValue(retryAfter);
+        return response;
+    };
+
+    /// <summary>
+    /// Answers the next requests to <paramref name="path"/> with <paramref name="answers"/>, one each, ahead of
+    /// every existing route; requests after those go to the routes that were there before.
+    /// </summary>
+    public StubHttpHandler AnswerNext(HttpMethod method, string path, params Func<StubRequest, HttpResponseMessage>[] answers)
+    {
+        // The route is matched under the handler's lock, once per request, so the count needs no lock of its own.
+        var left = answers.Length;
+        return Override(method, path, _ => left-- > 0, answers);
+    }
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(cancellationToken);

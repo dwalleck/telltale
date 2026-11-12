@@ -6,6 +6,7 @@ using Telltale.Core;
 using Telltale.Core.Calendar;
 using Telltale.Core.Configuration;
 using Telltale.Core.Derive;
+using Telltale.Core.Identity;
 using Telltale.Core.Secrets;
 using Telltale.Core.Storage;
 using Telltale.Core.Workflow;
@@ -85,7 +86,7 @@ internal sealed class PipelineSteps : IDisposable
     public Task SyncAsync(CancellationToken cancellationToken) => CollectAsync(CollectionMode.Incremental, cancellationToken);
 
     private Task CollectAsync(CollectionMode mode, CancellationToken cancellationToken) =>
-        new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets).BringUpToDateAsync(_store, mode, cancellationToken);
+        new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets, _services.Clock, _services.Error).BringUpToDateAsync(_store, mode, cancellationToken);
 
     /// <summary>
     /// Rebuilds every derived table and metric view from the raw tables, and logs the changelog anomalies it
@@ -96,6 +97,7 @@ internal sealed class PipelineSteps : IDisposable
     /// </summary>
     public async Task DeriveAsync(CancellationToken cancellationToken)
     {
+        await RequireStoredSaltAsync(cancellationToken);
         var raw = await _store.ReadRawAsync(cancellationToken);
         var derived = Derivation.Derive(raw, _config.Jira.BoardId, _roles, _abandonedResolutionIds, new BusinessCalendar(_timeZone, _config.Holidays), AsOf(raw));
         var previous = await _store.ReadAnomaliesAsync(cancellationToken);
@@ -119,6 +121,19 @@ internal sealed class PipelineSteps : IDisposable
     /// <summary>What a rebuild from <paramref name="raw"/> under the current configuration is built from.</summary>
     private DerivedSource SourceOf(RawData raw) =>
         new(DigestOf(raw), _config.TimeZone, string.Join(",", _config.Holidays.Order().Select(day => day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))));
+
+    /// <summary>
+    /// Derive and report need no secret. But when the salt is at hand and is not the one the stored people
+    /// were hashed with, the store is about to be filled under two salts, and the figures' distinct-assignee
+    /// counts are not to be relied on until a backfill settles it: the command stops, as a sync would.
+    /// </summary>
+    private async Task RequireStoredSaltAsync(CancellationToken cancellationToken)
+    {
+        if (_services.Secrets.Get(SecretName.HashingSalt) is { } salt && !string.IsNullOrWhiteSpace(salt))
+        {
+            IdentityHash.RequireSaltOf(await _store.ReadSaltFingerprintAsync(cancellationToken), salt.Trim());
+        }
+    }
 
     /// <summary>
     /// Identifies the raw data's content: equal raw data gives an equal digest, whenever and however often it
@@ -155,6 +170,7 @@ internal sealed class PipelineSteps : IDisposable
     /// </summary>
     public async Task ReportAsync(long? sprintId, bool needsSprint, CancellationToken cancellationToken)
     {
+        await RequireStoredSaltAsync(cancellationToken);
         var derivedFrom = await _store.ReadDerivedSourceAsync(cancellationToken)
             ?? throw new UserFacingException("The store has no derived data yet. Run derive first.");
 
@@ -217,12 +233,23 @@ internal sealed class PipelineSteps : IDisposable
         }
     }
 
-    private static StatusRoles ReadStatusRoles(TelltaleConfig config, string path)
+    /// <summary>
+    /// The status roles of the configuration. Every status ID must be digits, as Jira's are: anything else
+    /// could match no issue. Without <paramref name="requireDone"/>, a map in which no status has the done role
+    /// is returned and not refused; only <c>discover</c> asks for that (owner decision D40).
+    /// </summary>
+    internal static StatusRoles ReadStatusRoles(TelltaleConfig config, string path, bool requireDone = true)
     {
         try
         {
+            // The message does not repeat the ID: what is not a status ID could be a secret pasted into the wrong place.
+            if (config.StatusRoles.Keys.Any(statusId => statusId.Length == 0 || !statusId.All(char.IsAsciiDigit)))
+            {
+                throw new FormatException("every status ID must be a Jira status ID (digits only), and one is not.");
+            }
+
             var roles = StatusRoles.Parse(config.StatusRoles);
-            if (!roles.HasDone)
+            if (requireDone && !roles.HasDone)
             {
                 throw new FormatException("no status has the role 'done', so nothing could ever be delivered.");
             }
@@ -240,7 +267,7 @@ internal sealed class PipelineSteps : IDisposable
     /// name, a stray character, an empty entry) is refused: it could match no issue, and the abandoned work it
     /// was meant to exclude would count as delivered.
     /// </summary>
-    private static HashSet<string> ReadAbandonedResolutionIds(TelltaleConfig config, string path)
+    internal static HashSet<string> ReadAbandonedResolutionIds(TelltaleConfig config, string path)
     {
         // The element type says "not null", but JSON can still carry a null entry.
         var ids = config.AbandonedResolutionIds.Select(id => id?.Trim() ?? "").ToHashSet(StringComparer.Ordinal);
@@ -253,7 +280,7 @@ internal sealed class PipelineSteps : IDisposable
         return ids;
     }
 
-    private static TimeZoneInfo ReadTimeZone(TelltaleConfig config, string path)
+    internal static TimeZoneInfo ReadTimeZone(TelltaleConfig config, string path)
     {
         try
         {

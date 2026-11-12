@@ -37,6 +37,9 @@ public static class People
     /// <summary>Makes every status move unless a test names someone else, so a changelog author is never just the assignee.</summary>
     public static readonly FakePerson BoardAdmin = new("fake-account-0099", "Fake Board Admin", "fake.admin@example.invalid");
 
+    /// <summary>Five people: the smallest team whose figures are shown (GLOSSARY: Minimum group size).</summary>
+    public static IReadOnlyList<FakePerson> Team { get; } = [One, Two, Three, Four, Five];
+
     public static IReadOnlyList<FakePerson> All { get; } = [One, Two, Three, Four, Five, Six, BoardAdmin];
 }
 

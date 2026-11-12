@@ -15,7 +15,7 @@ A continuous period an issue spent in one status, identified by status ID.
 _Avoid_: Stage, phase
 
 **Sprint window**:
-The period a sprint counts for: from its start date to its completion date, or to now if not yet completed.
+The period a sprint counts for: from its start date to its completion date, or to now if not yet completed. A closed sprint with no completion date ends at its planned end.
 _Avoid_: Sprint dates, iteration
 
 **Membership interval**:
@@ -37,7 +37,7 @@ A move of an issue out of a done status category back to any earlier status.
 _Avoid_: Lead time, turnaround
 
 **Delivered**:
-An issue that is in a done status category and was not abandoned (closed with a won't-do resolution). Delivery is reaching Done; shipping to customers is a later step outside the team's control.
+An issue that is in a done status category and was not abandoned (closed with a won't-do resolution). Delivery is reaching Done; shipping to customers is a later step outside the team's control. The delivery moment is the issue's last move into a done status. An issue in a done status whose history shows no such move, or whose history ends in another status, is not delivered; it is counted as a changelog anomaly.
 _Avoid_: Completed, closed, resolved
 
 **Point bucket**:
@@ -98,7 +98,7 @@ A metric that shows whether gains came at a cost: reopen rate, revert rate, rewo
 A person's or group's own measurements from before the pilot, used as their comparison point. It is drawn from a list of sprints fixed before the pilot starts.
 
 **Minimum group size**:
-The smallest number of people (five) a result grouped by people may cover. A result grouped by issue attributes (sprint, point bucket) instead needs a team of at least five and at least three distinct assignees behind it.
+The smallest number of people (five) a result grouped by people may cover. A result grouped by issue attributes (sprint, point bucket) instead needs a team of at least five and at least three distinct assignees behind it. The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in its window. A result that fails either check is suppressed: its figures are withheld. When the team check fails, its issue counts are withheld too, because they add up to the withheld delivered count, and the sprint's tables show no per-bucket or per-status rows at all; when only the three-assignee check fails, the issue count is still shown. An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. A baseline figure pools every issue of the baseline sprints; it is shown only when the pooled group passes both checks and no baseline sprint has that row suppressed on its own, so that a pooled figure cannot give back a withheld one.
 
 **Case study**:
 One of the two consented, named individual exceptions to the minimum group size: the project owner and one mid-level developer, each on a Pro seat.

@@ -13,6 +13,7 @@ public class IncrementalSyncTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development)
             .Moved(Local(2026, 1, 22, 9), Workflow.Done);
@@ -78,6 +79,7 @@ public class IncrementalSyncTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development)
             .Moved(Local(2026, 1, 29, 9), Workflow.Done);
@@ -126,6 +128,7 @@ public class IncrementalSyncTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41, 42);
         var first = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development);
         var second = pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 20, 9))
@@ -154,6 +157,7 @@ public class IncrementalSyncTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41, 42);
         var first = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development);
         var second = pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 20, 9))
@@ -215,6 +219,7 @@ public class IncrementalSyncTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41, 42);
         var issue = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development);
         await pipeline.RunAllAsync(["backfill"]);

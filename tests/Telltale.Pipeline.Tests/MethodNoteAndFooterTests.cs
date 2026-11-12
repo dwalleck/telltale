@@ -21,7 +21,8 @@ public class MethodNoteAndFooterTests
         - Cycle time runs from an issue's first entry into a work status to its last entry into a done status, for delivered issues only. It belongs to the sprint in which the issue was delivered.
         - Figures are medians and P85s. The median is the middle value, or the mean of the two middle values. The P85 is the smallest value with at least 85% of the values at or below it.
         - Time in status covers the statuses before done. An issue counts toward a status only if it spent more than zero business days there.
-        - A figure is suppressed when the issues in the sprint have fewer than five distinct assignees, or when the figure itself has fewer than three distinct assignees behind it, so that it cannot show one person's work. The delivered count is subject to the first check only. A suppressed row still shows its issue count.
+        - A figure is shown only where it cannot show one person's work. The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in it. When the team is smaller than five, the delivered count and both tables read "suppressed", with no rows. With a team of five or more, a row with fewer than three distinct assignees behind it keeps its issue count and reads "suppressed" for its figures. The footer's two counts read "suppressed" when the issues in the whole store have fewer than five distinct assignees.
+        - An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. An unassigned issue counts toward nobody.
         - An interval that is still open (an issue still in a status, a sprint not yet completed) ends at the as-of time below.
         - Work that has since been removed from Jira stays in the figures.
 
@@ -165,18 +166,18 @@ public class MethodNoteAndFooterTests
     }
 
     [Test]
-    public async Task A_report_from_derived_data_without_the_data_quality_view_says_to_derive_again()
+    public async Task A_report_from_a_store_without_the_data_quality_view_says_to_derive_again()
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
-        await pipeline.ExecuteAsync("DROP VIEW data_quality; DELETE FROM derived_object WHERE name = 'data_quality';");
+        await pipeline.ExecuteAsync("DROP VIEW data_quality;");
 
         var exit = await pipeline.RunAsync("report", "--sprint", "41");
 
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            "The store's derived data has no data-quality figures: it was built by an earlier version of this tool. Run derive first.\n");
+            "The metric view data_quality is not in the store. Run derive first.\n");
         await Assert.That(Directory.Exists(pipeline.ReportDirectory)).IsFalse();
     }
 
@@ -308,8 +309,8 @@ public class MethodNoteAndFooterTests
             await Assert.That(report).Contains("\n- Issues delivered between sprints, in the whole store: 1\n");
         }
 
-        var quality = await pipeline.QueryAsync<(long Anomalies, long BetweenSprints)>("SELECT anomaly_issue_count, delivered_between_sprints_count FROM data_quality;");
-        await Assert.That(quality).IsEquivalentTo(new[] { (0L, 1L) });
+        var quality = await pipeline.QueryAsync<(long? Anomalies, long? BetweenSprints, long Suppressed)>("SELECT anomaly_issue_count, delivered_between_sprints_count, suppressed FROM data_quality;");
+        await Assert.That(quality).IsEquivalentTo(new (long?, long?, long)[] { (0, 1, 0) });
     }
 
     [Test]
@@ -364,8 +365,50 @@ public class MethodNoteAndFooterTests
             CollectionOrdering.Matching);
     }
 
-    /// <summary>Sprint 41 (5 to 19 January 2026) and sprint 42 (19 January to 2 February), both completed, with a half-hour gap between them.</summary>
+    [Test]
+    public async Task The_footers_counts_read_suppressed_when_the_whole_store_has_fewer_than_five_assignees()
+    {
+        // Review finding 2: with four people in the store, "1 issue delivered between sprints" is close to naming one of them.
+        await using var pipeline = new PipelineHarness();
+        AddSprints(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 8, 9), createdIn: Workflow.Done).AssignedTo(People.One);
+        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 6, 9)).AssignedTo(People.Two)
+            .Moved(Local(2026, 1, 19, 10, 15), Workflow.Done);
+        pipeline.Jira.AddIssue("FAKE-3", Local(2026, 1, 6, 9)).AssignedTo(People.Three);
+        pipeline.Jira.AddIssue("FAKE-4", Local(2026, 1, 6, 9)).AssignedTo(People.Four);
+        pipeline.Jira.AddIssue("FAKE-5", Local(2026, 1, 6, 9));
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith(
+            """
+
+            ---
+
+            - As-of time: 2026-02-03 12:00 -06:00 (America/Chicago)
+            - Issues with changelog anomalies, in the whole store: suppressed
+            - Issues delivered between sprints, in the whole store: suppressed
+
+            """);
+
+        var quality = await pipeline.QueryAsync<(long? Anomalies, long? BetweenSprints, long Suppressed)>(
+            "SELECT anomaly_issue_count, delivered_between_sprints_count, suppressed FROM data_quality;");
+        await Assert.That(quality).IsEquivalentTo(new (long?, long?, long)[] { (null, null, 1) });
+    }
+
+    /// <summary>
+    /// Sprint 41 (5 to 19 January 2026) and sprint 42 (19 January to 2 February), both completed, with a half-hour
+    /// gap between them, and a team of five in both: figures are shown only for a team (ADR-0003). The team's
+    /// five issues sit in New and have no anomaly.
+    /// </summary>
     private static void AddTwoSprints(FakeJira jira)
+    {
+        AddSprints(jira);
+        jira.AddIdleTeam(41, 42);
+    }
+
+    private static void AddSprints(FakeJira jira)
     {
         jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
         jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9), completed: Local(2026, 2, 2, 9, 30));

@@ -7,7 +7,14 @@ namespace Telltale.Core.Workflow;
 /// A delivered issue's cycle time: it starts at the issue's first entry into a work-role status and ends at
 /// the delivery moment. Measured in calendar days (elapsed time divided by 24 hours) and in business days.
 /// </summary>
-public sealed record Cycle(DateTimeOffset Start, double CalendarDays, double BusinessDays);
+public sealed record Cycle(DateTimeOffset Start, double CalendarDays, double BusinessDays)
+{
+    /// <summary>
+    /// The changelog entry of the move that started the cycle; null when the issue was created in a work-role
+    /// status. It places the start among other changes made at the same instant.
+    /// </summary>
+    public string? StartHistoryId { get; init; }
+}
 
 public static class Cycles
 {
@@ -28,7 +35,7 @@ public static class Cycles
         }
 
         var span = new Interval(started.At, deliveredAt);
-        return new Cycle(span.Start, span.Duration / TimeSpan.FromDays(1), calendar.BusinessDays(span));
+        return new Cycle(span.Start, span.Duration / TimeSpan.FromDays(1), calendar.BusinessDays(span)) { StartHistoryId = started.HistoryId };
     }
 
     /// <summary>

@@ -3,10 +3,11 @@ using Telltale.Core.Calendar;
 namespace Telltale.Core.Intervals;
 
 /// <summary>
-/// A sprint's time window. A completed sprint ends at its completion date, which can be
-/// earlier or later than the planned end. A sprint not yet completed runs until asOf.
+/// A sprint's time window. A completed sprint ends at <paramref name="Completed"/>; a sprint not yet
+/// completed has none and runs until asOf. The planned end plays no part here: where it stands in for
+/// a missing completion time, the caller has already decided so.
 /// </summary>
-public sealed record SprintWindow(string SprintId, DateTimeOffset Start, DateTimeOffset? PlannedEnd, DateTimeOffset? Completed)
+public sealed record SprintWindow(string SprintId, DateTimeOffset Start, DateTimeOffset? Completed)
 {
     public Interval Resolve(DateTimeOffset asOf)
     {

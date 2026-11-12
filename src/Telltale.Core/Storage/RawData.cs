@@ -3,7 +3,7 @@ namespace Telltale.Core.Storage;
 /// <summary>
 /// The fields kept from a Jira issue (ADR-0002): no summary, description or comment, and the
 /// assignee only as a salted hash (ADR-0003). <see cref="SprintIds"/> is what the Sprint field lists now:
-/// comma-separated sprint IDs, the form a Sprint change has, and empty when the issue is in no sprint. It is
+/// sprint IDs with a comma between them (<c>41,42</c>), the form a Sprint change has, and empty when the issue is in no sprint. It is
 /// null only for an issue stored before the field was fetched, whose sprints are therefore unknown.
 /// </summary>
 public sealed record RawIssue(
@@ -20,7 +20,8 @@ public sealed record RawIssue(
 
 /// <summary>
 /// One field change from an issue's changelog. <see cref="Field"/> is one of <see cref="ChangeFields"/>.
-/// Status values are status IDs; sprint values are comma-separated sprint IDs.
+/// Status values are status IDs; sprint values are sprint IDs with a comma between them (<c>41,42</c>), as in
+/// <see cref="RawIssue.SprintIds"/>; point values are numbers in invariant round-trip form, and null for no estimate.
 /// </summary>
 public sealed record RawChange(string HistoryId, string IssueId, DateTimeOffset At, string Field, string? From, string? To);
 
@@ -29,6 +30,7 @@ public static class ChangeFields
 {
     public const string Status = "status";
     public const string Sprint = "sprint";
+    public const string Points = "points";
 }
 
 /// <summary>
@@ -55,6 +57,13 @@ public sealed record RawData(
     IReadOnlyList<RawSprint> Sprints,
     IReadOnlyList<RawStatus> Statuses)
 {
+    /// <summary>
+    /// In a batch: the fingerprint (<c>IdentityHash.SaltFingerprint</c>) of the salt the batch's person hashes
+    /// were made with. The store records it, and refuses a batch made with another salt than its other rows
+    /// unless the batch replaces every one of them. Null when read back from the store.
+    /// </summary>
+    public string? SaltFingerprint { get; init; }
+
     /// <summary>
     /// In a batch: the IDs of issues the collector saw and found out of scope (epics, sub-tasks, types above
     /// epic level). Writing the batch deletes whatever the store holds of them, since an issue stored while it

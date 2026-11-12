@@ -23,6 +23,7 @@ public static class CliApp
             DeriveCommand.Create(services),
             ReportCommand.Create(services),
             RunCommand.Create(services),
+            DiscoverCommand.Create(services),
             SecretsCommand.Create(services),
         };
 
