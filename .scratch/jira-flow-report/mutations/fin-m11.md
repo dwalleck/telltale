@@ -1,0 +1,15 @@
+---
+id: fin-m11
+status: active
+project: Pipeline
+filter: '/*/*/(BackfillRebuildTests|PrivacyTests)/*'
+file: src/Telltale.Storage.Sqlite/SqliteStore.cs
+expectedMatches: 1
+find: |-
+              await connection.ExecuteAsync(Command(cancellationToken, "PRAGMA secure_delete = ON;"));
+replace: |-
+              await connection.ExecuteAsync(Command(cancellationToken, "PRAGMA secure_delete = OFF;"));
+---
+# fin-m11: deleted rows stay readable in the file
+
+Claim (C6): a connection that writes overwrites what it deletes. One of the three byte-level tests ran red first; this shows which of them need the setting.
