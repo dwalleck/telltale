@@ -168,6 +168,23 @@ public class SeparateCommandsTests
     }
 
     [Test]
+    public async Task Report_after_a_sync_that_removed_an_issue_converted_out_of_scope_is_refused_until_derive_runs_again()
+    {
+        // Owner decision D13 deletes the issue's rows from the raw tables; that is a change to the raw data too.
+        await using var pipeline = new PipelineHarness();
+        AddBoard(pipeline.Jira);
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+
+        pipeline.Jira.Issues[2].OfType(FakeIssueType.Epic);
+        await pipeline.RunAllAsync(["sync"]);
+        var stale = await pipeline.RunAsync("report", "--sprint", "42");
+
+        await Assert.That(stale).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo("The raw data changed since the derived data was built. Run derive first.\n");
+        await Assert.That(await pipeline.ReadStoreContentAsync()).DoesNotContain("FAKE-3");
+    }
+
+    [Test]
     public async Task Report_after_a_sync_that_changed_nothing_needs_no_new_derive()
     {
         await using var pipeline = new PipelineHarness();

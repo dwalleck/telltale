@@ -19,6 +19,10 @@ public class DeliveryTests
         [Shipped] = "done",
     });
 
+    private const string WontDo = "32";
+
+    private static readonly HashSet<string> AbandonedResolutions = [WontDo];
+
     private static readonly DateTimeOffset Created = Local(2026, 11, 2, 9);
 
     [Test]
@@ -61,6 +65,29 @@ public class DeliveryTests
             new StatusChange("4", Local(2026, 11, 12, 9), Development, Done));
 
         await Assert.That(outcome.Value).IsEqualTo(new Delivered(Local(2026, 11, 12, 9)));
+    }
+
+    [Test]
+    public async Task A_reopen_closed_again_at_the_same_instant_moves_the_delivery_to_that_instant()
+    {
+        // The visit to Development took no time, so it has no status interval; it is still a move out of done
+        // and back in, and the delivery moment is the last move into done.
+        var outcome = Outcome(Done,
+            new StatusChange("1", Local(2026, 11, 3, 9), New, Development),
+            new StatusChange("2", Local(2026, 11, 5, 9), Development, Done),
+            new StatusChange("3", Local(2026, 11, 12, 9), Done, Development),
+            new StatusChange("4", Local(2026, 11, 12, 9), Development, Done));
+
+        await Assert.That(outcome.Value).IsEqualTo(new Delivered(Local(2026, 11, 12, 9)));
+    }
+
+    [Test]
+    public async Task An_issue_moved_into_done_at_the_instant_it_was_created_is_delivered_then()
+    {
+        var outcome = Outcome(Done,
+            new StatusChange("1", Created, New, Done));
+
+        await Assert.That(outcome.Value).IsEqualTo(new Delivered(Created));
     }
 
     [Test]
@@ -130,6 +157,40 @@ public class DeliveryTests
         await Assert.That(outcome.Value).IsEqualTo(new NotDelivered());
     }
 
+    [Test]
+    public async Task An_issue_in_done_with_an_abandoned_resolution_is_abandoned_at_its_move_into_done()
+    {
+        var outcome = Outcome(Done, WontDo,
+            new StatusChange("1", Local(2026, 11, 3, 9), New, Development),
+            new StatusChange("2", Local(2026, 11, 5, 9), Development, Done));
+
+        await Assert.That(outcome.Value).IsEqualTo(new Abandoned(Local(2026, 11, 5, 9)));
+    }
+
+    [Test]
+    public async Task An_issue_in_done_with_a_resolution_that_is_not_in_the_abandoned_list_is_delivered()
+    {
+        var outcome = Outcome(Done, "31",
+            new StatusChange("1", Local(2026, 11, 3, 9), New, Development),
+            new StatusChange("2", Local(2026, 11, 5, 9), Development, Done));
+
+        await Assert.That(outcome.Value).IsEqualTo(new Delivered(Local(2026, 11, 5, 9)));
+    }
+
+    [Test]
+    public async Task An_abandoned_resolution_on_an_issue_that_is_not_done_changes_nothing()
+    {
+        // Reopened after being closed as won't-do, with the resolution left behind.
+        var outcome = Outcome(Development, WontDo,
+            new StatusChange("1", Local(2026, 11, 3, 9), New, Done),
+            new StatusChange("2", Local(2026, 11, 5, 9), Done, Development));
+
+        await Assert.That(outcome.Value).IsEqualTo(new NotDelivered());
+    }
+
     private static IssueOutcome Outcome(string currentStatusId, params StatusChange[] changes) =>
-        Delivery.Of(currentStatusId, StatusTimeline.Build(Created, currentStatusId, changes).Intervals, Roles);
+        Outcome(currentStatusId, resolutionId: null, changes);
+
+    private static IssueOutcome Outcome(string currentStatusId, string? resolutionId, params StatusChange[] changes) =>
+        Delivery.Of(currentStatusId, resolutionId, StatusTimeline.Build(Created, currentStatusId, changes).Entries, Roles, AbandonedResolutions);
 }

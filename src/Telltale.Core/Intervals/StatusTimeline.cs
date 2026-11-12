@@ -10,12 +10,20 @@ public sealed record StatusInterval(string StatusId, DateTimeOffset Start, DateT
     public Interval Resolve(DateTimeOffset asOf) => new(Start, End ?? (asOf > Start ? asOf : Start));
 }
 
+/// <summary>The moment an issue entered a status: at its creation, or by a transition.</summary>
+public sealed record StatusEntry(string StatusId, DateTimeOffset At);
+
 /// <summary>
 /// An issue's full status history as back-to-back intervals, from creation to now.
 /// Anomalies record places where the changelog doesn't line up; the timeline is still
 /// built, following each change's target status.
 /// </summary>
-public sealed record StatusTimeline(IReadOnlyList<StatusInterval> Intervals, IReadOnlyList<string> Anomalies)
+/// <remarks>
+/// <see cref="Intervals"/> answers "how long": a status entered and left at the same instant took no time and has
+/// no interval. <see cref="Entries"/> answers "what happened": it holds every status the issue entered, in order,
+/// starting with the one it was created in, so such a visit is still there. Rules about transitions read the entries.
+/// </remarks>
+public sealed record StatusTimeline(IReadOnlyList<StatusInterval> Intervals, IReadOnlyList<StatusEntry> Entries, IReadOnlyList<string> Anomalies)
 {
     public static StatusTimeline Build(DateTimeOffset created, string currentStatusId, IEnumerable<StatusChange> changes)
     {
@@ -29,6 +37,7 @@ public sealed record StatusTimeline(IReadOnlyList<StatusInterval> Intervals, IRe
             ? currentStatusId
             : ordered[0].FromStatusId ?? ordered[0].ToStatusId;
         var start = created;
+        var entries = new List<StatusEntry> { new(current, created) };
 
         foreach (var change in ordered)
         {
@@ -49,6 +58,7 @@ public sealed record StatusTimeline(IReadOnlyList<StatusInterval> Intervals, IRe
                 intervals.Add(new StatusInterval(current, start, at));
             }
 
+            entries.Add(new StatusEntry(change.ToStatusId, at));
             current = change.ToStatusId;
             start = at;
         }
@@ -60,6 +70,6 @@ public sealed record StatusTimeline(IReadOnlyList<StatusInterval> Intervals, IRe
             anomalies.Add($"Timeline ends in '{current}' but the issue's current status is '{currentStatusId}'.");
         }
 
-        return new StatusTimeline(intervals, anomalies);
+        return new StatusTimeline(intervals, entries, anomalies);
     }
 }

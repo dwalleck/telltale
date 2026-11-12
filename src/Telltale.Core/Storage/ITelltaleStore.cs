@@ -10,9 +10,10 @@ public interface ITelltaleStore
     Task InitializeAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Writes a batch of raw rows in one transaction, replacing rows with the same Jira IDs, and sets the
-    /// collector's watermark to <paramref name="reached"/> in that transaction: the watermark advances only
-    /// when the whole batch is written, and no batch is written without saying how far it reaches.
+    /// Writes a batch of raw rows in one transaction, replacing rows with the same Jira IDs, deleting the
+    /// issue row and the change rows of every issue in <see cref="RawData.OutOfScopeIssueIds"/>, and setting the
+    /// collector's watermark to <paramref name="reached"/>: the watermark advances only when the whole batch
+    /// is written, and no batch is written without saying how far it reaches.
     /// </summary>
     Task WriteRawAsync(RawData batch, Watermark reached, CancellationToken cancellationToken = default);
 

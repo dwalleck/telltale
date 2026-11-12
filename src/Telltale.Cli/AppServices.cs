@@ -25,6 +25,9 @@ public sealed record AppServices(
     string DatabasePath,
     string ReportDirectory)
 {
+    /// <summary>The keyboard and standard input, where <c>secrets set</c> reads a secret's value from.</summary>
+    public IConsoleInput ConsoleInput { get; init; } = new SystemConsoleInput();
+
     /// <summary>The real thing, with files under the current directory.</summary>
     public static AppServices ForProduction() => new(
         // SocketsHttpHandler uses the system proxy and the operating system's certificate store by default,
@@ -32,7 +35,7 @@ public sealed record AppServices(
         // is offered the signed-in user's credentials; without them it answers 407 to every request.
         new SocketsHttpHandler { DefaultProxyCredentials = CredentialCache.DefaultCredentials },
         TimeProvider.System,
-        new EnvironmentSecretStore(),
+        SecretStores.ForPlatform(OperatingSystem.IsWindows()),
         Console.Out,
         Console.Error,
         ConfigPath: Path.Combine("config", "telltale.json"),

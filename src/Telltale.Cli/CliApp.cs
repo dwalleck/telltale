@@ -23,6 +23,7 @@ public static class CliApp
             DeriveCommand.Create(services),
             ReportCommand.Create(services),
             RunCommand.Create(services),
+            SecretsCommand.Create(services),
         };
 
     /// <summary>The conventional exit code of a run ended by Ctrl+C (128 + SIGINT).</summary>

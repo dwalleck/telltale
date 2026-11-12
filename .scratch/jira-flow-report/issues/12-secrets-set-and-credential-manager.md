@@ -6,10 +6,23 @@ Owner decisions (2026-11-12): replacing a stored hashing salt needs `--replace` 
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `secrets set` prompts for or accepts each secret without echoing it, and can generate a random salt
-- [ ] On Windows the Credential Manager store is selected and environment variables are never read for secrets; on other systems the environment-variable store is
-- [ ] A missing secret produces a message naming which one and how to set it
-- [ ] No secret value appears in logs, the configuration file or the database
-- [ ] The solution still builds and all tests pass on a non-Windows machine
+- [x] `secrets set` prompts for or accepts each secret without echoing it, and can generate a random salt
+- [x] On Windows the Credential Manager store is selected and environment variables are never read for secrets; on other systems the environment-variable store is
+- [x] A missing secret produces a message naming which one and how to set it
+- [x] No secret value appears in logs, the configuration file or the database
+- [x] The solution still builds and all tests pass on a non-Windows machine
+
+## Comments
+
+Resolved 2026-11-12. Merged into `spec/jira-flow-report` as bcfe787 (source `ticket/12-secrets-set` at 97c8af6).
+
+- Checks: the merged tree differs from the source tree (the integration tip had three docs-only commits the branch lacked), so the full check ran on the merge (tag `merge-12`): Core 47 and Pipeline 173 passed, 0 failed, 0 skipped, 0 warnings, format and line endings pass.
+- Mutations: 30 records (12-m1 to 12-m30), all red in the ticket branch at e4d1358. None rerun at merge, because the merge changed no file a record edits.
+- Review: findings 1-13, all fixed here. This also closes findings 22 and 35 of the ticket 01 review (the store is chosen by platform; on Windows no environment variable is read for a secret).
+- D24: replacing a stored hashing salt needs `--replace`. Generating a salt while the database holds hashed people and the salt is missing also needs `--replace`; typing the original salt back does not.
+- D25: a value is typed without echo or piped with `--stdin`, never a command-line argument. Input that is not a console is refused without `--stdin`.
+- D32: a control character refuses the value, typed or piped.
+- Waits for the hand check in ticket 13 (Windows only, not run here): `WindowsCredentialVault` against the real `advapi32` (read, write, a missing entry as error 1168, zeroing and freeing); `SystemConsoleInput` (that keys waiting after Enter show the rest of a multi-line paste, and whether a paste ending in CRLF gives one Enter or two); whether corporate policy answers error 1312, and so whether a DPAPI store is needed.
+- For later tickets: a new `ISecretStore` must implement `HowToSet`; use `SecretInfo.Of(name)` in place of `EnvironmentSecretStore.VariableName`; the harness has `pipeline.Console` and `pipeline.SecretStore`.

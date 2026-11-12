@@ -240,8 +240,8 @@ public class JiraFailureTests
     }
 
     [Test]
-    [Arguments("""{"issues":[{"id":"900001","key":null,"fields":{}}]}""")]
-    [Arguments("""{"issues":[{"id":"900001","key":"FAKE-1","fields":{"issuetype":{"id":"800001"},"created":"2026-01-06T15:00:00.000+0000","status":{"id":null}}}]}""")]
+    [Arguments("""{"issues":[{"id":"900001","key":null,"fields":{"issuetype":{"id":"800001","hierarchyLevel":0}}}]}""")]
+    [Arguments("""{"issues":[{"id":"900001","key":"FAKE-1","fields":{"issuetype":{"id":"800001","hierarchyLevel":0},"created":"2026-01-06T15:00:00.000+0000","status":{"id":null}}}]}""")]
     public async Task A_null_where_jira_must_give_a_value_is_reported_plainly_and_nothing_is_stored(string searchAnswer)
     {
         await using var pipeline = new PipelineHarness();
@@ -278,7 +278,7 @@ public class JiraFailureTests
         await Assert.That(pipeline.Jira.Handler.Requests.Select(request => request.Path)).DoesNotContain($"/rest/agile/1.0/board/{FakeJira.BoardId}/project");
         var fields = body.RootElement.GetProperty("fields").EnumerateArray().Select(field => field.GetString()!).ToList();
         await Assert.That(body.RootElement.GetProperty("maxResults").GetInt32()).IsEqualTo(5000);
-        await Assert.That(fields).IsEquivalentTo(new[] { "issuetype", "status", "resolution", "assignee", "created", "updated", FakeJira.StoryPointFieldId });
+        await Assert.That(fields).IsEquivalentTo(new[] { "issuetype", "status", "resolution", "assignee", "created", "updated", FakeJira.SprintFieldId, FakeJira.StoryPointFieldId });
         await Assert.That(pipeline.Jira.Handler.Requests.Where(request => request.Query.ContainsKey("expand") || request.Body.Contains("\"expand\"", StringComparison.Ordinal))).IsEmpty();
     }
 
