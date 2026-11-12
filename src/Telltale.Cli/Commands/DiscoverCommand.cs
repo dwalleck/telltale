@@ -126,7 +126,7 @@ internal static class DiscoverCommand
         }
 
         var text = root.ToJsonString(Indented) + Environment.NewLine;
-        await RequireRunWouldAcceptAsync(text, path, cancellationToken);
+        var hasDoneRole = await RequireRunWouldAcceptAsync(text, path, firstDiscover: previous is null, cancellationToken);
 
         if (JsonNode.DeepEquals(root, before))
         {
@@ -139,6 +139,11 @@ internal static class DiscoverCommand
         if (backup is null)
         {
             await output.WriteLineAsync($"Wrote {path}. Before the first run, review the status roles and fill in abandonedResolutionIds and holidays.");
+            if (!hasDoneRole)
+            {
+                await output.WriteLineAsync("No status has the role 'done' yet, so run will refuse this file: nothing could ever be delivered. Give the role done to at least one status in statusRoles.");
+            }
+
             return;
         }
 
@@ -304,16 +309,25 @@ internal static class DiscoverCommand
     /// Puts the text about to be written through the checks the run makes when it loads the file, so discover
     /// never leaves a file the run refuses: a setting the tool does not know (a pasted secret, for one), a
     /// role outside the four, no done role. The run's message names the setting and never its value.
+    /// One file the run refuses is written all the same (owner decision D40): the first discover's, when the
+    /// board has no status discover can propose as done. The owner has to choose one, and needs the file to
+    /// do it in. Returns false in that case alone, so the caller can say so.
     /// </summary>
-    private static async Task RequireRunWouldAcceptAsync(string text, string path, CancellationToken cancellationToken)
+    private static async Task<bool> RequireRunWouldAcceptAsync(string text, string path, bool firstDiscover, CancellationToken cancellationToken)
     {
         try
         {
             using var stream = new MemoryStream(Encoding.UTF8.GetBytes(text));
             var config = await ConfigFile.ReadAsync(stream, path, cancellationToken);
-            PipelineSteps.ReadStatusRoles(config, path);
+            var onlyTheDoneRoleIsMissing = firstDiscover && config.StatusRoles.Values.All(IsRole) && !config.StatusRoles.Values.Contains("done");
+            if (!onlyTheDoneRoleIsMissing)
+            {
+                PipelineSteps.ReadStatusRoles(config, path);
+            }
+
             PipelineSteps.ReadAbandonedResolutionIds(config, path);
             PipelineSteps.ReadTimeZone(config, path);
+            return !onlyTheDoneRoleIsMissing;
         }
         catch (UserFacingException exception)
         {

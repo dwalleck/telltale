@@ -893,20 +893,50 @@ public class DiscoverTests
     }
 
     [Test]
-    public async Task A_first_discover_whose_file_run_would_refuse_writes_nothing_and_says_why()
+    public async Task A_first_discover_on_a_board_with_no_done_status_writes_the_file_and_says_no_status_has_the_done_role()
     {
-        // No status is in Jira's done category, so no role "done" is proposed, and run refuses a file without one.
+        // No status is in Jira's done category, so no role "done" is proposed. The file is still written,
+        // for the owner to give a status that role (owner decision D40); run refuses it until then.
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/status", _ => true, StubHttpHandler.Json(
             """[ { "id": "600004", "name": "Fake Development", "statusCategory": { "id": 4, "key": "indeterminate", "name": "In Progress" } } ]"""));
 
-        var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        var discover = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        var errorOfDiscover = pipeline.Error.ToString();
+        var run = await pipeline.RunWithFilesAsTheyAreAsync("run");
+
+        await Assert.That(discover).IsEqualTo(0);
+        await Assert.That(errorOfDiscover).IsEmpty();
+        await Assert.That(Output(pipeline)).EndsWith(
+            $"Wrote {pipeline.ConfigPath}. Before the first run, review the status roles and fill in abandonedResolutionIds and holidays.\n"
+            + "No status has the role 'done' yet, so run will refuse this file: nothing could ever be delivered. Give the role done to at least one status in statusRoles.\n");
+        var written = await ReadWrittenConfigAsync(pipeline);
+        await Assert.That(written["statusRoles"]!.ToJsonString()).IsEqualTo("""{"600004":"work"}""");
+        await Assert.That(run).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("statusRoles: no status has the role 'done', so nothing could ever be delivered.");
+    }
+
+    [Test]
+    public async Task A_rerun_over_a_file_with_no_done_status_is_still_refused_and_the_file_is_neither_rewritten_nor_copied()
+    {
+        // Only the first discover may write such a file. Once the file exists its roles are the owner's.
+        await using var pipeline = new PipelineHarness();
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        await EditWrittenConfigAsync(pipeline, config =>
+        {
+            config["statusRoles"]![Workflow.Done.Id] = "work";
+            config["statusRoles"]![Workflow.Shipped.Id] = "work";
+        });
+        var edited = await File.ReadAllTextAsync(pipeline.ConfigPath);
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover", "--time-zone", "Europe/London");
 
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
             $"discover did not write {pipeline.ConfigPath}, because run would refuse it: "
             + $"The configuration file {pipeline.ConfigPath} is not valid: statusRoles: no status has the role 'done', so nothing could ever be delivered.\n");
-        await Assert.That(File.Exists(pipeline.ConfigPath)).IsFalse();
+        await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(edited);
+        await Assert.That((await pipeline.ReadAllFilesAsync()).Keys).IsEquivalentTo(["telltale.json"]);
     }
 
     [Test]
