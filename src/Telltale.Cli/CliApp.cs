@@ -19,6 +19,7 @@ public static class CliApp
         new("Telltale: delivery metrics for the team's work, never for individuals.")
         {
             RunCommand.Create(services),
+            SecretsCommand.Create(services),
         };
 
     /// <summary>The conventional exit code of a run ended by Ctrl+C (128 + SIGINT).</summary>
