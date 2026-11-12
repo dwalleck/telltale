@@ -15,6 +15,20 @@ public static class SprintReport
     /// <summary>The report's file name for a sprint: reports are named by sprint ID.</summary>
     public static string FileName(string sprintId) => $"sprint-{sprintId}.md";
 
+    /// <summary>
+    /// The ID of the sprint that completed last, or null when none has. A closed sprint Jira gives no
+    /// completion time ended at its planned end (owner decision D7).
+    /// </summary>
+    public static async Task<string?> MostRecentlyCompletedSprintAsync(ITelltaleStore store, CancellationToken cancellationToken = default)
+    {
+        var sprints = await store.QueryViewsAsync<string>(
+            "SELECT sprint_id FROM delivered_per_sprint WHERE state = @closed ORDER BY COALESCE(completed, planned_end) DESC, started DESC, sprint_id DESC LIMIT 1;",
+            new { closed = SprintStates.Closed },
+            cancellationToken);
+
+        return sprints is [var sprintId] ? sprintId : null;
+    }
+
     /// <summary>Renders the report. Dates are shown in <paramref name="teamTimeZone"/>.</summary>
     public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, CancellationToken cancellationToken = default)
     {
@@ -45,23 +59,13 @@ public static class SprintReport
         return report.ToString();
     }
 
-    private static async Task<IReadOnlyList<TimeInStatusRow>> ReadTimeInStatusAsync(ITelltaleStore store, string sprintId, CancellationToken cancellationToken)
-    {
-        try
-        {
-            return await store.QueryViewsAsync<TimeInStatusRow>(
-                "SELECT status_name, issue_count, median_business_days FROM time_in_status_per_sprint WHERE sprint_id = @sprintId ORDER BY board_position;",
-                new { sprintId },
-                cancellationToken);
-        }
-        catch (DbException exception)
-        {
-            // The sprint was found a moment ago, so the store is readable: what is missing is this view.
-            throw new UserFacingException(
-                "The store's derived data has no time in status figures: it was built by an earlier version of this tool. Rebuild the derived data, then report again.",
-                exception);
-        }
-    }
+    // Derived data an earlier version of the tool built, without this view, never gets here: the report
+    // command refuses derived data that does not say which raw data it was built from (PipelineSteps.ReportAsync).
+    private static Task<IReadOnlyList<TimeInStatusRow>> ReadTimeInStatusAsync(ITelltaleStore store, string sprintId, CancellationToken cancellationToken) =>
+        store.QueryViewsAsync<TimeInStatusRow>(
+            "SELECT status_name, issue_count, median_business_days FROM time_in_status_per_sprint WHERE sprint_id = @sprintId ORDER BY board_position;",
+            new { sprintId },
+            cancellationToken);
 
     /// <summary>Renders the report and writes it into <paramref name="directory"/>. Returns the file's path.</summary>
     public static async Task<string> WriteAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, string directory, CancellationToken cancellationToken = default)
