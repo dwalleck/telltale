@@ -1,0 +1,2 @@
+# The embedded SQL scripts are the same bytes on every machine: their text identifies the derived objects.
+*.sql text eol=lf
