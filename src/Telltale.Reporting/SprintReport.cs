@@ -70,10 +70,11 @@ public static class SprintReport
             cancellationToken);
 
     /// <summary>
-    /// Every query of the report goes through here. The report reads metric views only, so a query the
-    /// database refuses means the views are not what this version expects: derive has not run on the store,
-    /// or a version without the view built them. The report command checks the store before it gets here;
-    /// another caller gets the same plain message, not the database's.
+    /// Every query of the report goes through here. The report reads metric views only. When the store says
+    /// a view or column is not there, derive has not run on it, or a version without that view built the
+    /// derived data. The report command checks the store before it gets here; another caller gets the same
+    /// plain message. Any other failure of the database (locked, damaged, unopenable) is not cured by derive
+    /// and is left as the database reports it.
     /// </summary>
     private static async Task<IReadOnlyList<T>> QueryAsync<T>(ITelltaleStore store, string sql, object parameters, CancellationToken cancellationToken)
     {
@@ -81,7 +82,7 @@ public static class SprintReport
         {
             return await store.QueryViewsAsync<T>(sql, parameters, cancellationToken);
         }
-        catch (DbException exception)
+        catch (ViewsNotBuiltException exception)
         {
             throw new UserFacingException(
                 "The store's derived data cannot be read: it has not been built yet, or another version of this tool built it. Run derive, then report again.",

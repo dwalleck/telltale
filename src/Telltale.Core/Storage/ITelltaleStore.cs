@@ -4,6 +4,13 @@ namespace Telltale.Core.Storage;
 /// The store's three layers (ADR-0002): raw rows written by collectors, derived rows rebuilt from
 /// them, and metric views, the only thing reports and ad hoc SQL read.
 /// </summary>
+/// <summary>
+/// A query over the metric views named a view or a column the store does not have: derive has not run on it,
+/// or a version of the tool without that view or column built the derived data. Running derive cures it.
+/// </summary>
+public sealed class ViewsNotBuiltException(Exception innerException)
+    : Exception("The query names a metric view or column the store does not have.", innerException);
+
 public interface ITelltaleStore
 {
     /// <summary>Creates or upgrades the raw tables. Safe to call on every start.</summary>
@@ -38,6 +45,8 @@ public interface ITelltaleStore
     /// <summary>
     /// Runs a query over metric views. <typeparamref name="T"/> is a class with <c>init</c> properties
     /// named like the columns (<c>delivered_count</c> maps to <c>DeliveredCount</c>); counts are <c>long</c>.
+    /// Throws <see cref="ViewsNotBuiltException"/> when the query names a view or column the store does not have.
+    /// Any other failure of the database is thrown as the database reports it.
     /// </summary>
     Task<IReadOnlyList<T>> QueryViewsAsync<T>(string sql, object? parameters = null, CancellationToken cancellationToken = default);
 }

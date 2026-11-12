@@ -304,7 +304,14 @@ public sealed class SqliteStore : ITelltaleStore
     public async Task<IReadOnlyList<T>> QueryViewsAsync<T>(string sql, object? parameters = null, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_readOnlyConnectionString, cancellationToken);
-        return (await connection.QueryAsync<T>(new CommandDefinition(sql, parameters, cancellationToken: cancellationToken))).AsList();
+        try
+        {
+            return (await connection.QueryAsync<T>(new CommandDefinition(sql, parameters, cancellationToken: cancellationToken))).AsList();
+        }
+        catch (SqliteException exception) when (NamesSomethingMissing(exception))
+        {
+            throw new ViewsNotBuiltException(exception);
+        }
     }
 
     /// <summary>
@@ -328,6 +335,18 @@ public sealed class SqliteStore : ITelltaleStore
     /// <summary>A connection that cannot write, whatever SQL it is given, and never creates the file.</summary>
     private static string ReadOnlyConnectionString(string databasePath) =>
         new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false, ForeignKeys = true, Mode = SqliteOpenMode.ReadOnly }.ToString();
+
+    /// <summary>
+    /// True when SQLite refused a statement because it names a table, view or column that does not exist.
+    /// SQLite has no code of its own for that: it is the generic error (1) with one of these two messages.
+    /// A locked, damaged or unopenable database has another code.
+    /// </summary>
+    private static bool NamesSomethingMissing(SqliteException exception) =>
+        exception.SqliteErrorCode == SqliteGenericError
+        && (exception.Message.Contains("no such table", StringComparison.Ordinal) || exception.Message.Contains("no such column", StringComparison.Ordinal));
+
+    /// <summary>SQLITE_ERROR.</summary>
+    private const int SqliteGenericError = 1;
 
     private static CommandDefinition Command(CancellationToken cancellationToken, string sql, object? parameters = null, DbTransaction? transaction = null) =>
         new(sql, parameters, transaction, cancellationToken: cancellationToken);

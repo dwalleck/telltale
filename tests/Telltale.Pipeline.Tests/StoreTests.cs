@@ -71,6 +71,20 @@ public class StoreTests
         await Assert.That(async () => await SprintReport.RenderAsync(store, "41", TimeZoneInfo.Utc)).Throws<UserFacingException>().WithMessage(DerivedDataUnreadable);
     }
 
+    [Test]
+    public async Task A_report_rendered_from_a_file_that_is_not_a_database_gets_the_databases_error_and_not_a_message_to_run_derive()
+    {
+        // Only missing derived data is cured by derive. A damaged, locked or unopenable store is another failure,
+        // and the commands already have plain messages for the database's own errors.
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        await pipeline.RunAllAsync(["run", "--sprint", "41"]);
+        await File.WriteAllTextAsync(pipeline.DatabasePath, new string('x', 4096));
+        var store = new SqliteStore(pipeline.DatabasePath);
+
+        await Assert.That(async () => await SprintReport.RenderAsync(store, "41", TimeZoneInfo.Utc)).Throws<SqliteException>().WithMessageContaining("not a database");
+    }
+
     private static void AddSprintAndIssue(FakeJira jira)
     {
         jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
