@@ -258,16 +258,9 @@ public static class SprintReport
         report.Append(" |\n");
     }
 
-    private static void AppendTableRow(StringBuilder report, params ReadOnlySpan<string> cells)
-    {
-        foreach (var cell in cells)
-        {
-            // A cell can hold Jira's text (a status name): a "|" in it would otherwise end the cell.
-            report.Append("| ").Append(Markdown.Text(cell)).Append(' ');
-        }
-
-        report.Append("|\n");
-    }
+    /// <summary>One row of a table. A cell can hold Jira's text (a status name), so every cell is written as text (<see cref="Markdown.Text"/>).</summary>
+    private static void AppendTableRow(StringBuilder report, params ReadOnlySpan<string> cells) =>
+        Markdown.AppendRow(report, cells.ToArray().Select(Markdown.Text));
 
     /// <summary>A number of issues, or <see cref="Suppressed"/> when the view withholds it.</summary>
     private static string Count(long? issues) => issues?.ToString(CultureInfo.InvariantCulture) ?? Suppressed;

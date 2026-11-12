@@ -560,9 +560,32 @@ public class TimeInStatusTableTests
 
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).StartsWith(
-            @"# Fake \*Sprint\* \[41\](https://example.invalid/x) \<b\>\_y\_\</b\> \`z\` \# \~q\~ \!\\ \&amp; (2026-01-05 to 2026-01-19)" + "\n\n");
+            @"# Fake \*Sprint\* \[41\](https\://example.invalid/x) \<b\>\_y\_\</b\> \`z\` \# \~q\~ \!\\ \&amp; (2026-01-05 to 2026-01-19)" + "\n\n");
         await Assert.That(TimeInStatusRows(report)).IsEquivalentTo(
-            new[] { @"| Fake \<i\>Dev\</i\> \!\[x\](https://example.invalid/y) \| \*Build\* | 5 | 2.0 |" }, CollectionOrdering.Matching);
+            new[] { @"| Fake \<i\>Dev\</i\> \!\[x\](https\://example.invalid/y) \| \*Build\* | 5 | 2.0 |" }, CollectionOrdering.Matching);
+    }
+
+    [Test]
+    [Arguments("www.example.invalid/x", @"www\.example.invalid/x")]
+    [Arguments("Fake WWW.Example.invalid", @"Fake WWW\.Example.invalid")]
+    [Arguments("see https://example.invalid/y", @"see https\://example.invalid/y")]
+    [Arguments("http://example.invalid", @"http\://example.invalid")]
+    [Arguments("mailto:fake.person@example.invalid", @"mailto:fake.person\@example.invalid")]
+    [Arguments("fake.person@example.invalid", @"fake.person\@example.invalid")]
+    public async Task A_web_or_mail_address_typed_as_a_status_name_is_shown_as_text_not_made_a_link(string name, string shown)
+    {
+        // Review of the final fix pass, finding 7: GitHub-flavoured markdown links a bare www., http://,
+        // https:// or mail address without any markup. The name still reads as it was typed.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
+        pipeline.Jira.RenameStatus(Workflow.Development, name);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41)
+            .Moved(Local(2026, 1, 7, 9), Workflow.Done);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(new[] { $"| {shown} | 5 | 2.0 |" }, CollectionOrdering.Matching);
     }
 
     [Test]

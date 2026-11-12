@@ -8,12 +8,14 @@ namespace Telltale.Reporting;
 /// <summary>How text and rows from the store are written as markdown.</summary>
 public static class Markdown
 {
-    private static readonly SearchValues<char> MeaningfulCharacters = SearchValues.Create("\\`*_[]<>|#~!&");
+    // The "@" is here for the mail addresses GitHub-flavoured markdown links without any markup.
+    private static readonly SearchValues<char> MeaningfulCharacters = SearchValues.Create("\\`*_[]<>|#~!&@");
 
     /// <summary>
     /// Text from Jira (a sprint name, a status name) as markdown that shows it as it was typed: every
     /// character markdown or HTML gives a meaning is escaped, and a line break or other control character
     /// becomes one space, so the text can add no heading, link, image, tag or table cell and stays on its line.
+    /// That includes the links markdown makes of a bare web or mail address.
     /// A report's own cells (figures, "suppressed") hold none of these characters and pass through unchanged.
     /// </summary>
     public static string Text(string text)
@@ -35,7 +37,7 @@ public static class Markdown
 
             // An underscore inside a word (a column name such as sprint_id) means nothing to markdown.
             var insideAWord = character == '_' && index > 0 && index < text.Length - 1 && char.IsLetterOrDigit(text[index - 1]) && char.IsLetterOrDigit(text[index + 1]);
-            if (MeaningfulCharacters.Contains(character) && !insideAWord)
+            if ((MeaningfulCharacters.Contains(character) && !insideAWord) || StartsAnAutolink(text, index))
             {
                 escaped.Append('\\');
             }
@@ -44,6 +46,31 @@ public static class Markdown
         }
 
         return escaped.ToString();
+    }
+
+    /// <summary>
+    /// True for the character whose escaping keeps GitHub-flavoured markdown from linking a bare address: the
+    /// colon of a scheme (<c>https://</c>) and the dot after <c>www</c> at the start of a word. Escaped, the
+    /// address still reads as it was typed.
+    /// </summary>
+    private static bool StartsAnAutolink(string text, int index) => text[index] switch
+    {
+        ':' => index + 1 < text.Length && text[index + 1] == '/',
+        '.' => index >= 3
+            && text.AsSpan(index - 3, 3).Equals("www", StringComparison.OrdinalIgnoreCase)
+            && (index == 3 || !char.IsLetterOrDigit(text[index - 4])),
+        _ => false,
+    };
+
+    /// <summary>Writes one table row: each cell as it is given, so a caller passes text through <see cref="Text"/> first.</summary>
+    public static void AppendRow(StringBuilder table, IEnumerable<string> cells)
+    {
+        foreach (var cell in cells)
+        {
+            table.Append("| ").Append(cell).Append(' ');
+        }
+
+        table.Append("|\n");
     }
 
     /// <summary>
@@ -62,16 +89,6 @@ public static class Markdown
         }
 
         return table.ToString();
-    }
-
-    private static void AppendRow(StringBuilder table, IEnumerable<string> cells)
-    {
-        foreach (var cell in cells)
-        {
-            table.Append("| ").Append(cell).Append(' ');
-        }
-
-        table.Append("|\n");
     }
 
     private static string Cell(object? value) => value switch
