@@ -79,4 +79,19 @@ public interface ITelltaleStore
     /// A figure a view withholds (ADR-0003) is null, so map figures to nullable properties.
     /// </summary>
     Task<IReadOnlyList<T>> QueryViewsAsync<T>(string sql, object? parameters = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Runs one query of any shape over metric views, under the same guard as
+    /// <see cref="QueryViewsAsync{T}"/>, and returns its column names and rows as they are. For SQL the owner
+    /// wrote (owner decision D48). A query that reads anything else throws <see cref="InvalidOperationException"/>;
+    /// SQL that cannot be run, or more than one statement, throws <see cref="UserFacingException"/>.
+    /// </summary>
+    Task<ViewRows> QueryViewRowsAsync(string sql, CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// The answer to a query over the metric views: the column names, and each row's values in column order. A
+/// value is a <c>long</c>, a <c>double</c>, a <c>string</c>, or null where the view gives none, which is
+/// where it withholds a figure.
+/// </summary>
+public sealed record ViewRows(IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyList<object?>> Rows);

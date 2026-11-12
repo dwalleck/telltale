@@ -16,12 +16,22 @@ internal static class PipelineCommand
         string description,
         bool fetches,
         Func<PipelineSteps, ParseResult, CancellationToken, Task> steps,
-        params Option[] options)
+        params Symbol[] optionsAndArguments)
     {
         var command = new Command(name, description);
-        foreach (var option in options)
+        foreach (var symbol in optionsAndArguments)
         {
-            command.Add(option);
+            switch (symbol)
+            {
+                case Option option:
+                    command.Add(option);
+                    break;
+                case Argument argument:
+                    command.Add(argument);
+                    break;
+                default:
+                    throw new ArgumentException($"{symbol.Name} is neither an option nor an argument.", nameof(optionsAndArguments));
+            }
         }
 
         command.SetAction((parse, cancellationToken) => CliApp.GuardAsync(services, async () =>

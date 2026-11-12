@@ -477,11 +477,64 @@ public sealed class SqliteStore : ITelltaleStore
     public async Task<IReadOnlyList<T>> QueryViewsAsync<T>(string sql, object? parameters = null, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_readOnlyConnectionString, cancellationToken);
+        var views = await LimitToMetricViewsAsync(connection, sql, cancellationToken);
+        try
+        {
+            return (await connection.QueryAsync<T>(new CommandDefinition(sql, parameters, cancellationToken: cancellationToken))).AsList();
+        }
+        catch (SqliteException exception) when (exception.SqliteErrorCode == raw.SQLITE_AUTH)
+        {
+            throw NotAMetricView(views, exception);
+        }
+    }
 
-        // The query runs against copies of the metric views' rows in the connection's temporary schema, and from
-        // here on the connection may read nothing else. So the views' own rules (the minimum group size above all,
-        // ADR-0003) are applied before the query sees a row, whatever SQL it is given. An unqualified view name
-        // finds the copy first.
+    public async Task<ViewRows> QueryViewRowsAsync(string sql, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(_readOnlyConnectionString, cancellationToken);
+        var views = await LimitToMetricViewsAsync(connection, sql, cancellationToken);
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            var columns = Enumerable.Range(0, reader.FieldCount).Select(reader.GetName).ToList();
+            var rows = new List<IReadOnlyList<object?>>();
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var values = new object?[reader.FieldCount];
+                reader.GetValues(values!);
+                rows.Add([.. values.Select(value => value is DBNull ? null : value)]);
+            }
+
+            // Whatever follows the first statement is prepared here, so the guard refuses it before a row is
+            // given back; and a second result would have no place in the answer.
+            if (await reader.NextResultAsync(cancellationToken))
+            {
+                throw new UserFacingException("The SQL holds more than one statement. Give one query at a time.");
+            }
+
+            return new ViewRows(columns, rows);
+        }
+        catch (SqliteException exception) when (exception.SqliteErrorCode == raw.SQLITE_AUTH)
+        {
+            throw NotAMetricView(views, exception);
+        }
+        catch (SqliteException exception) when (exception.SqliteErrorCode == raw.SQLITE_ERROR)
+        {
+            // A fault in the SQL itself. SQLite's message names what it could not read, never a row's data.
+            throw new UserFacingException($"The query could not be run: {exception.Message}", exception);
+        }
+    }
+
+    /// <summary>
+    /// Prepares a connection for a query over the metric views. The query will run against copies of the
+    /// metric views' rows in the connection's temporary schema, and from here on the connection may read
+    /// nothing else. So the views' own rules (the minimum group size above all, ADR-0003) are applied before
+    /// the query sees a row, whatever SQL it is given. An unqualified view name finds the copy first.
+    /// Returns the names of the metric views.
+    /// </summary>
+    private static async Task<HashSet<string>> LimitToMetricViewsAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)
+    {
         var views = await CopyMetricViewsAsync(connection, sql, cancellationToken);
         var rc = raw.sqlite3_set_authorizer(connection.Handle, MetricViewsOnly, views);
         if (rc != raw.SQLITE_OK)
@@ -489,17 +542,11 @@ public sealed class SqliteStore : ITelltaleStore
             throw new InvalidOperationException($"SQLite did not accept the guard that limits a query to the metric views (result code {rc}), so the query was not run.");
         }
 
-        try
-        {
-            return (await connection.QueryAsync<T>(new CommandDefinition(sql, parameters, cancellationToken: cancellationToken))).AsList();
-        }
-        catch (SqliteException exception) when (exception.SqliteErrorCode == raw.SQLITE_AUTH)
-        {
-            throw new InvalidOperationException(
-                $"This query reads only the metric views ({string.Join(", ", views.Order(StringComparer.Ordinal))}), and it asked for something else: {exception.Message}",
-                exception);
-        }
+        return views;
     }
+
+    private static InvalidOperationException NotAMetricView(HashSet<string> views, SqliteException exception) =>
+        new($"This query reads only the metric views ({string.Join(", ", views.Order(StringComparer.Ordinal))}), and it asked for something else: {exception.Message}", exception);
 
     /// <summary>
     /// Identifies the scripts that create the derived tables and the metric views: a digest of their names and

@@ -22,6 +22,7 @@ public static class CliApp
             SyncCommand.Create(services),
             DeriveCommand.Create(services),
             ReportCommand.Create(services),
+            QueryCommand.Create(services),
             RunCommand.Create(services),
             DiscoverCommand.Create(services),
             SecretsCommand.Create(services),

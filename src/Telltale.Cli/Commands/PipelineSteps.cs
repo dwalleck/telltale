@@ -211,39 +211,7 @@ internal sealed class PipelineSteps : IDisposable
     /// </summary>
     public async Task ReportAsync(long? sprintId, bool needsSprint, CancellationToken cancellationToken)
     {
-        await RequireFilledUnderTheConfigurationAsync(cancellationToken);
-        await RequireStoredSaltAsync(cancellationToken);
-        var derivedFrom = await _store.ReadDerivedSourceAsync(cancellationToken)
-            ?? throw new UserFacingException("The store has no derived data yet. Run derive first.");
-
-        // The views would answer from the old derived tables without a sign, so the report checks first.
-        var current = await SourceAsync(cancellationToken);
-        if (derivedFrom.RawDigest != current.RawDigest)
-        {
-            throw new UserFacingException("The raw data changed since the derived data was built. Run derive first.");
-        }
-
-        // The stored business days were counted in the old time zone, around the old holidays.
-        if (derivedFrom.TimeZone != current.TimeZone || derivedFrom.Holidays != current.Holidays)
-        {
-            throw new UserFacingException("The time zone or the holidays in the configuration changed since the derived data was built. Run derive first.");
-        }
-
-        // What is delivered, when a cycle starts and what a reopen is were decided with the old roles and resolutions.
-        if (derivedFrom.StatusRoles != current.StatusRoles || derivedFrom.AbandonedResolutionIds != current.AbandonedResolutionIds)
-        {
-            throw new UserFacingException("statusRoles or abandonedResolutionIds in the configuration file changed since the derived data was built. Run derive first.");
-        }
-
-        // The baseline views were built from the list as it was at the last derive. A report under another
-        // list would print the old baseline as if it were the configured one. This is the one check: a list
-        // equal to the derived one passed derive's checks against this same raw data.
-        if (derivedFrom.BaselineSprintIds != current.BaselineSprintIds)
-        {
-            // Deriving again is the remedy only for a list derive would accept; otherwise say what derive would.
-            await RequireBaselineSprintsAsync(await _store.ReadRawAsync(cancellationToken), cancellationToken);
-            throw new UserFacingException("baselineSprintIds in the configuration file changed since the derived data was built. Run derive first.");
-        }
+        await RequireCurrentDerivedDataAsync(cancellationToken);
 
         var sprint = sprintId?.ToString(CultureInfo.InvariantCulture)
             ?? await SprintReport.MostRecentlyCompletedSprintAsync(_store, cancellationToken);
@@ -288,6 +256,67 @@ internal sealed class PipelineSteps : IDisposable
         BaselineSprintRules.RequireWithinWhatWasFetched(starts, _baselineSprintIds, completeFrom);
         var path = await SprintReport.WriteAsync(_store, sprint, _timeZone, [.. _baselineSprintIds.Order(StringComparer.Ordinal)], _services.ReportDirectory, cancellationToken);
         await _services.Out.WriteLineAsync($"Wrote {path}");
+    }
+
+    /// <summary>
+    /// Runs the owner's SQL over the metric views and prints the rows as a markdown table (owner decision
+    /// D48). It is refused wherever a report would be: the views answer from the derived data as it is, so
+    /// derived data that is missing, stale or from other settings would be passed off as current.
+    /// </summary>
+    public async Task QueryAsync(string sql, CancellationToken cancellationToken)
+    {
+        await RequireCurrentDerivedDataAsync(cancellationToken);
+        try
+        {
+            await _services.Out.WriteAsync(Markdown.Table(await _store.QueryViewRowsAsync(sql, cancellationToken)));
+        }
+        catch (InvalidOperationException refusal) when (refusal.InnerException is System.Data.Common.DbException)
+        {
+            // The guard's refusal: the SQL asked for something that is not a metric view.
+            throw new UserFacingException(refusal.Message, refusal);
+        }
+    }
+
+    /// <summary>
+    /// What every command that reads the metric views asks first: the store was filled under the configured
+    /// collection settings, its people are hashed with the salt at hand, and the derived data was built from
+    /// the raw data and the settings as they are now. Each refusal names the command that repairs it.
+    /// </summary>
+    private async Task RequireCurrentDerivedDataAsync(CancellationToken cancellationToken)
+    {
+        await RequireFilledUnderTheConfigurationAsync(cancellationToken);
+        await RequireStoredSaltAsync(cancellationToken);
+        var derivedFrom = await _store.ReadDerivedSourceAsync(cancellationToken)
+            ?? throw new UserFacingException("The store has no derived data yet. Run derive first.");
+
+        // The views would answer from the old derived tables without a sign, so the report checks first.
+        var current = await SourceAsync(cancellationToken);
+        if (derivedFrom.RawDigest != current.RawDigest)
+        {
+            throw new UserFacingException("The raw data changed since the derived data was built. Run derive first.");
+        }
+
+        // The stored business days were counted in the old time zone, around the old holidays.
+        if (derivedFrom.TimeZone != current.TimeZone || derivedFrom.Holidays != current.Holidays)
+        {
+            throw new UserFacingException("The time zone or the holidays in the configuration changed since the derived data was built. Run derive first.");
+        }
+
+        // What is delivered, when a cycle starts and what a reopen is were decided with the old roles and resolutions.
+        if (derivedFrom.StatusRoles != current.StatusRoles || derivedFrom.AbandonedResolutionIds != current.AbandonedResolutionIds)
+        {
+            throw new UserFacingException("statusRoles or abandonedResolutionIds in the configuration file changed since the derived data was built. Run derive first.");
+        }
+
+        // The baseline views were built from the list as it was at the last derive. A report under another
+        // list would print the old baseline as if it were the configured one. This is the one check: a list
+        // equal to the derived one passed derive's checks against this same raw data.
+        if (derivedFrom.BaselineSprintIds != current.BaselineSprintIds)
+        {
+            // Deriving again is the remedy only for a list derive would accept; otherwise say what derive would.
+            await RequireBaselineSprintsAsync(await _store.ReadRawAsync(cancellationToken), cancellationToken);
+            throw new UserFacingException("baselineSprintIds in the configuration file changed since the derived data was built. Run derive first.");
+        }
     }
 
     /// <summary>
