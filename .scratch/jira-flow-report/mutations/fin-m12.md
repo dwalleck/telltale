@@ -13,3 +13,4 @@ replace: |-
 # fin-m12: derive and report read the salt from the secret store again
 
 Claim (A3): a run reads each secret once. The test passed when written.
+- Verified 2026-11-12 at 5c4f1d9: red, 1 failed of 53 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.

@@ -13,3 +13,4 @@ replace: |-
 # fin-m10: a report does not ask the start-date rule of an unchanged baseline list
 
 Claim (B7): report asks the before-range rule of the baseline sprints at every run, also when neither the list nor the raw data changed.
+- Verified 2026-11-12 at 5c4f1d9: red, 1 failed of 38 (Pipeline, filter /*/*/BaselineTests/*); restored.

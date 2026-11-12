@@ -13,3 +13,4 @@ replace: |-
 # fin-m7: a store that does not say what it was filled from gets the message about changed settings
 
 Claim (C14): a watermark row from before the columns existed is refused with a message of its own.
+- Verified 2026-11-12 at 5c4f1d9: red, 3 failed of 30 (Pipeline, filter /*/*/IncrementalSyncTests/*); restored.

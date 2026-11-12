@@ -13,3 +13,4 @@ replace: |-
 # fin-m6: a changed site is not among the settings a refusal names
 
 Claim (C5): what the store was filled from names the Jira site, and a changed site is refused naming jira.siteUrl.
+- Verified 2026-11-12 at 5c4f1d9: red, 3 failed of 30 (Pipeline, filter /*/*/IncrementalSyncTests/*); restored.

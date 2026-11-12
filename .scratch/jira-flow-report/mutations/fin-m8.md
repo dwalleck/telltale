@@ -13,3 +13,4 @@ replace: |-
 # fin-m8: the project keys column holds another setting
 
 Claim (C14): each setting the store was filled from is kept in its own column.
+- Verified 2026-11-12 at 5c4f1d9: red, 29 failed of 30 (Pipeline, filter /*/*/IncrementalSyncTests/*); restored.
