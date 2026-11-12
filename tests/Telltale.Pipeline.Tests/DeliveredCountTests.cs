@@ -1,6 +1,6 @@
 using Telltale.Pipeline.Tests.Harness;
 using TUnit.Assertions.Enums;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -10,7 +10,7 @@ public class DeliveredCountTests
     public async Task Run_writes_a_report_with_the_sprint_name_dates_and_delivered_count()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
@@ -35,7 +35,7 @@ public class DeliveredCountTests
     public async Task The_delivered_count_can_be_read_from_a_metric_view_with_ad_hoc_sql()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
@@ -59,7 +59,7 @@ public class DeliveredCountTests
     public async Task An_issue_finished_in_a_later_sprint_than_it_started_in_counts_in_the_later_sprint()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
@@ -76,7 +76,7 @@ public class DeliveredCountTests
     public async Task A_move_from_done_to_shipped_does_not_change_the_delivery_sprint()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
@@ -94,7 +94,7 @@ public class DeliveredCountTests
     public async Task An_issue_that_was_done_then_reopened_and_is_not_done_now_is_not_delivered()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
@@ -112,7 +112,7 @@ public class DeliveredCountTests
     public async Task A_reopened_issue_counts_in_the_sprint_of_its_final_move_to_done()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
@@ -132,7 +132,7 @@ public class DeliveredCountTests
     {
         // The issue's current status decides, not the last entry of its changelog.
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
@@ -150,7 +150,7 @@ public class DeliveredCountTests
     {
         // Owner decision D9. Without a transition into done there is no delivery moment, so no sprint to count it in.
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 8, 9), createdIn: Workflow.Done);
         pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 8, 9), createdIn: Workflow.Done)
@@ -170,7 +170,7 @@ public class DeliveredCountTests
         // Owner decision D8. The changelog says the issue left Done on the 12th; Jira says it is in Done now.
         // The earlier move into Done (in sprint 41) was undone, and nothing dates the present one.
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
@@ -190,7 +190,7 @@ public class DeliveredCountTests
     public async Task Renaming_statuses_changes_no_figure()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.AddTeam(41, 42);
 
         // The names now say the opposite of what the statuses are. Only the IDs carry the roles.
@@ -217,7 +217,7 @@ public class DeliveredCountTests
     {
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.Shapes = shapes;
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
@@ -234,7 +234,7 @@ public class DeliveredCountTests
     public async Task A_sprint_that_is_not_on_the_board_is_refused_with_a_plain_message()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
 
         var exit = await pipeline.RunAsync("run", "--sprint", "99");
 
@@ -242,10 +242,10 @@ public class DeliveredCountTests
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo("Sprint 99 is not in the store, or has not started. Check the ID against the board's sprints.\n");
     }
 
-    /// <summary>Sprint 41 (5 to 19 January 2026) and sprint 42 (19 January to 2 February), both completed, with a half-hour gap between them.</summary>
-    private static void AddTwoSprints(FakeJira jira)
+    /// <summary>The harness's two sprints, both completed, with sprint 41 starting on Monday 5 January at 20:00 instead of 09:00.</summary>
+    private static void AddTwoSprintsTheFirstFromMondayEvening(FakeJira jira)
     {
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 20), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
-        jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9), completed: Local(2026, 2, 2, 9, 30));
+        jira.AddSprint41(start: Local(2026, 1, 5, 20));
+        jira.AddSprint42();
     }
 }

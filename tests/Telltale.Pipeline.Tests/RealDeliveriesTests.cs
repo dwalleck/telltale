@@ -1,7 +1,7 @@
 using System.Text.Json.Nodes;
 using Telltale.Pipeline.Tests.Harness;
 using TUnit.Assertions.Enums;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -17,7 +17,7 @@ public class RealDeliveriesTests
     public async Task An_issue_that_is_done_with_an_abandoned_resolution_is_not_delivered()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Jira.AddTeam(41);
         pipeline.Config["abandonedResolutionIds"] = new JsonArray(ResolutionWontDo);
         FinishedInSprint(pipeline.Jira, "FAKE-1").Resolved(ResolutionFinished);
@@ -35,7 +35,7 @@ public class RealDeliveriesTests
     public async Task An_issue_that_is_done_with_any_other_resolution_or_none_is_delivered()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Jira.AddTeam(41);
         pipeline.Config["abandonedResolutionIds"] = new JsonArray(ResolutionWontDo);
         FinishedInSprint(pipeline.Jira, "FAKE-1").Resolved(ResolutionFinished);
@@ -58,7 +58,7 @@ public class RealDeliveriesTests
     {
         // The same Jira every time; only the configuration file differs.
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Jira.AddTeam(41);
         pipeline.Config["abandonedResolutionIds"] = new JsonArray([.. abandoned.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(id => (JsonNode)id)]);
         FinishedInSprint(pipeline.Jira, "FAKE-1").Resolved(ResolutionFinished);
@@ -77,7 +77,7 @@ public class RealDeliveriesTests
     {
         // Leaving the setting out would count abandoned work as delivered without anyone having decided so.
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config.Remove("abandonedResolutionIds");
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -99,7 +99,7 @@ public class RealDeliveriesTests
         // Jira's resolution IDs are digits. A name or a slip of the hand would match no issue, and abandoned
         // work would count as delivered with nothing to show for it.
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config["abandonedResolutionIds"] = JsonNode.Parse(ids);
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -114,7 +114,7 @@ public class RealDeliveriesTests
     public async Task An_abandoned_resolution_id_with_spaces_around_it_still_matches()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Jira.AddTeam(41);
         pipeline.Config["abandonedResolutionIds"] = new JsonArray($" {ResolutionWontDo}  ");
         FinishedInSprint(pipeline.Jira, "FAKE-1").Resolved(ResolutionFinished);
@@ -133,7 +133,7 @@ public class RealDeliveriesTests
         // Spec, metric rules: delivered is "has a cycle end and its resolution is not in the abandoned list".
         // issue_cycle is a derived table, not a view; later views filter on its delivered flag, so its content is pinned here.
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config["abandonedResolutionIds"] = new JsonArray(ResolutionWontDo);
         FinishedInSprint(pipeline.Jira, "FAKE-1").Resolved(ResolutionFinished);
         FinishedInSprint(pipeline.Jira, "FAKE-2").Resolved(ResolutionWontDo);
@@ -158,11 +158,11 @@ public class RealDeliveriesTests
     {
         // The same story on two sites. The second site also has an epic and a sub-task, both finished in the sprint.
         await using var storyOnly = new PipelineHarness();
-        AddSprint(storyOnly.Jira);
+        storyOnly.Jira.AddSprint41();
         storyOnly.Jira.AddTeam(41);
         FinishedInSprint(storyOnly.Jira, "FAKE-1").AssignedTo(People.One);
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Jira.AddTeam(41);
         FinishedInSprint(pipeline.Jira, "FAKE-1").AssignedTo(People.One);
         FinishedInSprint(pipeline.Jira, "FAKE-2").OfType(FakeIssueType.Epic).AssignedTo(People.Two);
@@ -190,7 +190,7 @@ public class RealDeliveriesTests
     {
         // Either sign is enough on its own (the flag even without a level), and a level above epics is a container too.
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Jira.AddTeam(41);
         FinishedInSprint(pipeline.Jira, "FAKE-1");
         FinishedInSprint(pipeline.Jira, "FAKE-2").OfType(new FakeIssueType("800009", "Fake Odd Type", subtask, hierarchyLevel));
@@ -206,7 +206,7 @@ public class RealDeliveriesTests
     public async Task Nothing_of_an_epic_or_a_sub_task_is_stored_and_no_history_is_asked_for_it()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         var story = FinishedInSprint(pipeline.Jira, "FAKE-11");
         FinishedInSprint(pipeline.Jira, "FAKE-12").OfType(FakeIssueType.Epic).AssignedTo(People.Two);
         FinishedInSprint(pipeline.Jira, "FAKE-13").OfType(FakeIssueType.SubTask).AssignedTo(People.Three);
@@ -231,7 +231,7 @@ public class RealDeliveriesTests
     {
         // Owner decision D13. Both issues were stories at the first sync; FAKE-2 is then converted in Jira.
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         FinishedInSprint(pipeline.Jira, "FAKE-1");
         var converted = FinishedInSprint(pipeline.Jira, "FAKE-2");
         pipeline.Jira.AddTeam(41);
@@ -259,7 +259,7 @@ public class RealDeliveriesTests
     {
         // The epic is out of scope, so nothing else of it is read: not its status, its dates or its assignee.
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         var story = FinishedInSprint(pipeline.Jira, "FAKE-1");
 
         // Five people with an issue each in the sprint, so its delivered count is shown (SuppressionTests).
@@ -287,7 +287,7 @@ public class RealDeliveriesTests
     public async Task Every_standard_issue_type_counts_not_only_stories()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Jira.AddTeam(41);
         FinishedInSprint(pipeline.Jira, "FAKE-1");
         FinishedInSprint(pipeline.Jira, "FAKE-2").OfType(new FakeIssueType("800004", "Fake Bug", Subtask: false, HierarchyLevel: 0));
@@ -303,7 +303,7 @@ public class RealDeliveriesTests
     {
         // Without the level nothing says whether the issue is an epic, and guessing would put it in the figures.
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         FinishedInSprint(pipeline.Jira, "FAKE-1").OfType(new FakeIssueType("800009", "Fake Odd Type", Subtask: false, HierarchyLevel: null));
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -319,9 +319,6 @@ public class RealDeliveriesTests
     private static Task<IReadOnlyList<(string SprintId, long DeliveredCount)>> DeliveredPerSprintAsync(PipelineHarness pipeline) =>
         pipeline.QueryAsync<(string SprintId, long DeliveredCount)>("SELECT sprint_id, delivered_count FROM delivered_per_sprint ORDER BY sprint_id;");
 
-    /// <summary>Sprint 41, 5 to 19 January 2026, completed.</summary>
-    private static void AddSprint(FakeJira jira) =>
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
 
     /// <summary>An issue worked on and moved to Done inside sprint 41.</summary>
     private static FakeIssue FinishedInSprint(FakeJira jira, string key) =>

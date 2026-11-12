@@ -1,6 +1,6 @@
 using Telltale.Pipeline.Tests.Harness;
 using TUnit.Assertions.Enums;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -115,7 +115,7 @@ public class SprintStateTests
         // Owner decision D7. Without it the sprint's window would run to now and take every later delivery.
         await using var pipeline = new PipelineHarness(Now);
         pipeline.Jira.AddClosedSprintWithoutCompletion(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9));
-        pipeline.Jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9));
+        pipeline.Jira.AddSprint42(stillRunning: true);
         pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
@@ -150,7 +150,7 @@ public class SprintStateTests
         // 9th, while sprint 41 ran, and FAKE-2 on the 21st, in sprint 42.
         await using var pipeline = new PipelineHarness(Now);
         pipeline.Jira.AddClosedSprintWithoutCompletion(41, "Fake Sprint 41", Local(2026, 1, 5, 9));
-        pipeline.Jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9));
+        pipeline.Jira.AddSprint42(stillRunning: true);
         pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).InSprints(41)
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
@@ -176,7 +176,7 @@ public class SprintStateTests
     {
         await using var pipeline = new PipelineHarness(Now);
         pipeline.Jira.AddClosedSprintWithoutCompletion(41, "Fake Sprint 41", Local(2026, 1, 5, 9));
-        pipeline.Jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9));
+        pipeline.Jira.AddSprint42(stillRunning: true);
         pipeline.Jira.AddTeam(41, 42);
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
         pipeline.Error.GetStringBuilder().Clear();
@@ -194,7 +194,7 @@ public class SprintStateTests
     {
         await using var pipeline = new PipelineHarness(Now);
         pipeline.Jira.AddClosedSprintWithoutCompletion(41, "Fake Sprint 41", Local(2026, 1, 5, 9));
-        pipeline.Jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9));
+        pipeline.Jira.AddSprint42(stillRunning: true);
         pipeline.Jira.AddTeam(41, 42);
         pipeline.Config["baselineSprintIds"] = new System.Text.Json.Nodes.JsonArray("41");
 
@@ -307,7 +307,7 @@ public class SprintStateTests
     /// <summary>Sprint 41 (5 to 19 January 2026, completed) and sprint 42 (from 19 January, planned to end 2 February, still active).</summary>
     private static void AddClosedAndActiveSprints(FakeJira jira)
     {
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
-        jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9));
+        jira.AddSprint41();
+        jira.AddSprint42(stillRunning: true);
     }
 }

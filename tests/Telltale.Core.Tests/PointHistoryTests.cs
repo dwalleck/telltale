@@ -1,6 +1,6 @@
 using Telltale.Core;
 using Telltale.Core.Workflow;
-using static Telltale.Core.Tests.TestTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Core.Tests;
 

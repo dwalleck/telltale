@@ -4,7 +4,7 @@ using Telltale.Core.Workflow;
 using Telltale.Pipeline.Tests.Harness;
 using Telltale.Storage.Sqlite;
 using TUnit.Assertions.Enums;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -29,7 +29,7 @@ public class CycleTimeTests
     public async Task The_report_shows_cycle_time_from_the_first_work_status_to_done_for_the_issues_bucket()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Thursday 09:00 to Monday 09:00: four calendar days, two of them a weekend.
@@ -48,7 +48,7 @@ public class CycleTimeTests
     public async Task Time_in_blocked_before_any_work_status_does_not_start_the_cycle()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Blocked from Tuesday, development from Wednesday 09:00, done Friday 09:00.
@@ -66,7 +66,7 @@ public class CycleTimeTests
     public async Task An_issue_that_went_straight_to_done_is_delivered_but_contributes_no_cycle_time()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).Estimated(3)
             .Moved(Local(2026, 1, 9, 9), Workflow.Done);
@@ -83,7 +83,7 @@ public class CycleTimeTests
     public async Task Time_in_blocked_after_the_cycle_started_counts_toward_cycle_time()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Development Tuesday 09:00, blocked Wednesday to Thursday, done Friday 09:00.
@@ -104,7 +104,7 @@ public class CycleTimeTests
     public async Task An_issue_that_skips_development_starts_its_cycle_at_its_first_entry_into_review_or_qe(string firstWorkStatus)
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Committed until Wednesday 09:00, then straight past Development; done Friday 09:00.
@@ -123,7 +123,7 @@ public class CycleTimeTests
     public async Task A_move_from_done_to_shipped_does_not_move_the_cycle_end()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Development Tuesday 09:00, done Thursday 09:00, shipped the next Wednesday.
@@ -141,7 +141,7 @@ public class CycleTimeTests
     public async Task A_reopened_issues_cycle_runs_from_its_first_work_status_to_its_final_entry_into_done()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Development Tuesday 09:00, done Wednesday, reopened Thursday, done again Friday 09:00.
@@ -160,7 +160,7 @@ public class CycleTimeTests
     public async Task Each_issues_reopen_count_is_recorded_in_derived_data()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9))
             .Moved(Local(2026, 1, 6, 9), Workflow.Development)
             .Moved(Local(2026, 1, 7, 9), Workflow.Done);
@@ -192,7 +192,7 @@ public class CycleTimeTests
     public async Task A_cycle_across_a_weekend_and_a_configured_holiday_has_fewer_business_days_than_calendar_days()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
         pipeline.Config["holidays"] = new JsonArray("2026-01-19");
 
@@ -212,7 +212,7 @@ public class CycleTimeTests
     public async Task Without_the_holiday_the_same_cycle_counts_the_monday()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 15, 9)).Estimated(3)
             .Moved(Local(2026, 1, 16, 12), Workflow.Development)
@@ -237,7 +237,7 @@ public class CycleTimeTests
     public async Task Median_is_the_middle_value_or_the_mean_of_the_two_middle_values_and_p85_is_nearest_rank(double[] cycleDays, double median, double p85)
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.AddTeam(41);
 
         // Every cycle ends on Friday 16 January at noon and starts at most four days earlier, so none
@@ -265,7 +265,7 @@ public class CycleTimeTests
     public async Task The_table_has_a_row_per_point_bucket_with_its_issue_count_and_unestimated_issues_last()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
 
         // Bucket 13: three issues, each Tuesday to Thursday.
         foreach (var (key, person) in new[] { ("FAKE-1", People.Four), ("FAKE-2", People.Five), ("FAKE-3", People.One) })
@@ -335,7 +335,7 @@ public class CycleTimeTests
     public async Task Statuses_entered_and_left_at_the_same_instant_still_start_a_cycle_and_count_as_a_reopen()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // A bulk move: Development and Done in one instant.
@@ -368,7 +368,7 @@ public class CycleTimeTests
     public async Task Two_estimates_that_differ_only_in_the_third_decimal_are_two_rows_with_different_labels()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(2.001)
             .Moved(Local(2026, 1, 6, 9), Workflow.Development)
@@ -390,7 +390,7 @@ public class CycleTimeTests
     public async Task An_abandoned_issue_that_was_worked_on_is_in_no_cycle_time_row()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
         pipeline.Config["abandonedResolutionIds"] = new JsonArray("300002");
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
@@ -461,7 +461,7 @@ public class CycleTimeTests
     public async Task An_issue_delivered_between_sprints_is_in_no_cycle_time_row()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Done at 10:15 on the 19th: after sprint 41 was completed and before sprint 42 started.
@@ -499,10 +499,10 @@ public class CycleTimeTests
         public double? P85CalendarDays { get; init; }
     }
 
-    /// <summary>Sprint 41 (5 to 19 January 2026) and sprint 42 (19 January to 2 February), both completed, with a half-hour gap between them.</summary>
-    private static void AddTwoSprints(FakeJira jira)
+    /// <summary>The harness's two sprints, both completed, with sprint 41 starting on Monday 5 January at 20:00 instead of 09:00.</summary>
+    private static void AddTwoSprintsTheFirstFromMondayEvening(FakeJira jira)
     {
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 20), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
-        jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9), completed: Local(2026, 2, 2, 9, 30));
+        jira.AddSprint41(start: Local(2026, 1, 5, 20));
+        jira.AddSprint42();
     }
 }

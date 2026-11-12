@@ -1,6 +1,6 @@
 using Telltale.Pipeline.Tests.Harness;
 using TUnit.Assertions.Enums;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -28,7 +28,7 @@ public class SuppressionTests
     public async Task A_point_bucket_with_two_assignees_reads_suppressed_beside_its_issue_count_and_one_with_three_is_reported()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
 
         // Bucket 3: three people, one issue each. Bucket 5: three issues, but only two people.
         Delivered(pipeline.Jira, "FAKE-1", points: 3, People.One);
@@ -53,7 +53,7 @@ public class SuppressionTests
     public async Task A_direct_query_of_the_cycle_time_view_gives_null_figures_a_suppressed_flag_and_the_issue_count_for_that_bucket()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         Delivered(pipeline.Jira, "FAKE-1", points: 3, People.One);
         Delivered(pipeline.Jira, "FAKE-2", points: 3, People.Two);
         Delivered(pipeline.Jira, "FAKE-3", points: 3, People.Three);
@@ -78,7 +78,7 @@ public class SuppressionTests
     public async Task A_sprint_with_four_assignees_suppresses_every_figure_and_every_issue_count_and_shows_no_blank_or_zero()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
 
         // Four people in one bucket: enough for the bucket, not for the sprint.
         Delivered(pipeline.Jira, "FAKE-1", points: 3, People.One);
@@ -125,7 +125,7 @@ public class SuppressionTests
         // Owner decision D49: the count is a figure like any other, so it needs three distinct assignees
         // behind it as well as a team of five. Three issues delivered by two people; three more people in the sprint.
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         Delivered(pipeline.Jira, "FAKE-1", points: 3, People.One);
         Delivered(pipeline.Jira, "FAKE-2", points: 3, People.One);
         Delivered(pipeline.Jira, "FAKE-3", points: 3, People.Two);
@@ -148,7 +148,7 @@ public class SuppressionTests
     public async Task A_delivered_count_with_three_assignees_among_the_delivered_issues_is_shown()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         Delivered(pipeline.Jira, "FAKE-1", points: 3, People.One);
         Delivered(pipeline.Jira, "FAKE-2", points: 3, People.Two);
         Delivered(pipeline.Jira, "FAKE-3", points: 3, People.Three);
@@ -167,7 +167,7 @@ public class SuppressionTests
     public async Task A_sprint_with_five_assignees_across_all_its_issues_but_four_among_the_delivered_ones_is_not_suppressed()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         Delivered(pipeline.Jira, "FAKE-1", points: 3, People.One);
         Delivered(pipeline.Jira, "FAKE-2", points: 3, People.Two);
         Delivered(pipeline.Jira, "FAKE-3", points: 3, People.Three);
@@ -187,7 +187,7 @@ public class SuppressionTests
     public async Task A_status_with_two_assignees_reads_suppressed_beside_its_issue_count_and_one_with_three_is_reported()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
 
         // Everyone's issue spends a day in New and two in Development. Three people's issues then spend a day in QE.
         foreach (var (key, person) in new[] { ("FAKE-1", People.Three), ("FAKE-2", People.Four), ("FAKE-3", People.Five) })
@@ -227,7 +227,7 @@ public class SuppressionTests
     public async Task Unassigned_issues_do_not_raise_a_buckets_assignee_count()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         Delivered(pipeline.Jira, "FAKE-1", points: 3, People.One);
         Delivered(pipeline.Jira, "FAKE-2", points: 3, People.Two);
         Delivered(pipeline.Jira, "FAKE-3", points: 3, People.Three);
@@ -251,7 +251,7 @@ public class SuppressionTests
     public async Task Unassigned_issues_do_not_raise_a_sprints_assignee_count()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         Delivered(pipeline.Jira, "FAKE-1", points: 3, People.One);
         Delivered(pipeline.Jira, "FAKE-2", points: 3, People.Two);
         Delivered(pipeline.Jira, "FAKE-3", points: 3, People.Three);
@@ -272,7 +272,7 @@ public class SuppressionTests
         // Owner decision D45: "no issue has a cycle time" would say the sprint's few people delivered nothing
         // with a cycle, and "no issue spent time" that none of them had work in the sprint.
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).AssignedTo(People.One);
 
         await pipeline.RunAsync("run", "--sprint", "41");
@@ -298,7 +298,7 @@ public class SuppressionTests
     {
         // The other side of D45: with a team, an empty table is a fact about the work and is stated.
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         foreach (var (person, number) in People.Team.Select((person, index) => (person, index + 1)))
         {
             // Delivered in the sprint straight from New: a delivery with no cycle time, and no time in the sprint as a member.
@@ -328,7 +328,7 @@ public class SuppressionTests
         // The flag decides, not the figure being null: a view that set the flag and still let a figure through
         // (a fault, or a view changed by hand) must not get that figure into the report.
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         foreach (var (person, number) in People.Team.Select((person, index) => (person, index + 1)))
         {
             Delivered(pipeline.Jira, $"FAKE-{number}", points: 3, person);
@@ -377,8 +377,6 @@ public class SuppressionTests
         public double? P85CalendarDays { get; init; }
     }
 
-    private static void AddSprint(FakeJira jira) =>
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
 
     /// <summary>
     /// An issue of sprint 41, delivered in it with a cycle of two days: one business day in New, development

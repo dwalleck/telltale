@@ -2,7 +2,7 @@ using Telltale.Pipeline.Tests.Harness;
 using Telltale.Reporting;
 using Telltale.Storage.Sqlite;
 using TUnit.Assertions.Enums;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -33,7 +33,7 @@ public class MethodNoteAndFooterTests
     {
         // The clock reads 3 February 2026, noon, team time: that is the as-of time.
         await using var pipeline = new PipelineHarness(Local(2026, 2, 3, 12));
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsWithATeam(pipeline.Jira);
         AddThreeDeliveriesBetweenSprints(pipeline.Jira);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).InSprints(41)
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
@@ -60,7 +60,7 @@ public class MethodNoteAndFooterTests
     public async Task An_issue_with_inconsistent_status_history_still_gets_a_timeline_is_logged_and_is_counted_in_the_footer()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsWithATeam(pipeline.Jira);
         var othersLogged = AddThreeAnomalies(pipeline.Jira);
 
         // The second entry says the issue left Review, but the history before it left the issue in Development.
@@ -95,7 +95,7 @@ public class MethodNoteAndFooterTests
     {
         // Timelines are built by derive, so derive finds and logs the anomalies; collecting and reporting log nothing.
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsWithATeam(pipeline.Jira);
         var first = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 8, 9), createdIn: Workflow.Done);
 
         await pipeline.RunAllAsync(["backfill"]);
@@ -133,7 +133,7 @@ public class MethodNoteAndFooterTests
     public async Task A_report_is_refused_when_the_status_roles_or_the_abandoned_resolutions_changed_since_derive(string setting)
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsWithATeam(pipeline.Jira);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 9), Workflow.Done);
@@ -164,7 +164,7 @@ public class MethodNoteAndFooterTests
     public async Task A_report_is_not_refused_when_the_status_roles_are_written_again_as_they_were()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsWithATeam(pipeline.Jira);
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
 
         // The same roles in the same board order.
@@ -181,7 +181,7 @@ public class MethodNoteAndFooterTests
     public async Task A_report_is_refused_when_the_time_zone_or_the_holidays_changed_since_derive(string setting)
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsWithATeam(pipeline.Jira);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 9), Workflow.Done);
@@ -205,7 +205,7 @@ public class MethodNoteAndFooterTests
     public async Task The_method_note_and_the_footer_name_the_time_zone_the_figures_were_derived_with()
     {
         await using var pipeline = new PipelineHarness(Local(2026, 2, 3, 12));
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsWithATeam(pipeline.Jira);
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
 
         // Rendered with another zone than derive used: the note and the as-of time still speak of derive's.
@@ -220,7 +220,7 @@ public class MethodNoteAndFooterTests
     public async Task A_report_from_a_store_without_the_data_quality_view_says_to_derive_again()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsWithATeam(pipeline.Jira);
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
         await pipeline.ExecuteAsync("DROP VIEW data_quality;");
 
@@ -237,7 +237,7 @@ public class MethodNoteAndFooterTests
     {
         // The issue ID is the one value of Jira's that reaches the anomaly log, so it is checked where it enters.
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsWithATeam(pipeline.Jira);
         pipeline.Jira.Handler.Override(HttpMethod.Post, "/rest/api/3/search/jql", _ => true,
             StubHttpHandler.Json("""{"isLast":true,"issues":[{"id":"900001 Fake Person One","key":"FAKE-1","fields":{"issuetype":{"id":"800001","subtask":false,"hierarchyLevel":0},"status":{"id":"600001"},"created":"2026-01-06T15:00:00.000+0000","updated":"2026-01-06T15:00:00.000+0000"}}]}"""));
 
@@ -252,7 +252,7 @@ public class MethodNoteAndFooterTests
     public async Task An_issue_whose_sprint_history_disagrees_with_its_sprint_field_is_logged_and_counted()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsWithATeam(pipeline.Jira);
         var othersLogged = AddThreeAnomalies(pipeline.Jira);
 
         // The history ends with the issue in sprints 41 and 42; the Sprint field lists 41 only.
@@ -276,7 +276,7 @@ public class MethodNoteAndFooterTests
         // Owner decision D8: not delivered, and a changelog anomaly. Its status history also does not line up
         // (it ends in Development), so the issue has two anomalies and is still one issue in the footer.
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsWithATeam(pipeline.Jira);
         var othersLogged = AddThreeAnomalies(pipeline.Jira);
         AddThreeDeliveriesBetweenSprints(pipeline.Jira);
         var odd = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
@@ -305,7 +305,7 @@ public class MethodNoteAndFooterTests
     {
         // Owner decision D9: created in Done, so nothing dates a delivery. One was later moved on to Shipped.
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsWithATeam(pipeline.Jira);
         var othersLogged = AddThreeAnomalies(pipeline.Jira);
         var created = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 8, 9), createdIn: Workflow.Done);
         var shipped = pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 8, 9), createdIn: Workflow.Done)
@@ -334,7 +334,7 @@ public class MethodNoteAndFooterTests
     public async Task An_issue_delivered_between_two_sprints_is_in_neither_sprints_delivered_count_and_is_counted_in_the_footer()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsWithATeam(pipeline.Jira);
 
         AddThreeDeliveriesBetweenSprints(pipeline.Jira);
 
@@ -377,7 +377,7 @@ public class MethodNoteAndFooterTests
     public async Task The_report_and_the_anomaly_log_contain_no_issue_keys_and_no_names()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsWithATeam(pipeline.Jira);
 
         // Every kind of line the note, the footer and the log can hold: an anomaly of each kind and a delivery between sprints.
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).AssignedTo(People.One).InSprints(41)
@@ -433,7 +433,7 @@ public class MethodNoteAndFooterTests
     {
         // Review finding 2: with four people in the store, "1 issue delivered between sprints" is close to naming one of them.
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        pipeline.Jira.AddSprints41And42();
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 8, 9), createdIn: Workflow.Done).AssignedTo(People.One);
         pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 6, 9)).AssignedTo(People.Two)
             .Moved(Local(2026, 1, 19, 10, 15), Workflow.Done);
@@ -469,7 +469,7 @@ public class MethodNoteAndFooterTests
         // whole store's) and three distinct assignees behind the figure. Each person has one issue with an
         // anomaly (created in Done) and one delivered between the sprints; the first person has a second of each.
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsWithATeam(pipeline.Jira);
         foreach (var (person, number) in People.Team.Take(people).Append(People.One).Take(3).Select((person, index) => (person, index + 1)))
         {
             pipeline.Jira.AddIssue($"FAKE-1{number}", Local(2026, 1, 8, 9), createdIn: Workflow.Done).AssignedTo(person);
@@ -496,7 +496,7 @@ public class MethodNoteAndFooterTests
     public async Task A_footer_count_of_nothing_has_nobody_behind_it_and_reads_suppressed()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsWithATeam(pipeline.Jira);
 
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
 
@@ -510,9 +510,9 @@ public class MethodNoteAndFooterTests
     /// gap between them, and a team of five in both: figures are shown only for a team (ADR-0003). The team's
     /// five issues sit in New and have no anomaly.
     /// </summary>
-    private static void AddTwoSprints(FakeJira jira)
+    private static void AddTwoSprintsWithATeam(FakeJira jira)
     {
-        AddSprints(jira);
+        jira.AddSprints41And42();
         jira.AddTeam(41, 42);
     }
 
@@ -540,9 +540,4 @@ public class MethodNoteAndFooterTests
         }
     }
 
-    private static void AddSprints(FakeJira jira)
-    {
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
-        jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9), completed: Local(2026, 2, 2, 9, 30));
-    }
 }

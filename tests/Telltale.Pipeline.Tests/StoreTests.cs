@@ -6,7 +6,7 @@ using Telltale.Pipeline.Tests.Harness;
 using Telltale.Reporting;
 using Telltale.Storage.Sqlite;
 using TUnit.Assertions.Enums;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -269,7 +269,7 @@ public class StoreTests
 
     private static void AddSprintAndIssue(FakeJira jira)
     {
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
+        jira.AddSprint41();
         jira.ServeEachIssueOncePer(People.Team);
         jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).InSprints(41)
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)

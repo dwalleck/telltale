@@ -4,6 +4,7 @@ using Dapper;
 using Microsoft.Data.Sqlite;
 using Telltale.Cli;
 using Telltale.Core.Secrets;
+using Telltale.Tests.Shared;
 
 namespace Telltale.Pipeline.Tests.Harness;
 

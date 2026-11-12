@@ -1,5 +1,5 @@
 using Telltale.Pipeline.Tests.Harness;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -74,7 +74,7 @@ public class SeparateCommandsTests
         // Owner decision D7: such a sprint ended at its planned end, here later than sprint 41's completion.
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.AddClosedSprintWithoutCompletion(45, "Fake Sprint 45", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9));
-        pipeline.Jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
+        pipeline.Jira.AddSprint41();
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
 
         var exit = await pipeline.RunAsync("report");
@@ -306,8 +306,8 @@ public class SeparateCommandsTests
     private static void AddBoard(FakeJira jira)
     {
         jira.AddSprint(43, "Fake Sprint 43", Local(2026, 2, 2, 10), plannedEnd: Local(2026, 2, 16, 9));
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
-        jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9), completed: Local(2026, 2, 2, 9, 30));
+        jira.AddSprint41();
+        jira.AddSprint42();
         jira.AddFutureSprint(44, "Fake Sprint 44", Local(2026, 2, 16, 10), Local(2026, 3, 2, 9));
         jira.AddSprint(40, "Fake Sprint 40", Local(2025, 12, 22, 9), plannedEnd: Local(2026, 1, 5, 8), completed: Local(2026, 1, 5, 8, 30));
 

@@ -2,7 +2,7 @@ using System.Text.Json.Nodes;
 using Telltale.Pipeline.Tests.Harness;
 using Telltale.Storage.Sqlite;
 using TUnit.Assertions.Enums;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -28,7 +28,7 @@ public class BaselineTests
     public async Task With_baseline_sprints_configured_both_tables_show_figures_pooled_over_all_issues_of_those_sprints()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("41", "42");
 
         // Sprint 41, bucket 3: five people, cycle times 1 to 5 business days.
@@ -67,7 +67,7 @@ public class BaselineTests
     public async Task With_no_baseline_configured_no_baseline_columns_appear_and_the_baseline_views_are_empty(bool settingPresentAndEmpty)
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         if (settingPresentAndEmpty)
         {
             pipeline.Config["baselineSprintIds"] = new JsonArray();
@@ -104,7 +104,7 @@ public class BaselineTests
     public async Task With_a_baseline_the_method_note_says_what_it_is_pooled_over_and_when_a_baseline_cell_reads_suppressed_or_none()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("42", "41");
         AddSprintWithOneAssigneeInBucketThreeAndInReview(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
@@ -124,7 +124,7 @@ public class BaselineTests
     public async Task Without_a_baseline_the_report_says_nothing_about_one()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
 
         await pipeline.RunAllAsync(["run", "--sprint", "42"]);
@@ -136,7 +136,7 @@ public class BaselineTests
     public async Task The_sprint_being_reported_may_be_the_only_baseline_sprint_and_then_reads_against_its_own_figures()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("41");
         foreach (var (person, days) in People.Team.Select((person, index) => (person, index + 1)))
         {
@@ -159,7 +159,7 @@ public class BaselineTests
     public async Task A_query_over_the_views_reads_the_two_baseline_views()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("41");
         foreach (var (person, days) in People.Team.Select((person, index) => (person, index + 1)))
         {
@@ -185,7 +185,7 @@ public class BaselineTests
     public async Task A_query_over_the_views_cannot_read_the_derived_table_that_holds_the_baseline_list(string sql)
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("41");
         pipeline.Jira.AddTeam(41);
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
@@ -199,7 +199,7 @@ public class BaselineTests
     public async Task Unestimated_issues_have_a_baseline_row_of_their_own()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("41");
         foreach (var (person, days) in People.Team.Select((person, index) => (person, index + 1)))
         {
@@ -215,7 +215,7 @@ public class BaselineTests
     public async Task A_baseline_figure_with_fewer_than_three_assignees_is_suppressed_in_the_view_and_the_report_and_a_row_the_baseline_lacks_reads_none()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("41");
 
         // The baseline sprint. Bucket 3: five people, 1 to 5 days. Bucket 5: two people and an unassigned issue.
@@ -275,7 +275,7 @@ public class BaselineTests
         // Owner decision D44. Without it the pooled bucket 3 would read 2, 3, 4, 6: its P85 is the fourth of
         // four values, which is the one cycle time sprint 41's own report withholds.
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("41", "42");
         AddSprintWithOneAssigneeInBucketThreeAndInReview(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
@@ -315,7 +315,7 @@ public class BaselineTests
         // lack issues delivered in it, and a baseline pooled from it would be too low without a sign.
         // Sprint 41 started on 5 January and sprint 42 on 19 January.
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         AddSprintWithOneAssigneeInBucketThreeAndInReview(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
         pipeline.Config["jira"]!["backfillStart"] = "2026-01-10";
@@ -337,7 +337,7 @@ public class BaselineTests
     public async Task A_report_refuses_a_baseline_list_that_gained_a_sprint_from_before_the_start_date_and_a_sprint_after_it_is_accepted()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         AddSprintWithOneAssigneeInBucketThreeAndInReview(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
         pipeline.Config["jira"]!["backfillStart"] = "2026-01-10";
@@ -366,7 +366,7 @@ public class BaselineTests
         // stores the same raw rows and the derived data is not stale; only the date the store is complete
         // from has moved, past the start of baseline sprint 41.
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         AddSprintWithOneAssigneeInBucketThreeAndInReview(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
         foreach (var issue in pipeline.Jira.Issues)
@@ -406,7 +406,7 @@ public class BaselineTests
         // Sprint 41 has four people, sprint 42 six, and sprint 43 completed with no issue at all. Pooled, 41
         // and 42 have a team of six.
         await using var pipeline = new PipelineHarness(Local(2026, 2, 17, 12));
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Jira.AddSprint(43, "Fake Sprint 43", Local(2026, 2, 2, 9), plannedEnd: Local(2026, 2, 13, 17), completed: Local(2026, 2, 13, 17));
         AddSprintFortyOneWithFourAssignees(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
@@ -428,7 +428,7 @@ public class BaselineTests
     public async Task A_run_whose_baseline_holds_a_sprint_short_of_five_assignees_writes_the_report_with_every_baseline_cell_suppressed_and_names_the_sprint()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         AddSprintFortyOneWithFourAssignees(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("41", "42");
@@ -463,7 +463,7 @@ public class BaselineTests
     public async Task A_report_under_a_baseline_list_that_gained_a_sprint_short_of_five_assignees_asks_for_derive_like_any_changed_list()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         AddSprintFortyOneWithFourAssignees(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("42");
@@ -483,7 +483,7 @@ public class BaselineTests
     {
         // The finding behind D50: the list is fixed, and the assignees are read as of the last sync.
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         foreach (var (person, days) in People.Team.Select((person, index) => (person, index + 1)))
         {
             Delivered(pipeline.Jira, 41, $"FAKE-{days}", points: 3, person, days);
@@ -507,7 +507,7 @@ public class BaselineTests
     {
         // B8 of the final review: such a sprint was reported as having "fewer than five assignees".
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Jira.AddClosedSprintWithoutStart(43, "Fake Sprint 43", completed: Local(2026, 2, 2, 9));
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("42", "43");
@@ -527,7 +527,7 @@ public class BaselineTests
         // The list is meant to be fixed, but it is a setting, and reports made under two lists can be laid side
         // by side. Sprint 41 has one assignee in bucket 3 and in Review.
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         AddSprintWithOneAssigneeInBucketThreeAndInReview(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
 
@@ -563,7 +563,7 @@ public class BaselineTests
     public async Task A_report_is_refused_when_the_baseline_list_changed_since_derive_so_it_never_shows_another_lists_baseline()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         AddSprintWithOneAssigneeInBucketThreeAndInReview(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("42");
@@ -588,7 +588,7 @@ public class BaselineTests
     public async Task A_baseline_sprint_id_that_is_not_digits_is_refused_before_anything_is_fetched(string ids)
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = JsonNode.Parse(ids);
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -604,7 +604,7 @@ public class BaselineTests
     public async Task Baseline_sprint_ids_are_trimmed_and_one_listed_twice_counts_once()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray(" 41 ", "41");
         foreach (var (person, days) in People.Team.Select((person, index) => (person, index + 1)))
         {
@@ -629,7 +629,7 @@ public class BaselineTests
         // Sprint 77 was created on another board; Jira lists it on this one, and it is not this board's sprint.
         // Sprint 43 is running and sprint 44 has not started: a baseline is fixed, so it is drawn from completed sprints.
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Jira.AddSprint(43, "Fake Sprint 43", Local(2026, 2, 2, 9), plannedEnd: Local(2026, 2, 13, 17));
         pipeline.Jira.AddFutureSprint(44, "Fake Sprint 44");
         pipeline.Jira.AddSprint(77, "Fake Other Team Sprint", Local(2026, 1, 12, 9), plannedEnd: Local(2026, 1, 26, 9), completed: Local(2026, 1, 26, 9), originBoardId: 499999);
@@ -653,7 +653,7 @@ public class BaselineTests
     public async Task A_baseline_sprint_id_that_is_not_a_completed_sprint_of_the_configured_board_stops_report_too(string listed)
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Jira.AddSprint(43, "Fake Sprint 43", Local(2026, 2, 2, 9), plannedEnd: Local(2026, 2, 13, 17));
         pipeline.Jira.AddTeam(41);
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
@@ -719,10 +719,11 @@ public class BaselineTests
         public double? P85CalendarDays { get; init; }
     }
 
-    private static void AddSprints(FakeJira jira)
+    /// <summary>The harness's two sprints as two working weeks each: Monday 09:00 to the second Friday 17:00, completed as planned.</summary>
+    private static void AddTwoSprintsOfTwoWorkingWeeks(FakeJira jira)
     {
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 16, 17), completed: Local(2026, 1, 16, 17));
-        jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 9), plannedEnd: Local(2026, 1, 30, 17), completed: Local(2026, 1, 30, 17));
+        jira.AddSprint41(plannedEnd: Local(2026, 1, 16, 17), completed: Local(2026, 1, 16, 17));
+        jira.AddSprint42(start: Local(2026, 1, 19, 9), plannedEnd: Local(2026, 1, 30, 17), completed: Local(2026, 1, 30, 17));
     }
 
     /// <summary>

@@ -1,5 +1,5 @@
 using Telltale.Pipeline.Tests.Harness;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -32,7 +32,7 @@ public class PointBucketTests
     public async Task An_issue_re_estimated_after_its_cycle_started_stays_in_the_bucket_of_its_estimate_at_cycle_start()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Estimated 3 when development started on Tuesday; raised to 8 on Wednesday; done Thursday.
@@ -52,7 +52,7 @@ public class PointBucketTests
     public async Task An_issue_re_estimated_before_its_cycle_started_is_in_the_bucket_of_the_later_estimate()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Estimated 3 at creation; raised to 5 on Tuesday; development from Wednesday; done Friday.
@@ -70,7 +70,7 @@ public class PointBucketTests
     public async Task An_issue_with_no_estimate_at_cycle_start_is_unestimated_even_if_estimated_later()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // No estimate when development started on Tuesday; estimated 5 on Wednesday; done Thursday.
@@ -88,7 +88,7 @@ public class PointBucketTests
     public async Task An_issue_with_no_point_history_uses_its_current_estimate()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(2)
             .Moved(Local(2026, 1, 6, 9), Workflow.Development)
@@ -103,7 +103,7 @@ public class PointBucketTests
     public async Task Each_issue_is_in_the_bucket_of_its_own_estimate_at_its_own_cycle_start()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Both are estimated 8 now. FAKE-1 was 3 when it started on Tuesday; FAKE-2 was already 8 when it started on Thursday.
@@ -129,7 +129,7 @@ public class PointBucketTests
     public async Task Point_history_that_carries_its_numbers_in_from_and_to_is_read_the_same_way()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // The other shape the documentation allows: the numbers are in from and to, and nowhere else. Raised from 3 to 5 before development started.
@@ -148,7 +148,7 @@ public class PointBucketTests
     public async Task A_re_estimate_fetched_by_a_later_sync_does_not_move_an_issue_that_had_already_started()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
         var issue = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
             .Moved(Local(2026, 1, 6, 9), Workflow.Development)
@@ -180,7 +180,7 @@ public class PointBucketTests
         // two numbers that disagree, a negative number, and a number written with a decimal comma.
         const string otherFieldId = FakeJira.OtherFieldId;
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
         pipeline.Config["jira"]!["storyPointFieldId"] = otherFieldId;
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development)
             .AddHistory(Local(2026, 1, 7, 9), otherFieldId, "Fake Reviewer", null, null, to, toText);
@@ -200,7 +200,7 @@ public class PointBucketTests
     public async Task Point_history_that_carries_the_same_number_in_both_places_is_read()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Raised from 3 to 5 before development started; each number is in from or to and again, written another way, in the text beside it.
@@ -219,7 +219,7 @@ public class PointBucketTests
     public async Task Point_history_whose_values_are_json_numbers_is_read()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
         pipeline.Jira.PointHistoryAsNumbers = true;
 
@@ -239,7 +239,7 @@ public class PointBucketTests
     public async Task A_re_estimate_at_the_instant_of_the_cycle_start_but_recorded_after_the_move_into_work_does_not_move_the_issue()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Tuesday 09:00: moved into development, and then, in a later changelog entry with the same time, raised from 3 to 8.
@@ -257,7 +257,7 @@ public class PointBucketTests
     public async Task A_re_estimate_at_the_instant_of_the_cycle_start_recorded_before_the_move_into_work_is_the_issues_bucket()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Tuesday 09:00: raised from 3 to 8, and then, in a later changelog entry with the same time, moved into development.
@@ -279,7 +279,7 @@ public class PointBucketTests
         // An issue the store already holds is fetched again only when it changes in Jira, so the history of a
         // newly named field would be missing for every other issue, and "no history" would be read as "never changed".
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
             .Moved(Local(2026, 1, 6, 9), Workflow.Development)
             .Moved(Local(2026, 1, 8, 9), Workflow.Done);
@@ -300,7 +300,7 @@ public class PointBucketTests
     public async Task A_sync_is_refused_on_a_store_filled_before_point_history_was_fetched()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
             .Moved(Local(2026, 1, 6, 9), Workflow.Development)
             .Moved(Local(2026, 1, 8, 9), Workflow.Done);
@@ -318,7 +318,7 @@ public class PointBucketTests
     public async Task After_a_backfill_under_the_changed_history_field_sync_works_again()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
         var issue = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
             .Moved(Local(2026, 1, 6, 9), Workflow.Development);
@@ -337,7 +337,7 @@ public class PointBucketTests
     {
         // B16 of the final review: "-0" parses as a number that is not negative, and was stored and labelled as "-0".
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(-0.0)
             .AddHistory(Local(2026, 1, 5, 10), FakeJira.StoryPointFieldId, "Fake Story Points", null, "3", null, "-0")
@@ -357,7 +357,7 @@ public class PointBucketTests
         // Owner decision: story point history values are numbers only. Each is kept in one form however Jira
         // writes it ("0.50", " 3.0 "), and an empty value is no estimate. The raw table is read because no view shows it.
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9))
             .Reestimated(Local(2026, 1, 6, 9), 0.5)
             .AddHistory(Local(2026, 1, 7, 9), FakeJira.StoryPointFieldId, "Fake Story Points", null, "0.50", null, " 3.0 ")
@@ -377,7 +377,7 @@ public class PointBucketTests
     {
         // Owner decision D35. Such an issue is in no row of the cycle time table, so its bucket is read from derived data.
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
 
         // Straight to done on Thursday. Raised from 3 to 5 on Tuesday, before that, and to 8 on Friday, after it.
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
@@ -394,7 +394,7 @@ public class PointBucketTests
     public async Task A_delivered_issue_that_never_entered_a_work_status_and_had_no_estimate_when_delivered_is_unestimated()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
 
         // Straight to done on Thursday with no estimate; estimated 5 on Friday.
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9))
@@ -410,7 +410,7 @@ public class PointBucketTests
     public async Task For_an_issue_that_never_entered_a_work_status_a_re_estimate_recorded_after_the_move_into_done_at_the_same_instant_does_not_count()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
 
         // Thursday 09:00: moved straight to done, and then, in a later changelog entry with the same time, raised from 3 to 8.
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
@@ -426,7 +426,7 @@ public class PointBucketTests
     public async Task For_an_issue_that_never_entered_a_work_status_a_re_estimate_recorded_before_the_move_into_done_at_the_same_instant_counts()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint(pipeline.Jira);
+        AddSprint41FromMondayEvening(pipeline.Jira);
 
         // Thursday 09:00: raised from 3 to 5, and then, in a later changelog entry with the same time, moved straight to done. Raised to 8 on Friday.
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
@@ -443,6 +443,7 @@ public class PointBucketTests
     private static Task<IReadOnlyList<double?>> BucketsOfDeliveredIssuesWithoutACycleAsync(PipelineHarness pipeline) =>
         pipeline.QueryAsync<double?>("SELECT point_bucket FROM issue_cycle WHERE delivered = 1 AND cycle_start IS NULL;");
 
-    private static void AddSprint(FakeJira jira) =>
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 20), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
+    /// <summary>The harness's sprint 41, starting on Monday 5 January at 20:00 instead of 09:00.</summary>
+    private static void AddSprint41FromMondayEvening(FakeJira jira) =>
+        jira.AddSprint41(start: Local(2026, 1, 5, 20));
 }

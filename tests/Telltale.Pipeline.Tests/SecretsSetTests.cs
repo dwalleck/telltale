@@ -1,7 +1,7 @@
 using Telltale.Cli;
 using Telltale.Core.Secrets;
 using Telltale.Pipeline.Tests.Harness;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -221,7 +221,7 @@ public class SecretsSetTests
     {
         // Issues without an assignee leave no hash behind, so no stored hash can stop matching.
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).Moved(Local(2026, 1, 7, 9), Workflow.Development).Moved(Local(2026, 1, 9, 9), Workflow.Done);
         await pipeline.RunAsync("run", "--sprint", "41");
         pipeline.Secrets.Remove(SecretName.HashingSalt);
@@ -276,7 +276,7 @@ public class SecretsSetTests
 
     private static async Task RunOnceWithAnAssigneeAsync(PipelineHarness pipeline)
     {
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).AssignedTo(People.One)
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 9), Workflow.Done);
@@ -284,15 +284,13 @@ public class SecretsSetTests
         await Assert.That(exit).IsEqualTo(0);
     }
 
-    private static void AddOneSprint(FakeJira jira) =>
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
 
     [Test]
     public async Task No_secret_value_reaches_the_console_the_configuration_file_the_database_or_the_report()
     {
         await using var pipeline = new PipelineHarness();
         pipeline.Secrets.Clear();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 9), Workflow.Done);

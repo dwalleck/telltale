@@ -1,5 +1,5 @@
 using Telltale.Pipeline.Tests.Harness;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -15,7 +15,7 @@ public class RealJiraCollectionTests
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.Shapes = shapes;
         pipeline.Jira.SearchPageSize = 2;
-        AddSprint41(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         AddDeliveredIssues(pipeline.Jira, count: 5);
         AddTeamAfterTheOthers(pipeline.Jira);
 
@@ -32,7 +32,7 @@ public class RealJiraCollectionTests
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.SearchPageSize = 2;
         pipeline.Jira.RepeatsIssueOnNextPage = true;
-        AddSprint41(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         AddDeliveredIssues(pipeline.Jira, count: 3);
         AddTeamAfterTheOthers(pipeline.Jira);
 
@@ -52,7 +52,7 @@ public class RealJiraCollectionTests
         // Ticket 02's review, finding 5: out-of-scope issues take room on a page. The first page holds none but them.
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.SearchPageSize = 2;
-        AddSprint41(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Jira.AddIssue("FAKE-101", Local(2026, 1, 5, 10)).OfType(FakeIssueType.Epic);
         pipeline.Jira.AddIssue("FAKE-102", Local(2026, 1, 5, 11)).OfType(FakeIssueType.SubTask);
         AddDeliveredIssues(pipeline.Jira, count: 3);
@@ -74,7 +74,7 @@ public class RealJiraCollectionTests
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.Shapes = shapes;
         pipeline.Jira.ChangelogPageSize = 2;
-        AddSprint41(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         AddDeliveredIssues(pipeline.Jira, count: 3);
         AddTeamAfterTheOthers(pipeline.Jira);
 
@@ -93,7 +93,7 @@ public class RealJiraCollectionTests
         foreach (var pipeline in new[] { repeating, plain })
         {
             pipeline.Jira.ChangelogPageSize = 2;
-            AddSprint41(pipeline.Jira);
+            pipeline.Jira.AddSprint41();
             AddDeliveredIssues(pipeline.Jira, count: 3);
             AddTeamAfterTheOthers(pipeline.Jira);
         }
@@ -148,7 +148,7 @@ public class RealJiraCollectionTests
     public async Task A_rate_limited_answer_followed_by_success_completes_the_run_after_waiting_as_long_as_jira_said()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint41(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         AddDeliveredIssues(pipeline.Jira, count: 3);
         AddTeamAfterTheOthers(pipeline.Jira);
         pipeline.Jira.Handler.AnswerNext(HttpMethod.Post, "/rest/api/3/search/jql", StubHttpHandler.RateLimited(30), StubHttpHandler.RateLimited(7));
@@ -170,7 +170,7 @@ public class RealJiraCollectionTests
     public async Task Rate_limited_answers_beyond_the_retry_limit_fail_the_run_plainly_and_leave_the_store_and_the_watermark_as_they_were()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint41(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         AddDeliveredIssues(pipeline.Jira, count: 2);
         await pipeline.RunAllAsync(["backfill"]);
         var before = await pipeline.ReadStoreContentAsync();
@@ -198,7 +198,7 @@ public class RealJiraCollectionTests
     public async Task A_rate_limited_answer_that_names_no_wait_is_retried_after_waits_that_double()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint41(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         AddDeliveredIssues(pipeline.Jira, count: 3);
         AddTeamAfterTheOthers(pipeline.Jira);
         pipeline.Jira.Handler.AnswerNext(HttpMethod.Get, "/rest/api/3/status", StubHttpHandler.RateLimited(null), StubHttpHandler.RateLimited(null), StubHttpHandler.RateLimited(null));
@@ -214,7 +214,7 @@ public class RealJiraCollectionTests
     {
         // The other documented form of Retry-After: an HTTP date instead of a number of seconds.
         await using var pipeline = new PipelineHarness();
-        AddSprint41(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         AddDeliveredIssues(pipeline.Jira, count: 3);
         AddTeamAfterTheOthers(pipeline.Jira);
         var start = pipeline.Clock.GetUtcNow();
@@ -233,7 +233,7 @@ public class RealJiraCollectionTests
     public async Task A_rate_limited_answer_is_waited_out_for_at_least_a_second_and_at_most_five_minutes(int retryAfterSeconds, int secondsWaited, bool retried)
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint41(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         AddDeliveredIssues(pipeline.Jira, count: 1);
         pipeline.Jira.Handler.AnswerNext(HttpMethod.Post, "/rest/api/3/search/jql", StubHttpHandler.RateLimited(retryAfterSeconds));
 
@@ -253,7 +253,7 @@ public class RealJiraCollectionTests
     public async Task A_rate_limited_answer_whose_wait_cannot_be_read_ends_the_run_and_is_not_taken_for_one_that_names_no_wait(string retryAfter)
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint41(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         AddDeliveredIssues(pipeline.Jira, count: 1);
         pipeline.Jira.Handler.AnswerNext(HttpMethod.Post, "/rest/api/3/search/jql", StubHttpHandler.RateLimitedWithHeader(retryAfter));
 
@@ -269,7 +269,7 @@ public class RealJiraCollectionTests
     {
         // Four requests are each told to wait five minutes. Three waits make fifteen minutes; the fourth is not started.
         await using var pipeline = new PipelineHarness();
-        AddSprint41(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         AddDeliveredIssues(pipeline.Jira, count: 1);
         pipeline.Jira.Handler
             .AnswerNext(HttpMethod.Get, "/rest/api/3/status", StubHttpHandler.RateLimited(300))
@@ -292,7 +292,7 @@ public class RealJiraCollectionTests
     {
         // The user's Ctrl+C arrives while the command waits.
         await using var pipeline = new PipelineHarness();
-        AddSprint41(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         AddDeliveredIssues(pipeline.Jira, count: 1);
         pipeline.Jira.Handler.AnswerNext(HttpMethod.Post, "/rest/api/3/search/jql", StubHttpHandler.RateLimited(30));
         pipeline.Clock.DuringWait = pipeline.Cancellation.Cancel;
@@ -349,7 +349,7 @@ public class RealJiraCollectionTests
         {
             pipeline.Jira.SearchPageSize = 2;
             pipeline.Jira.ChangelogPageSize = 2;
-            AddSprint41(pipeline.Jira);
+            pipeline.Jira.AddSprint41();
             AddDeliveredIssues(pipeline.Jira, count: 5);
         }
 
@@ -377,7 +377,7 @@ public class RealJiraCollectionTests
     public async Task Old_history_whose_items_carry_no_field_id_and_null_values_still_counts()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint41(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // In Development since the Friday before the sprint; added to the sprint on Wednesday 09:00; Done on Friday 09:00.
@@ -397,7 +397,7 @@ public class RealJiraCollectionTests
     public async Task Old_history_of_a_custom_field_that_happens_to_be_named_status_is_not_taken_for_a_move()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint41(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         AddDeliveredIssues(pipeline.Jira, count: 3);
         AddTeamAfterTheOthers(pipeline.Jira);
         pipeline.Jira.Issues[0].AddHistory(Local(2026, 1, 8, 9), "customfield_10999", "status", null, null, "700001", "Synthetic custom value", withoutFieldId: true);
@@ -419,7 +419,7 @@ public class RealJiraCollectionTests
     {
         // That includes the story point field: sites name it differently, so no name says an old item is its history.
         await using var pipeline = new PipelineHarness();
-        AddSprint41(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         AddDeliveredIssues(pipeline.Jira, count: 1);
         pipeline.Jira.Handler.Override(HttpMethod.Post, "/rest/api/3/changelog/bulkfetch", _ => true, StubHttpHandler.Json(ChangelogWithOneItem(item)));
 
@@ -435,7 +435,7 @@ public class RealJiraCollectionTests
     public async Task A_status_change_whose_values_are_not_status_ids_stops_the_run_and_nothing_is_stored(string item)
     {
         await using var pipeline = new PipelineHarness();
-        AddSprint41(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         AddDeliveredIssues(pipeline.Jira, count: 1);
         pipeline.Jira.Handler.Override(HttpMethod.Post, "/rest/api/3/changelog/bulkfetch", _ => true, StubHttpHandler.Json(ChangelogWithOneItem(item)));
 
@@ -461,8 +461,6 @@ public class RealJiraCollectionTests
     /// </summary>
     private static void AddTeamAfterTheOthers(FakeJira jira) => jira.AddIdleTeam(Local(2026, 1, 12, 9), 41);
 
-    private static void AddSprint41(FakeJira jira) =>
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
 
     /// <summary>
     /// Issues FAKE-1 to FAKE-n, each created, started and finished inside sprint 41, an hour after the one before,

@@ -2,7 +2,7 @@ using System.Net;
 using Telltale.Core.Identity;
 using Telltale.Core.Secrets;
 using Telltale.Pipeline.Tests.Harness;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -19,7 +19,7 @@ public class BackfillRebuildTests
     {
         // Story 47: the database is disposable. The store was built up over a backfill and a later sync.
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddSprints41And42();
         pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9)).AssignedTo(People.One).Estimated(3).InSprints(42)
             .Moved(Local(2026, 1, 21, 9), Workflow.Development)
@@ -55,7 +55,7 @@ public class BackfillRebuildTests
     public async Task An_issue_deleted_in_jira_is_still_counted_after_a_sync_and_no_longer_after_a_backfill()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddSprints41And42();
         pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development)
@@ -85,8 +85,8 @@ public class BackfillRebuildTests
     public async Task A_sprint_removed_from_the_board_in_jira_stays_after_a_sync_and_is_gone_from_the_store_after_a_backfill()
     {
         await using var pipeline = new PipelineHarness();
-        pipeline.Jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
-        var removed = pipeline.Jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9), completed: Local(2026, 2, 2, 9, 30));
+        pipeline.Jira.AddSprint41();
+        var removed = pipeline.Jira.AddSprint42();
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development)
             .Moved(Local(2026, 1, 22, 9), Workflow.Done);
@@ -132,7 +132,7 @@ public class BackfillRebuildTests
 
         static void BuildBoard(FakeJira jira)
         {
-            AddTwoSprints(jira);
+            jira.AddSprints41And42();
             jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).Estimated(3).InSprints(41)
                 .Reestimated(Local(2026, 1, 7, 9), 8)
                 .SprintsChanged(Local(2026, 1, 20, 9), 42)
@@ -147,7 +147,7 @@ public class BackfillRebuildTests
         // Statuses are reference data: stored history still names a status by ID after Jira stops listing it,
         // and the report needs its name. A rebuild does not clear them.
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddSprints41And42();
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9)).InSprints(41)
             .Moved(Local(2026, 1, 6, 9), Workflow.Review)
@@ -213,7 +213,7 @@ public class BackfillRebuildTests
 
         static void BuildBoard(FakeJira jira)
         {
-            AddTwoSprints(jira);
+            jira.AddSprints41And42();
             jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9)).AssignedTo(People.One)
                 .Moved(Local(2026, 1, 21, 9), Workflow.Development);
             jira.AddIssue("FAKE-2", Local(2026, 1, 20, 9)).AssignedTo(People.Two)
@@ -235,7 +235,7 @@ public class BackfillRebuildTests
     public async Task The_rows_of_an_issue_still_in_jira_are_the_same_before_and_after_a_backfill_that_clears_another()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddSprints41And42();
         var kept = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9)).AssignedTo(People.One).Estimated(3).InSprints(42)
             .Moved(Local(2026, 1, 21, 9), Workflow.Development)
             .Moved(Local(2026, 1, 22, 9), Workflow.Done);
@@ -294,7 +294,7 @@ public class BackfillRebuildTests
 
         static void BuildBoard(FakeJira jira)
         {
-            AddTwoSprints(jira);
+            jira.AddSprints41And42();
             jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
                 .Moved(Local(2026, 1, 21, 9), Workflow.Development)
                 .Moved(Local(2026, 1, 22, 9), Workflow.Done);
@@ -353,7 +353,7 @@ public class BackfillRebuildTests
 
         static void BuildBoard(FakeJira jira)
         {
-            AddTwoSprints(jira);
+            jira.AddSprints41And42();
             jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9)).AssignedTo(People.One)
                 .Moved(Local(2026, 1, 21, 9), Workflow.Development)
                 .Moved(Local(2026, 1, 22, 9), Workflow.Done);
@@ -369,8 +369,8 @@ public class BackfillRebuildTests
         // for no particular sprint, the store was brought up to date, and why there is no report is said, not failed.
         // Sprint 41 started on 5 January and the store is filled from the 15th.
         await using var pipeline = new PipelineHarness();
-        pipeline.Jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
-        pipeline.Jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 16, 9));
+        pipeline.Jira.AddSprint41();
+        pipeline.Jira.AddSprint42(plannedEnd: Local(2026, 2, 16, 9), stillRunning: true);
         pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development)
@@ -401,7 +401,7 @@ public class BackfillRebuildTests
         // issues found out of scope, which needs Jira to return the issue (for example one converted to a
         // sub-task before the new start date and not touched since).
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddSprints41And42();
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
@@ -438,7 +438,7 @@ public class BackfillRebuildTests
     {
         // Counts only. They are the sign of a backfill that replaced much with little.
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddSprints41And42();
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development)
             .Moved(Local(2026, 1, 22, 9), Workflow.Done);
@@ -464,8 +464,8 @@ public class BackfillRebuildTests
         await using var pipeline = new PipelineHarness();
         var sprints = new[]
         {
-            pipeline.Jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10)),
-            pipeline.Jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9), completed: Local(2026, 2, 2, 9, 30)),
+            pipeline.Jira.AddSprint41(),
+            pipeline.Jira.AddSprint42(),
         };
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9)).Moved(Local(2026, 1, 21, 9), Workflow.Development);
         pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 20, 9)).Moved(Local(2026, 1, 22, 9), Workflow.Development);
@@ -522,7 +522,7 @@ public class BackfillRebuildTests
         // date begins last at twelve hours behind UTC, which is 06:00 in the team's zone in January: a sprint
         // that started at 09:00 on the start date is whole for any account, one that started at 05:00 may not be.
         await using var pipeline = new PipelineHarness();
-        pipeline.Jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, startHour), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
+        pipeline.Jira.AddSprint41(start: Local(2026, 1, 5, startHour));
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 8, 9), Workflow.Done);
@@ -535,10 +535,4 @@ public class BackfillRebuildTests
         await Assert.That(File.Exists(Path.Combine(pipeline.ReportDirectory, "sprint-41.md"))).IsEqualTo(expectedExit == 0);
     }
 
-    /// <summary>Sprint 41 (5 to 19 January 2026) and sprint 42 (19 January to 2 February), both completed.</summary>
-    private static void AddTwoSprints(FakeJira jira)
-    {
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
-        jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9), completed: Local(2026, 2, 2, 9, 30));
-    }
 }

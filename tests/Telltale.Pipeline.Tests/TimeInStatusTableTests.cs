@@ -4,7 +4,7 @@ using Telltale.Pipeline.Tests.Harness;
 using Telltale.Reporting;
 using Telltale.Storage.Sqlite;
 using TUnit.Assertions.Enums;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -22,7 +22,7 @@ public class TimeInStatusTableTests
     public async Task The_report_shows_the_issue_count_and_median_business_days_for_each_status_issues_were_in_during_the_sprint()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // In the sprint from before it started. New until Tuesday 09:00, Development until Thursday 09:00.
@@ -53,7 +53,7 @@ public class TimeInStatusTableTests
     public async Task An_issue_added_to_the_sprint_after_it_started_only_contributes_time_from_when_it_joined()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // In Development since the Friday before the sprint; added to the sprint on Wednesday 09:00; Done on Friday 09:00.
@@ -72,7 +72,7 @@ public class TimeInStatusTableTests
     public async Task An_issue_removed_mid_sprint_only_contributes_time_while_it_was_a_member()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // In the sprint and in Development from creation; taken out of the sprint on Thursday 09:00; Done the next Wednesday.
@@ -91,7 +91,7 @@ public class TimeInStatusTableTests
     public async Task An_issue_carried_over_contributes_to_each_sprint_only_within_that_sprints_window()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Development from Thursday 15 January 09:00. Sprint 41 completes on Monday 19 January 09:00 and Jira carries
@@ -120,7 +120,7 @@ public class TimeInStatusTableTests
     public async Task Statuses_appear_in_board_order_with_the_median_over_the_issues_that_were_in_each_and_a_status_nobody_was_in_is_omitted()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
 
         // Board order is the order the configuration lists the statuses in. Here Blocked sits before Development,
         // which is neither the order of the status IDs nor the order Jira lists the statuses in.
@@ -179,7 +179,7 @@ public class TimeInStatusTableTests
     {
         // Owner decision D21. Without it the weekend-only issue would make the Review row "4 issues".
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
 
         // In Review only from Saturday 09:00 to Sunday 09:00: a calendar day, and no business time.
         // Development before that: 15 hours of Monday and Tuesday to Friday, 4.625 business days.
@@ -215,7 +215,7 @@ public class TimeInStatusTableTests
     {
         // B14 of the final review: every other median in these tests is exact to one decimal.
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
 
         // Five people's issues, in Development from the sprint's start (Monday 5 January 09:00): to Tuesday
         // 09:00 twice (1 day), to Tuesday 18:00 (1.375 days) and to Wednesday 09:00 twice (2 days).
@@ -237,7 +237,7 @@ public class TimeInStatusTableTests
     public async Task Time_in_shipped_is_stored_in_status_intervals_and_done_statuses_are_not_in_the_table()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
         var issue = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9)).InSprints(41)
             .Moved(Local(2026, 1, 6, 9), Workflow.Development)
@@ -267,7 +267,7 @@ public class TimeInStatusTableTests
     public async Task A_sprint_no_issue_belonged_to_says_so_in_place_of_the_table()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
 
         // In sprint 41 only: sprint 42 has no member.
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41);
@@ -291,7 +291,7 @@ public class TimeInStatusTableTests
     public async Task Calendar_time_business_time_and_business_days_are_stored_per_issue_sprint_and_status_without_weekends_and_holidays()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
         pipeline.Config["holidays"] = new JsonArray("2026-01-12");
 
@@ -329,7 +329,7 @@ public class TimeInStatusTableTests
     {
         // The holiday list is required (ADR-0001): left out, every business-day figure would silently count holidays.
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
         pipeline.Config.Remove("holidays");
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -345,7 +345,7 @@ public class TimeInStatusTableTests
     public async Task An_empty_sprint_field_id_is_refused(string fieldId)
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
         pipeline.Config["jira"]!["sprintFieldId"] = fieldId;
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -363,7 +363,7 @@ public class TimeInStatusTableTests
     public async Task A_sprint_field_id_that_is_not_a_custom_field_id_is_refused(string fieldId)
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
         pipeline.Config["jira"]!["sprintFieldId"] = fieldId;
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -377,7 +377,7 @@ public class TimeInStatusTableTests
     public async Task A_sprint_field_id_equal_to_the_story_point_field_id_is_refused()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
         pipeline.Config["jira"]!["sprintFieldId"] = FakeJira.StoryPointFieldId;
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -393,7 +393,7 @@ public class TimeInStatusTableTests
         // sprintFieldId mistyped as a user picker: its history holds account IDs, which must never be stored.
         const string userPickerFieldId = FakeJira.OtherFieldId;
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
         pipeline.Config["jira"]!["sprintFieldId"] = userPickerFieldId;
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development)
             .AddHistory(Local(2026, 1, 7, 9), userPickerFieldId, "Fake Reviewer", People.One.AccountId, People.One.DisplayName, People.Two.AccountId, People.Two.DisplayName);
@@ -414,7 +414,7 @@ public class TimeInStatusTableTests
     {
         // Jira writes a Sprint change as "41, 42". The store holds one form, "41,42", so the two columns compare.
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development)
             .InSprints(41)
             .SprintsChanged(Local(2026, 1, 19, 10), 41, 42);
@@ -432,7 +432,7 @@ public class TimeInStatusTableTests
         // A store filled before Sprint changes were normalised holds "41, 42". A change is never written twice,
         // so nothing but a migration would ever correct it.
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development)
             .InSprints(41)
             .SprintsChanged(Local(2026, 1, 19, 10), 41, 42);
@@ -453,7 +453,7 @@ public class TimeInStatusTableTests
     public async Task The_migration_of_sprint_changes_leaves_status_changes_and_empty_values_as_they_are()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9))
             .Moved(Local(2026, 1, 6, 9), Workflow.Development)
             .SprintsChanged(Local(2026, 1, 7, 9), 41)
@@ -474,7 +474,7 @@ public class TimeInStatusTableTests
     {
         // A no-break space and a tab around the IDs: accepted as before, and gone from what is stored.
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development)
             .AddHistory(Local(2026, 1, 7, 9), FakeJira.SprintFieldId, "Sprint", "", "", "41,\u00A042\t", "Fake Sprint 41, Fake Sprint 42")
             .InSprints(41, 42);
@@ -489,7 +489,7 @@ public class TimeInStatusTableTests
     public async Task An_issue_stored_before_the_sprint_field_was_kept_stops_derive_with_a_message_to_backfill()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
 
         // FAKE-1 is in no sprint, which is known and stops nothing.
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development);
@@ -511,7 +511,7 @@ public class TimeInStatusTableTests
     public async Task A_status_name_with_a_table_separator_stays_inside_its_cell()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
         pipeline.Jira.ServeEachIssueOncePer(People.Team);
         pipeline.Jira.RenameStatus(Workflow.Development, "Fake Dev | Build");
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41)
@@ -548,7 +548,7 @@ public class TimeInStatusTableTests
     public async Task A_report_from_derived_data_built_before_the_time_in_status_view_existed_says_to_rebuild_it()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41);
         await pipeline.RunAsync("run", "--sprint", "41");
         File.Delete(Path.Combine(pipeline.ReportDirectory, "sprint-41.md"));
@@ -568,7 +568,7 @@ public class TimeInStatusTableTests
     public async Task No_personal_or_free_text_from_the_sprint_field_or_its_history_reaches_the_store_or_the_report()
     {
         await using var pipeline = new PipelineHarness();
-        AddTwoSprints(pipeline.Jira);
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
         pipeline.Jira.AddTeam(41);
         var issue = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).AssignedTo(People.One);
         issue.AddHistory(Local(2026, 1, 7, 9), FakeJira.SprintFieldId, "Sprint", "", "", "41", "Fake Sprint 41", author: People.Two);
@@ -605,9 +605,9 @@ public class TimeInStatusTableTests
     /// Sprint 41: Monday 5 January 2026 09:00 to Monday 19 January 09:00, completed.
     /// Sprint 42: Monday 19 January 12:00 to Monday 2 February 09:00, completed.
     /// </summary>
-    private static void AddTwoSprints(FakeJira jira)
+    private static void AddTwoSprintsThreeHoursApart(FakeJira jira)
     {
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 9));
-        jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 12), plannedEnd: Local(2026, 2, 2, 9), completed: Local(2026, 2, 2, 9));
+        jira.AddSprint41(completed: Local(2026, 1, 19, 9));
+        jira.AddSprint42(start: Local(2026, 1, 19, 12), completed: Local(2026, 2, 2, 9));
     }
 }
