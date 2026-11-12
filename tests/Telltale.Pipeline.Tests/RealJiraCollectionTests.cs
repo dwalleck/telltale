@@ -368,8 +368,8 @@ public class RealJiraCollectionTests
         await Assert.That(errorOfFailedRun).IsEqualTo(message);
 
         // The failed run kept nothing of the pages it did get, and no watermark.
-        await Assert.That(storeAfterFailedRun).DoesNotContain("FAKE-").And.Contains("## watermark\n\n");
-        await Assert.That(await uninterrupted.ReadStoreContentAsync()).Contains("FAKE-5");
+        await Assert.That(storeAfterFailedRun).Contains("## issue\n\n").And.Contains("## watermark\n\n");
+        await Assert.That(await uninterrupted.ReadStoreContentAsync()).Contains(uninterrupted.Jira.StoredRowOf("FAKE-5"));
         await Assert.That(await interrupted.ReadStoreContentAsync()).IsEqualTo(await uninterrupted.ReadStoreContentAsync());
     }
 

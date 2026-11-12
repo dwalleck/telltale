@@ -272,7 +272,6 @@ public sealed class JiraCollector
 
             seen[issueId] = new RawIssue(
                 issueId,
-                Text(issue, "key"),
                 Text(issueType, "id"),
                 JiraTime.Parse(fields.GetProperty("created")),
                 Text(fields.GetProperty("status"), "id"),

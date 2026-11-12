@@ -309,7 +309,7 @@ public class SecretsSetTests
         // The scan is only worth something if it reads what the commands wrote and the secrets were used.
         await Assert.That(files.Keys).Contains("telltale.json");
         await Assert.That(files.Keys).Contains(Path.Combine("reports", "sprint-41.md"));
-        await Assert.That(files["store.db"]).Contains("FAKE-1");
+        await Assert.That(files["store.db"]).Contains(pipeline.Jira.IdOf("FAKE-1"));
         await Assert.That(pipeline.Out.ToString()).Contains("Stored the secret 'hashing salt'.");
         await Assert.That(pipeline.Secrets.Count).IsEqualTo(3);
 

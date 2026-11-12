@@ -253,7 +253,7 @@ public class JiraFailureTests
     }
 
     [Test]
-    [Arguments("""{"issues":[{"id":"900001","key":null,"fields":{"issuetype":{"id":"800001","hierarchyLevel":0}}}]}""")]
+    [Arguments("""{"issues":[{"id":null,"key":"FAKE-1","fields":{"issuetype":{"id":"800001","hierarchyLevel":0}}}]}""")]
     [Arguments("""{"issues":[{"id":"900001","key":"FAKE-1","fields":{"issuetype":{"id":"800001","hierarchyLevel":0},"created":"2026-01-06T15:00:00.000+0000","status":{"id":null}}}]}""")]
     public async Task A_null_where_jira_must_give_a_value_is_reported_plainly_and_nothing_is_stored(string searchAnswer)
     {
@@ -270,7 +270,7 @@ public class JiraFailureTests
         // "Nothing was stored": the store holds no issue key, and the status and sprint lists fetched before the search are not in it either.
         var files = await pipeline.ReadAllFilesAsync();
         await Assert.That(files.Keys).Contains("store.db");
-        await Assert.That(files["store.db"]).DoesNotContain("FAKE-1").And.DoesNotContain("Fake Sprint 41");
+        await Assert.That(files["store.db"]).DoesNotContain(pipeline.Jira.IdOf("FAKE-1")).And.DoesNotContain("Fake Sprint 41");
     }
 
     [Test]

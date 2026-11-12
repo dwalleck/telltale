@@ -118,7 +118,7 @@ public class IncrementalSyncTests
 
         // The second fetch was not empty: the overlap brings the newest issues back, and they are written again.
         await Assert.That(pipeline.Jira.SearchAnswers[1]).IsEquivalentTo(new[] { "FAKE-1", "FAKE-2" });
-        await Assert.That(storeBefore).Contains("FAKE-2");
+        await Assert.That(storeBefore).Contains(pipeline.Jira.StoredRowOf("FAKE-2"));
         await Assert.That(await pipeline.ReadStoreContentAsync(withoutAsOf: true)).IsEqualTo(storeBefore);
         await Assert.That(await pipeline.ReadReportBytesAsync(42, withoutAsOf: true)).IsEqualTo(reportBefore);
     }
@@ -346,7 +346,7 @@ public class IncrementalSyncTests
 
         await Assert.That(twice.Jira.SearchAnswers[1]).IsEquivalentTo(new[] { "FAKE-1", "FAKE-2", "FAKE-3" });
         var store = await twice.ReadStoreContentAsync();
-        await Assert.That(store).Contains("FAKE-3");
+        await Assert.That(store).Contains(twice.Jira.StoredRowOf("FAKE-3"));
         await Assert.That(store).Contains("Fake Renamed");
         await Assert.That(store).IsEqualTo(await once.ReadStoreContentAsync());
 

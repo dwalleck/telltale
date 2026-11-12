@@ -124,10 +124,9 @@ public sealed class SqliteStore : ITelltaleStore
             connection,
             transaction,
             """
-            INSERT INTO issue (issue_id, issue_key, issue_type_id, created, status_id, resolution_id, story_points, assignee_hash, updated, sprint_ids)
-            VALUES (@issueId, @key, @issueTypeId, @created, @statusId, @resolutionId, @storyPoints, @assigneeHash, @updated, @sprintIds)
+            INSERT INTO issue (issue_id, issue_type_id, created, status_id, resolution_id, story_points, assignee_hash, updated, sprint_ids)
+            VALUES (@issueId, @issueTypeId, @created, @statusId, @resolutionId, @storyPoints, @assigneeHash, @updated, @sprintIds)
             ON CONFLICT (issue_id) DO UPDATE SET
-                issue_key = excluded.issue_key,
                 issue_type_id = excluded.issue_type_id,
                 created = excluded.created,
                 status_id = excluded.status_id,
@@ -137,10 +136,10 @@ public sealed class SqliteStore : ITelltaleStore
                 updated = excluded.updated,
                 sprint_ids = excluded.sprint_ids;
             """,
-            ["@issueId", "@key", "@issueTypeId", "@created", "@statusId", "@resolutionId", "@storyPoints", "@assigneeHash", "@updated", "@sprintIds"],
+            ["@issueId", "@issueTypeId", "@created", "@statusId", "@resolutionId", "@storyPoints", "@assigneeHash", "@updated", "@sprintIds"],
             batch.Issues.Select(issue => new object?[]
             {
-                issue.IssueId, issue.Key, issue.IssueTypeId, StoredTime.ToStored(issue.Created), issue.StatusId, issue.ResolutionId,
+                issue.IssueId, issue.IssueTypeId, StoredTime.ToStored(issue.Created), issue.StatusId, issue.ResolutionId,
                 issue.StoryPoints, issue.AssigneeHash, StoredTime.ToStored(issue.Updated), issue.SprintIds,
             }),
             cancellationToken);
@@ -283,7 +282,7 @@ public sealed class SqliteStore : ITelltaleStore
         var statuses = await connection.QueryAsync<StatusRow>(Command(cancellationToken, "SELECT * FROM status ORDER BY status_id;"));
 
         return new RawData(
-            [.. issues.Select(row => new RawIssue(row.IssueId, row.IssueKey, row.IssueTypeId, StoredTime.FromStored(row.Created), row.StatusId, row.ResolutionId, row.StoryPoints, row.AssigneeHash, StoredTime.FromStored(row.Updated), row.SprintIds))],
+            [.. issues.Select(row => new RawIssue(row.IssueId, row.IssueTypeId, StoredTime.FromStored(row.Created), row.StatusId, row.ResolutionId, row.StoryPoints, row.AssigneeHash, StoredTime.FromStored(row.Updated), row.SprintIds))],
             [.. changes.Select(row => new RawChange(row.HistoryId, row.IssueId, StoredTime.FromStored(row.At), row.Field, row.FromValue, row.ToValue))],
             [.. sprints.Select(row => new RawSprint(row.SprintId, row.BoardId, row.Name, row.State, StoredTime.FromStoredOrNull(row.Started), StoredTime.FromStoredOrNull(row.PlannedEnd), StoredTime.FromStoredOrNull(row.Completed)))],
             [.. statuses.Select(row => new RawStatus(row.StatusId, row.Name, row.Category))]);
@@ -617,7 +616,6 @@ public sealed class SqliteStore : ITelltaleStore
     private sealed class IssueRow
     {
         public string IssueId { get; init; } = "";
-        public string IssueKey { get; init; } = "";
         public string IssueTypeId { get; init; } = "";
         public string Created { get; init; } = "";
         public string StatusId { get; init; } = "";

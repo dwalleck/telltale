@@ -475,7 +475,7 @@ public class TimeInStatusTableTests
         // A row as an earlier version of the tool left it: no Sprint field value was ever fetched for it,
         // and Jira no longer returns the issue, so the sync does not fill it in.
         await pipeline.ExecuteAsync(
-            $"INSERT INTO issue (issue_id, issue_key, issue_type_id, created, status_id, updated) VALUES ('900900', 'FAKE-900', '{FakeJira.IssueTypeStoryId}', '2026-01-02T15:00:00.000Z', '{Workflow.Development.Id}', '2026-01-02T15:00:00.000Z');");
+            $"INSERT INTO issue (issue_id, issue_type_id, created, status_id, updated) VALUES ('900900', '{FakeJira.IssueTypeStoryId}', '2026-01-02T15:00:00.000Z', '{Workflow.Development.Id}', '2026-01-02T15:00:00.000Z');");
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 

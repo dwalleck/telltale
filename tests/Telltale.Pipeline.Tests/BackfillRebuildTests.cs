@@ -37,8 +37,8 @@ public class BackfillRebuildTests
         await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
 
         // Not only uncounted: no row of the issue is left, raw or derived.
-        await Assert.That(storeAfterSync).Contains("FAKE-2");
-        await Assert.That(await pipeline.ReadStoreContentAsync()).DoesNotContain("FAKE-2");
+        await Assert.That(storeAfterSync).Contains(pipeline.Jira.StoredRowOf("FAKE-2"));
+        await Assert.That(await pipeline.ReadStoreContentAsync()).DoesNotContain(pipeline.Jira.StoredRowOf("FAKE-2"));
     }
 
     [Test]
@@ -87,7 +87,7 @@ public class BackfillRebuildTests
 
         var store = await changed.ReadStoreContentAsync();
         await Assert.That(store).IsNotEqualTo(underTheOldSetting);
-        await Assert.That(store).Contains("FAKE-1");
+        await Assert.That(store).Contains(changed.Jira.StoredRowOf("FAKE-1"));
         await Assert.That(store).IsEqualTo(await fresh.ReadStoreContentAsync());
 
         static void BuildBoard(FakeJira jira)
@@ -163,12 +163,12 @@ public class BackfillRebuildTests
 
         await Assert.That(failed).IsEqualTo(1);
         await Assert.That(interrupted.Error.ToString()).Contains(failure);
-        await Assert.That(storeBefore).Contains("FAKE-2");
+        await Assert.That(storeBefore).Contains(interrupted.Jira.StoredRowOf("FAKE-2"));
         await Assert.That(await interrupted.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
         await Assert.That(storeAfterFailure).IsEqualTo(storeBefore);
         await Assert.That(reportAfterFailure).IsEqualTo(reportBefore);
         var store = await interrupted.ReadStoreContentAsync();
-        await Assert.That(store).DoesNotContain("FAKE-2");
+        await Assert.That(store).DoesNotContain(interrupted.Jira.StoredRowOf("FAKE-2"));
         await Assert.That(store).IsEqualTo(await uninterrupted.ReadStoreContentAsync());
 
         static void BuildBoard(FakeJira jira)
@@ -210,11 +210,11 @@ public class BackfillRebuildTests
         // Every row that names the issue, raw and derived: its issue row with the hashed assignee, its changes,
         // its intervals and its cycle.
         var store = await pipeline.ReadStoreContentAsync();
-        await Assert.That(before).Contains("FAKE-1");
+        await Assert.That(before).Contains(pipeline.Jira.StoredRowOf("FAKE-1"));
         await Assert.That(before.Split('\n')).Count().IsGreaterThanOrEqualTo(4);
-        await Assert.That(before).Matches("(?m)^.*FAKE-1.* \\| [0-9a-f]{64} \\| .*$");
+        await Assert.That(before).Matches($"(?m)^{kept.Id} \\| .* \\| [0-9a-f]{{64}} \\| .*$");
         await Assert.That(RowsOf(kept, store)).IsEqualTo(before);
-        await Assert.That(store).DoesNotContain("FAKE-2");
+        await Assert.That(store).DoesNotContain(pipeline.Jira.StoredRowOf("FAKE-2"));
 
         static string RowsOf(FakeIssue issue, string store) =>
             string.Join('\n', store.Split('\n').Where(row => row.Contains(issue.Id, StringComparison.Ordinal)));
@@ -293,7 +293,7 @@ public class BackfillRebuildTests
         await oldSalt.RunAllAsync(["backfill"], ["derive"]);
 
         var store = await resalted.ReadStoreContentAsync();
-        await Assert.That(underTheOldSalt).Contains("FAKE-2");
+        await Assert.That(underTheOldSalt).Contains(resalted.Jira.StoredRowOf("FAKE-2"));
         await Assert.That(store).IsNotEqualTo(await oldSalt.ReadStoreContentAsync());
         await Assert.That(store).IsEqualTo(await fresh.ReadStoreContentAsync());
 
@@ -343,8 +343,8 @@ public class BackfillRebuildTests
         await Assert.That(before).Contains("\nDelivered issues: 5\n");
         await Assert.That(await pipeline.ReadReportAsync(41)).IsEqualTo(before);
         await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 5\n");
-        await Assert.That(storeBefore).Contains("FAKE-1");
-        await Assert.That(await pipeline.ReadStoreContentAsync()).DoesNotContain("FAKE-1");
+        await Assert.That(storeBefore).Contains(pipeline.Jira.StoredRowOf("FAKE-1"));
+        await Assert.That(await pipeline.ReadStoreContentAsync()).DoesNotContain(pipeline.Jira.StoredRowOf("FAKE-1"));
     }
 
     [Test]
@@ -385,7 +385,7 @@ public class BackfillRebuildTests
         pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 20, 9)).Moved(Local(2026, 1, 22, 9), Workflow.Development);
         await pipeline.RunAllAsync(["backfill"]);
         var storeBefore = await pipeline.ReadStoreContentAsync();
-        var gone = missing == "issues" ? "FAKE-" : "Fake Sprint";
+        var gone = missing == "issues" ? pipeline.Jira.StoredRowOf("FAKE-1") : "Fake Sprint";
 
         if (missing == "issues")
         {

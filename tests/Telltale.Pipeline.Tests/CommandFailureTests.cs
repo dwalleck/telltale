@@ -56,7 +56,7 @@ public class CommandFailureTests
         // The store exists by now, but the batch is written only after the whole fetch: the issue's key is not in it.
         var files = await pipeline.ReadAllFilesAsync();
         await Assert.That(files.Keys).Contains("store.db");
-        await Assert.That(string.Concat(files.Values)).DoesNotContain("FAKE-1");
+        await Assert.That(string.Concat(files.Values)).DoesNotContain(pipeline.Jira.IdOf("FAKE-1"));
     }
 
     private static void AddSprintAndIssue(FakeJira jira)

@@ -273,6 +273,7 @@ public sealed partial class FakeJira
     private readonly Lock _gate = new();
     private readonly List<FakeSprint> _sprints = [];
     private readonly List<FakeIssue> _issues = [];
+    private readonly Dictionary<string, string> _idsByKey = [];
     private readonly List<IReadOnlyList<string>> _searchAnswers = [];
     private readonly Dictionary<string, (List<FakeIssue> Found, int Answer, int Offset)> _searchPages = [];
     private readonly Dictionary<string, string> _statusNames = Workflow.BoardOrder.ToDictionary(status => status.Id, status => status.DefaultName);
@@ -449,9 +450,28 @@ public sealed partial class FakeJira
         {
             var issue = new FakeIssue(this, (_nextIssueId++).ToString(CultureInfo.InvariantCulture), key, created, createdIn ?? Workflow.New);
             _issues.Add(issue);
+            _idsByKey[key] = issue.Id;
             return issue;
         }
     }
+
+    /// <summary>
+    /// The Jira issue ID of the issue added with <paramref name="key"/>, also after it was deleted from the
+    /// site. The store identifies an issue by this ID and never holds its key (owner decision D52).
+    /// </summary>
+    public string IdOf(string key)
+    {
+        lock (_gate)
+        {
+            return _idsByKey[key];
+        }
+    }
+
+    /// <summary>
+    /// The start of every row about the issue added with <paramref name="key"/> in
+    /// <see cref="PipelineHarness.ReadStoreContentAsync"/>: its tables' first column is the issue ID.
+    /// </summary>
+    public string StoredRowOf(string key) => $"\n{IdOf(key)} | ";
 
     /// <summary>Deletes an issue from the site: no search finds it again, and nothing says it is gone.</summary>
     public void Delete(FakeIssue issue)

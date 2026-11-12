@@ -1,14 +1,14 @@
 namespace Telltale.Core.Storage;
 
 /// <summary>
-/// The fields kept from a Jira issue (ADR-0002): no summary, description or comment, and the
-/// assignee only as a salted hash (ADR-0003). <see cref="SprintIds"/> is what the Sprint field lists now:
+/// The fields kept from a Jira issue (ADR-0002): no summary, description or comment, the
+/// assignee only as a salted hash (ADR-0003), and the Jira issue ID but not the issue key, which
+/// anyone can look up an assignee by (owner decision D52). <see cref="SprintIds"/> is what the Sprint field lists now:
 /// sprint IDs with a comma between them (<c>41,42</c>), the form a Sprint change has, and empty when the issue is in no sprint. It is
 /// null only for an issue stored before the field was fetched, whose sprints are therefore unknown.
 /// </summary>
 public sealed record RawIssue(
     string IssueId,
-    string Key,
     string IssueTypeId,
     DateTimeOffset Created,
     string StatusId,

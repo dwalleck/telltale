@@ -140,15 +140,15 @@ public class RealDeliveriesTests
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        var rows = await pipeline.QueryAsync<(string IssueKey, string? CycleEnd, long Delivered, string? DeliverySprintId)>(
-            "SELECT i.issue_key, c.cycle_end, c.delivered, c.delivery_sprint_id FROM issue_cycle c JOIN issue i ON i.issue_id = c.issue_id ORDER BY i.issue_key;");
+        var rows = await pipeline.QueryAsync<(string IssueId, string? CycleEnd, long Delivered, string? DeliverySprintId)>(
+            "SELECT issue_id, cycle_end, delivered, delivery_sprint_id FROM issue_cycle ORDER BY issue_id;");
 
         // Both were moved to Done on 9 January at 15:00 in the team's zone, which is 21:00 UTC.
         await Assert.That(rows).IsEquivalentTo(
             new (string, string?, long, string?)[]
             {
-                ("FAKE-1", "2026-01-09T21:00:00.000Z", 1L, "41"),
-                ("FAKE-2", "2026-01-09T21:00:00.000Z", 0L, null),
+                (pipeline.Jira.IdOf("FAKE-1"), "2026-01-09T21:00:00.000Z", 1L, "41"),
+                (pipeline.Jira.IdOf("FAKE-2"), "2026-01-09T21:00:00.000Z", 0L, null),
             },
             CollectionOrdering.Matching);
     }
@@ -215,7 +215,7 @@ public class RealDeliveriesTests
 
         await Assert.That(exit).IsEqualTo(0);
         var store = (await pipeline.ReadAllFilesAsync())["store.db"];
-        await Assert.That(store).Contains("FAKE-11").And.DoesNotContain("FAKE-12").And.DoesNotContain("FAKE-13");
+        await Assert.That(store).Contains(pipeline.Jira.IdOf("FAKE-11")).And.DoesNotContain(pipeline.Jira.IdOf("FAKE-12")).And.DoesNotContain(pipeline.Jira.IdOf("FAKE-13"));
         await Assert.That(store).DoesNotContain(FakeIssueType.Epic.Id).And.DoesNotContain(FakeIssueType.SubTask.Id);
         var request = pipeline.Jira.Handler.Requests.Single(request => request.Path == "/rest/api/3/changelog/bulkfetch");
         using var body = System.Text.Json.JsonDocument.Parse(request.Body);
@@ -248,8 +248,8 @@ public class RealDeliveriesTests
         await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 4\n");
 
         // Its raw rows are gone, the issue and its history; the other issue keeps both of its changes.
-        var issueKeys = await pipeline.QueryAsync<string>("SELECT issue_key FROM issue WHERE issue_key IN ('FAKE-1', 'FAKE-2');");
-        await Assert.That(issueKeys).IsEquivalentTo(new[] { "FAKE-1" }, CollectionOrdering.Matching);
+        var issueIds = await pipeline.QueryAsync<string>("SELECT issue_id FROM issue WHERE issue_id IN (@first, @second);", new { first = pipeline.Jira.Issues[0].Id, second = converted.Id });
+        await Assert.That(issueIds).IsEquivalentTo(new[] { pipeline.Jira.Issues[0].Id }, CollectionOrdering.Matching);
         var changes = await pipeline.QueryAsync<(string IssueId, long Changes)>("SELECT issue_id, COUNT(*) FROM change WHERE issue_id IN (@first, @second) GROUP BY issue_id ORDER BY issue_id;", new { first = pipeline.Jira.Issues[0].Id, second = converted.Id });
         await Assert.That(changes).IsEquivalentTo(new[] { (pipeline.Jira.Issues[0].Id, 2L) }, CollectionOrdering.Matching);
     }
@@ -313,7 +313,7 @@ public class RealDeliveriesTests
             "Jira's issue search answered in a shape this tool does not understand (KeyNotFoundException). Nothing was stored.\n");
         var files = await pipeline.ReadAllFilesAsync();
         await Assert.That(files.Keys).Contains("store.db");
-        await Assert.That(files["store.db"]).DoesNotContain("FAKE-1").And.DoesNotContain("Fake Sprint 41");
+        await Assert.That(files["store.db"]).DoesNotContain(pipeline.Jira.StoredRowOf("FAKE-1")).And.DoesNotContain("Fake Sprint 41");
     }
 
     private static Task<IReadOnlyList<(string SprintId, long DeliveredCount)>> DeliveredPerSprintAsync(PipelineHarness pipeline) =>

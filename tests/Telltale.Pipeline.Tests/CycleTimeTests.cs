@@ -184,9 +184,8 @@ public class CycleTimeTests
         await pipeline.RunAsync("run", "--sprint", "41");
 
         // Reopens are recorded but not reported in this slice, so no metric view carries them yet.
-        var rows = await pipeline.QueryAsync<(string IssueKey, long ReopenCount)>(
-            "SELECT i.issue_key, c.reopen_count FROM issue_cycle c JOIN issue i ON i.issue_id = c.issue_id ORDER BY i.issue_key;");
-        await Assert.That(rows).IsEquivalentTo(new[] { ("FAKE-1", 0L), ("FAKE-2", 2L), ("FAKE-3", 1L) }, CollectionOrdering.Matching);
+        var rows = await pipeline.QueryAsync<(string IssueId, long ReopenCount)>("SELECT issue_id, reopen_count FROM issue_cycle ORDER BY issue_id;");
+        await Assert.That(rows).IsEquivalentTo(new[] { (pipeline.Jira.IdOf("FAKE-1"), 0L), (pipeline.Jira.IdOf("FAKE-2"), 2L), (pipeline.Jira.IdOf("FAKE-3"), 1L) }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -359,9 +358,10 @@ public class CycleTimeTests
             + "| 3 | 5 | 0.0 | 0.0 | 0.0 | 0.0 |\n"
             + "| 8 | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n"
             + NextSection);
-        var reopens = await pipeline.QueryAsync<(string IssueKey, long ReopenCount)>(
-            "SELECT i.issue_key, c.reopen_count FROM issue_cycle c JOIN issue i ON i.issue_id = c.issue_id WHERE i.issue_key IN ('FAKE-1', 'FAKE-2') ORDER BY i.issue_key;");
-        await Assert.That(reopens).IsEquivalentTo(new[] { ("FAKE-1", 0L), ("FAKE-2", 1L) }, CollectionOrdering.Matching);
+        var reopens = await pipeline.QueryAsync<(string IssueId, long ReopenCount)>(
+            "SELECT issue_id, reopen_count FROM issue_cycle WHERE issue_id IN (@first, @second) ORDER BY issue_id;",
+            new { first = pipeline.Jira.IdOf("FAKE-1"), second = pipeline.Jira.IdOf("FAKE-2") });
+        await Assert.That(reopens).IsEquivalentTo(new[] { (pipeline.Jira.IdOf("FAKE-1"), 0L), (pipeline.Jira.IdOf("FAKE-2"), 1L) }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -423,7 +423,7 @@ public class CycleTimeTests
         // delivered but carries everything else a delivery has (six and four days).
         var people = Enumerable.Range(1, 5).ToList();
         await store.WriteRawAsync(new RawData(
-            Issues: [.. Enumerable.Range(1, 10).Select(id => new RawIssue($"{id}", $"FAKE-{id}", FakeJira.IssueTypeStoryId, start, Workflow.Done.Id, ResolutionId: null, StoryPoints: 3, AssigneeHash: $"synthetic-hash-{((id - 1) % 5) + 1}", Updated: end, SprintIds: ""))],
+            Issues: [.. Enumerable.Range(1, 10).Select(id => new RawIssue($"{id}", FakeJira.IssueTypeStoryId, start, Workflow.Done.Id, ResolutionId: null, StoryPoints: 3, AssigneeHash: $"synthetic-hash-{((id - 1) % 5) + 1}", Updated: end, SprintIds: ""))],
             Changes: [],
             Sprints: [],
             Statuses: []),

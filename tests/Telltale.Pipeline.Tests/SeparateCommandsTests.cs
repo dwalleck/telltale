@@ -183,7 +183,7 @@ public class SeparateCommandsTests
 
         await Assert.That(stale).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo("The raw data changed since the derived data was built. Run derive first.\n");
-        await Assert.That(await pipeline.ReadStoreContentAsync()).DoesNotContain("FAKE-3");
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM issue WHERE issue_id = @id;", new { id = pipeline.Jira.IdOf("FAKE-3") })).IsEquivalentTo(new[] { 0L });
     }
 
     [Test]
