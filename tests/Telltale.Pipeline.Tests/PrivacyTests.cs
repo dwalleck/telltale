@@ -120,7 +120,7 @@ public class PrivacyTests
     }
 
     [Test]
-    public async Task A_store_that_held_issue_keys_holds_none_in_its_tables_or_its_bytes_after_the_next_command()
+    public async Task A_store_that_held_issue_keys_holds_none_in_its_tables_or_its_bytes_after_the_next_command_nor_what_was_deleted_before()
     {
         // A store as the version before owner decision D52 left it: the issue table has the key column.
         await using var pipeline = new PipelineHarness();
@@ -132,11 +132,22 @@ public class PrivacyTests
             UPDATE issue SET issue_key = 'FAKE-' || substr(issue_id, -1);
             DELETE FROM schema_migration WHERE name = '0007_drop_issue_key.sql';
             """);
+
+        // And a row that version deleted without overwriting it, as it deleted the rows of a converted issue
+        // or of people hashed under an old salt: still in the file, in no table.
+        await pipeline.ExecuteAsync(
+            """
+            PRAGMA secure_delete = OFF;
+            INSERT INTO status (status_id, name, category) VALUES ('999999', 'Synthetic text of a row deleted before the migration ran', 'new');
+            DELETE FROM status WHERE status_id = '999999';
+            """);
         var bytesBefore = await pipeline.ReadDatabaseBytesAsync();
 
         await pipeline.RunAllAsync(["derive"]);
 
         await Assert.That(bytesBefore).Contains("FAKE-1");
+        await Assert.That(bytesBefore).Contains("of a row deleted before the migration ran");
+        await Assert.That(await pipeline.ReadDatabaseBytesAsync()).DoesNotContain("of a row deleted before the migration ran");
         await Assert.That(await pipeline.QueryAsync<string>("SELECT name FROM pragma_table_info('issue') WHERE name LIKE '%key%';")).IsEmpty();
         await Assert.That(await pipeline.ReadDatabaseBytesAsync()).DoesNotContain("FAKE-");
     }

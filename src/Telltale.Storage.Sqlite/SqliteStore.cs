@@ -65,6 +65,14 @@ public sealed class SqliteStore : ITelltaleStore
         _readOnlyConnectionString = ReadOnlyConnectionString(databasePath);
     }
 
+    /// <summary>
+    /// The migrations after which the file is rebuilt (VACUUM). <c>secure_delete</c> overwrites what a
+    /// connection of this version deletes; it does nothing for what an earlier version deleted or dropped and
+    /// left in the file's free pages: person hashes under an old salt, the rows of issues that left scope,
+    /// issue keys. The migration that drops the issue key is where a store from such a version arrives.
+    /// </summary>
+    private static readonly HashSet<string> RebuildFileAfter = ["0007_drop_issue_key.sql"];
+
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
@@ -76,12 +84,21 @@ public sealed class SqliteStore : ITelltaleStore
             """));
         var applied = (await connection.QueryAsync<string>(Command(cancellationToken, "SELECT name FROM schema_migration;"))).ToHashSet(StringComparer.Ordinal);
 
+        var rebuildFile = false;
         foreach (var (name, sql) in Scripts.InFolder("Migrations").Where(script => !applied.Contains(script.Name)))
         {
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
             await connection.ExecuteAsync(Command(cancellationToken, sql, transaction: transaction));
             await connection.ExecuteAsync(Command(cancellationToken, "INSERT INTO schema_migration (name) VALUES (@name);", new { name }, transaction));
             await transaction.CommitAsync(cancellationToken);
+            rebuildFile |= RebuildFileAfter.Contains(name);
+        }
+
+        // Once, after such a migration: VACUUM writes the file anew from its live rows, so nothing that was
+        // deleted before this version set secure_delete stays in a free page. It cannot run in a transaction.
+        if (rebuildFile)
+        {
+            await connection.ExecuteAsync(Command(cancellationToken, "VACUUM;"));
         }
     }
 
