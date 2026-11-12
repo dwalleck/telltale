@@ -16,13 +16,13 @@ public static class SprintReport
     public static string FileName(string sprintId) => $"sprint-{sprintId}.md";
 
     /// <summary>
-    /// The ID of the sprint that completed last, or null when none has. A closed sprint Jira gives no
-    /// completion time ended at its planned end (owner decision D7).
+    /// The ID of the sprint that completed last, or null when none has. When a sprint ended is its
+    /// sprint window's end, which derive decides.
     /// </summary>
     public static async Task<string?> MostRecentlyCompletedSprintAsync(ITelltaleStore store, CancellationToken cancellationToken = default)
     {
         var sprints = await store.QueryViewsAsync<string>(
-            "SELECT sprint_id FROM delivered_per_sprint WHERE state = @closed ORDER BY COALESCE(completed, planned_end) DESC, started DESC, sprint_id DESC LIMIT 1;",
+            "SELECT sprint_id FROM delivered_per_sprint WHERE state = @closed ORDER BY ended DESC, started DESC, sprint_id DESC LIMIT 1;",
             new { closed = SprintStates.Closed },
             cancellationToken);
 
@@ -33,7 +33,7 @@ public static class SprintReport
     public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, CancellationToken cancellationToken = default)
     {
         var rows = await store.QueryViewsAsync<DeliveredRow>(
-            "SELECT sprint_name, started, planned_end, completed, delivered_count FROM delivered_per_sprint WHERE sprint_id = @sprintId;",
+            "SELECT sprint_name, started, ended, delivered_count FROM delivered_per_sprint WHERE sprint_id = @sprintId;",
             new { sprintId },
             cancellationToken);
 
@@ -80,11 +80,11 @@ public static class SprintReport
 
     private static void AppendTitle(StringBuilder report, DeliveredRow sprint, TimeZoneInfo teamTimeZone)
     {
-        // A sprint ends when it was completed; one still running shows its planned end.
-        var end = sprint.Completed ?? sprint.PlannedEnd;
-        var dates = end is null
+        // The dates are the sprint window's, which the figures were counted in. A sprint that is not
+        // completed has no end yet: its window runs to the as-of time, whatever end was planned.
+        var dates = sprint.Ended is null
             ? $"from {LocalDate(sprint.Started, teamTimeZone)}"
-            : $"{LocalDate(sprint.Started, teamTimeZone)} to {LocalDate(end, teamTimeZone)}";
+            : $"{LocalDate(sprint.Started, teamTimeZone)} to {LocalDate(sprint.Ended, teamTimeZone)}";
 
         report.Append("# ").Append(sprint.SprintName).Append(" (").Append(dates).Append(")\n\n");
     }
@@ -166,8 +166,7 @@ public static class SprintReport
     {
         public string SprintName { get; init; } = "";
         public string Started { get; init; } = "";
-        public string? PlannedEnd { get; init; }
-        public string? Completed { get; init; }
+        public string? Ended { get; init; }
         public long DeliveredCount { get; init; }
     }
 

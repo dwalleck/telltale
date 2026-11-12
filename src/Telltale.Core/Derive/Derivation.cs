@@ -40,7 +40,7 @@ public static class Derivation
         // a future sprint has no window yet, even when it carries planned dates.
         var windows = raw.Sprints
             .Where(sprint => sprint.BoardId == boardId && sprint.State != SprintStates.Future && sprint.Start is not null)
-            .Select(sprint => new SprintWindow(sprint.SprintId, sprint.Start!.Value, sprint.PlannedEnd, WindowEnd(sprint)))
+            .Select(sprint => new SprintWindow(sprint.SprintId, sprint.Start!.Value, WindowEnd(sprint)))
             .ToList();
 
         // Every status has exactly one role. Guessing one for a status the configuration does not mention
