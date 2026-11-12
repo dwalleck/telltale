@@ -547,7 +547,7 @@ public class BaselineTests
 
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            $"baselineSprintIds in the configuration file lists {refused}, and the store holds no completed sprint of board 400001 with such an ID. "
+            $"baselineSprintIds in the configuration file lists {refused}, and the store holds no completed sprint with such an ID. "
             + "The baseline is drawn from completed sprints only. Correct the list, or run backfill if the sprint has completed since, and run again.\n");
         await Assert.That(await pipeline.ReadStoreContentAsync()).IsEqualTo(before);
     }
@@ -568,7 +568,7 @@ public class BaselineTests
 
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            $"baselineSprintIds in the configuration file lists {listed}, and the store holds no completed sprint of board 400001 with such an ID. "
+            $"baselineSprintIds in the configuration file lists {listed}, and the store holds no completed sprint with such an ID. "
             + "The baseline is drawn from completed sprints only. Correct the list, or run backfill if the sprint has completed since, and run again.\n");
         await Assert.That(File.Exists(Path.Combine(pipeline.ReportDirectory, "sprint-41.md"))).IsFalse();
     }

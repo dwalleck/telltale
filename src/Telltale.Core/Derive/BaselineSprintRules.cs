@@ -11,22 +11,23 @@ namespace Telltale.Core.Derive;
 public static class BaselineSprintRules
 {
     /// <summary>
-    /// Stops when a baseline sprint ID is not a completed sprint of the configured board in the store. A
+    /// Stops when a baseline sprint ID is not a completed sprint in the store (which holds the configured
+    /// board's sprints and no others). A
     /// mistyped ID would otherwise leave its sprint out of the baseline without a sign, and a sprint that is
     /// running or has not started would make the baseline move, or add nothing to it: the baseline is a fixed
     /// list of past sprints (GLOSSARY: Baseline).
     /// </summary>
-    public static void RequireCompleted(IReadOnlyList<RawSprint> sprints, long boardId, IReadOnlySet<string> baselineSprintIds)
+    public static void RequireCompleted(IReadOnlyList<RawSprint> sprints, IReadOnlySet<string> baselineSprintIds)
     {
         var completed = sprints
-            .Where(sprint => sprint.BoardId == boardId && sprint.State == SprintStates.Closed)
+            .Where(sprint => sprint.State == SprintStates.Closed)
             .Select(sprint => sprint.SprintId)
             .ToHashSet(StringComparer.Ordinal);
         var refused = baselineSprintIds.Where(sprintId => !completed.Contains(sprintId)).Order(StringComparer.Ordinal).ToList();
         if (refused.Count > 0)
         {
             throw new UserFacingException(
-                $"baselineSprintIds in the configuration file lists {string.Join(", ", refused)}, and the store holds no completed sprint of board {boardId} with such an ID. "
+                $"baselineSprintIds in the configuration file lists {string.Join(", ", refused)}, and the store holds no completed sprint with such an ID. "
                 + "The baseline is drawn from completed sprints only. Correct the list, or run backfill if the sprint has completed since, and run again.");
         }
     }

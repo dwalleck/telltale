@@ -118,7 +118,7 @@ internal sealed class PipelineSteps : IDisposable
         await RequireStoredSaltAsync(cancellationToken);
         var raw = await _store.ReadRawAsync(cancellationToken);
         await RequireBaselineSprintsAsync(raw, cancellationToken);
-        var derived = Derivation.Derive(raw, _config.Jira.BoardId, _roles, _abandonedResolutionIds, new BusinessCalendar(_timeZone, _config.Holidays), AsOf(raw));
+        var derived = Derivation.Derive(raw, _roles, _abandonedResolutionIds, new BusinessCalendar(_timeZone, _config.Holidays), AsOf(raw));
         var previous = await _store.ReadAnomaliesAsync(cancellationToken);
         await _store.ReplaceDerivedAsync(derived, SourceOf(raw), cancellationToken);
 
@@ -271,7 +271,7 @@ internal sealed class PipelineSteps : IDisposable
     /// </summary>
     private async Task RequireBaselineSprintsAsync(RawData raw, CancellationToken cancellationToken)
     {
-        BaselineSprintRules.RequireCompleted(raw.Sprints, _config.Jira.BoardId, _baselineSprintIds);
+        BaselineSprintRules.RequireCompleted(raw.Sprints, _baselineSprintIds);
         if (_baselineSprintIds.Count > 0)
         {
             BaselineSprintRules.RequireWithinWhatWasFetched(raw.Sprints, _baselineSprintIds, await CompleteFromAsync(cancellationToken));

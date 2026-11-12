@@ -7,16 +7,16 @@ namespace Telltale.Core.Derive;
 
 /// <summary>
 /// Rebuilds all derived data from the raw rows. It is a pure function of the raw data, the
-/// configured board, status roles, abandoned resolutions and business calendar, and the as-of time, so changing a definition means rerunning it (ADR-0002).
+/// configured status roles, abandoned resolutions and business calendar, and the as-of time, so changing a definition means rerunning it (ADR-0002).
 /// </summary>
 /// <remarks>
 /// Throws <see cref="UserFacingException"/> when an issue is in, or its timeline entered, a status that has no configured role, when
-/// a closed sprint of the board has neither a completion time nor a planned end, or when an issue was stored
+/// a closed sprint has neither a completion time nor a planned end, or when an issue was stored
 /// before its Sprint field was fetched.
 /// </remarks>
 public static class Derivation
 {
-    public static DerivedData Derive(RawData raw, long boardId, StatusRoles roles, IReadOnlySet<string> abandonedResolutionIds, BusinessCalendar calendar, DateTimeOffset asOf)
+    public static DerivedData Derive(RawData raw, StatusRoles roles, IReadOnlySet<string> abandonedResolutionIds, BusinessCalendar calendar, DateTimeOffset asOf)
     {
         // Unknown is not "in no sprint": deriving anyway would leave these issues out of every sprint's time in status.
         var sprintsUnknown = raw.Issues.Count(issue => issue.SprintIds is null);
@@ -39,11 +39,12 @@ public static class Derivation
             .Where(change => change.Field == ChangeFields.Points)
             .ToLookup(change => change.IssueId, change => PointChange.FromRaw(change.HistoryId, change.At, change.From, change.To));
 
-        // Which sprints count is decided here and nowhere else. Only the configured board's: the store can
-        // still hold sprints of a board ID that was since corrected. And only sprints that have started:
-        // a future sprint has no window yet, even when it carries planned dates.
+        // Which sprints count is decided here and nowhere else: sprints that have started. A future sprint
+        // has no window yet, even when it carries planned dates. Every sprint in the store is the configured
+        // board's: a backfill replaces them all, and no command reads a store filled under another board
+        // (CollectionScope.RequireSameAs).
         var windows = raw.Sprints
-            .Where(sprint => sprint.BoardId == boardId && sprint.State != SprintStates.Future && sprint.Start is not null)
+            .Where(sprint => sprint.State != SprintStates.Future && sprint.Start is not null)
             .Select(sprint => new SprintWindow(sprint.SprintId, sprint.Start!.Value, WindowEnd(sprint)))
             .ToList();
 
