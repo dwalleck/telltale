@@ -63,4 +63,12 @@ public sealed record RawData(
     /// was in scope can be converted later (owner decision D13). Always empty in what the store reads back.
     /// </summary>
     public IReadOnlyList<string> OutOfScopeIssueIds { get; init; } = [];
+
+    /// <summary>
+    /// In a batch: true when the batch is everything Jira holds for the configuration (a backfill). Writing it
+    /// removes every raw row first, so what the store holds afterwards is this batch and nothing else: a row
+    /// for something that has since left Jira does not stay (owner decision D4). Always false in what the
+    /// store reads back.
+    /// </summary>
+    public bool ReplacesEverything { get; init; }
 }

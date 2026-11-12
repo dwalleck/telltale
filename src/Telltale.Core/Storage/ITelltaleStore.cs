@@ -13,7 +13,9 @@ public interface ITelltaleStore
     /// Writes a batch of raw rows in one transaction, replacing rows with the same Jira IDs, deleting the
     /// issue row and the change rows of every issue in <see cref="RawData.OutOfScopeIssueIds"/>, and setting the
     /// collector's watermark to <paramref name="reached"/>: the watermark advances only when the whole batch
-    /// is written, and no batch is written without saying how far it reaches.
+    /// is written, and no batch is written without saying how far it reaches. A batch that
+    /// <see cref="RawData.ReplacesEverything"/> first removes every raw row, in the same transaction: if the
+    /// write fails, the store holds what it held before.
     /// </summary>
     Task WriteRawAsync(RawData batch, Watermark reached, CancellationToken cancellationToken = default);
 

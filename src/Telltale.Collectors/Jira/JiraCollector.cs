@@ -104,7 +104,9 @@ public sealed class JiraCollector
         // A fetch that found nothing reaches no further than the one before it. An out-of-scope issue's update
         // does not move it: the overlap brings that issue back, and deleting it again changes nothing.
         var reached = new Watermark(WatermarkName, covers, issues.Count > 0 ? issues.Max(issue => issue.Updated) : since);
-        await store.WriteRawAsync(new RawData(issues, changes, sprints, statuses) { OutOfScopeIssueIds = outOfScopeIssueIds }, reached, cancellationToken);
+        // A backfill asked for everything, so its batch replaces what the store holds; a sync's is added to it.
+        var batch = new RawData(issues, changes, sprints, statuses) { OutOfScopeIssueIds = outOfScopeIssueIds, ReplacesEverything = mode == CollectionMode.Backfill };
+        await store.WriteRawAsync(batch, reached, cancellationToken);
     }
 
     // Separates the two parts of what a watermark covers. A project key cannot hold it.
