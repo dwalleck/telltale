@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using Telltale.Collectors.Jira;
 using Telltale.Core;
 using Telltale.Core.Configuration;
+using Telltale.Core.Workflow;
 
 namespace Telltale.Cli.Commands;
 
@@ -64,6 +65,7 @@ internal static class DiscoverCommand
         var jira = Section(root, "jira", path);
         var statusRoles = Section(root, "statusRoles", path);
         RefuseCredentialsInTheFile(jira, path);
+        RequireRunWouldAcceptWhatTheFileSays(root, jira, statusRoles, path);
 
         // A message about a value names where the value came from: the option, or the setting in the file.
         string From(bool option, string optionName, string setting) => option ? optionName : $"{setting} in {path}";
@@ -78,21 +80,11 @@ internal static class DiscoverCommand
         var backfillStart = given.BackfillStart ?? FileText(jira, "backfillStart", backfillFrom);
         RequireAll(path, ("--site-url", siteText is null), ("--board", boardId is null), ("--time-zone", timeZone is null), ("--backfill-start", backfillStart is null));
 
+        // What the file says was checked above. These checks are for what the options say, by the same rules.
         var site = ReadSite(siteText!, siteFrom);
-        if (boardId <= 0)
-        {
-            throw new UserFacingException($"{boardFrom} must be a positive number.");
-        }
-
-        if (!TimeZoneInfo.TryFindSystemTimeZoneById(timeZone!, out _))
-        {
-            throw new UserFacingException($"{timeZoneFrom}: '{timeZone}' is not a known IANA time zone ID.");
-        }
-
-        if (!DateOnly.TryParseExact(backfillStart, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
-        {
-            throw new UserFacingException($"{backfillFrom} must be a date written as yyyy-MM-dd.");
-        }
+        RequireBoardId(boardId!.Value, boardFrom);
+        RequireTimeZone(timeZone!, timeZoneFrom, showValue: given.TimeZone is not null);
+        RequireDate(backfillStart!, backfillFrom);
 
         var facts = await new JiraDiscovery(services.HttpHandler, site, boardId!.Value, services.Secrets).ReadAsync(cancellationToken);
 
@@ -176,7 +168,7 @@ internal static class DiscoverCommand
         {
             var proposal = known.TryGetValue(statusId, out var status) ? ProposeRole(status) : null;
 
-            // A role written as null is still something the owner wrote: it is not replaced, and the run's check refuses it below.
+            // Every role in the file is one of the four by now (RequireRunWouldAcceptWhatTheFileSays).
             if (statusRoles.TryGetPropertyValue(statusId, out var inFile))
             {
                 var role = RoleText(inFile);
@@ -206,7 +198,7 @@ internal static class DiscoverCommand
         }
     }
 
-    private static string RoleText(JsonNode? inFile) => inFile is null ? "null" : TextOf(inFile) ?? inFile.ToJsonString();
+    private static string RoleText(JsonNode? inFile) => TextOf(inFile) ?? throw new InvalidOperationException("A role in the file was not checked before it was listed.");
 
     /// <summary>
     /// The role proposed for a status. A name containing "block" proposes blocked (owner decision D30), because
@@ -285,10 +277,10 @@ internal static class DiscoverCommand
     {
         if (inFile is not null)
         {
-            var kept = inFile is JsonArray array && array.All(key => TextOf(key) is not null) ? array.Select(key => TextOf(key)!).ToList() : null;
-            var same = kept is not null && kept.ToHashSet(StringComparer.Ordinal).SetEquals(listed);
-            var shown = kept is null ? inFile.ToJsonString() : string.Join(", ", kept);
-            return (inFile.DeepClone(), same ? $"{shown} (from the file)" : $"{shown} (from the file; Jira lists {string.Join(", ", listed)})");
+            // The keys are project keys by now (RequireRunWouldAcceptWhatTheFileSays), so they can be shown.
+            var kept = inFile.AsArray().Select(key => TextOf(key)!).ToList();
+            var shown = string.Join(", ", kept);
+            return (inFile.DeepClone(), kept.ToHashSet(StringComparer.Ordinal).SetEquals(listed) ? $"{shown} (from the file)" : $"{shown} (from the file; Jira lists {string.Join(", ", listed)})");
         }
 
         if (listed.Count == 0)
@@ -418,6 +410,103 @@ internal static class DiscoverCommand
         if (TextOf(jira["siteUrl"]) is { } inFile && Uri.TryCreate(inFile, UriKind.Absolute, out var site) && site.UserInfo.Length > 0)
         {
             throw new UserFacingException($"jira.siteUrl in {path} must not carry a user name or password. Take them out of the file, then run discover again.");
+        }
+    }
+
+    /// <summary>
+    /// Checks every value the file gives for a setting discover reads or shows, by the rule the run applies
+    /// to that setting, before Jira is asked anything and before anything is printed or copied. An option that
+    /// replaces the value does not excuse it: the old file is copied into the backup as it is, and the line
+    /// about the change shows the old value. The messages name the setting and never the value, which could
+    /// be a secret pasted into the wrong place. A setting the file leaves out is fine: discover fills it in.
+    /// The settings discover only carries over (the abandoned resolutions, the holidays, anything the tool does
+    /// not know) are never shown, and the check of the text about to be written refuses them.
+    /// </summary>
+    private static void RequireRunWouldAcceptWhatTheFileSays(JsonObject root, JsonObject jira, JsonObject statusRoles, string path)
+    {
+        string InFile(string setting) => $"{setting} in {path}";
+
+        if (FileText(jira, "siteUrl", InFile("jira.siteUrl")) is { } siteUrl)
+        {
+            ReadSite(siteUrl, InFile("jira.siteUrl"));
+        }
+
+        if (FileNumber(jira, "boardId", InFile("jira.boardId")) is { } boardId)
+        {
+            RequireBoardId(boardId, InFile("jira.boardId"));
+        }
+
+        if (FileText(root, "timeZone", InFile("timeZone")) is { } timeZone)
+        {
+            RequireTimeZone(timeZone, InFile("timeZone"), showValue: false);
+        }
+
+        if (FileText(jira, "backfillStart", InFile("jira.backfillStart")) is { } backfillStart)
+        {
+            RequireDate(backfillStart, InFile("jira.backfillStart"));
+        }
+
+        foreach (var (setting, example) in new[] { ("sprintFieldId", "customfield_10020"), ("storyPointFieldId", "customfield_10016") })
+        {
+            if (FileText(jira, setting, InFile($"jira.{setting}")) is { } fieldId && !ConfigFile.IsCustomFieldId(fieldId))
+            {
+                throw new UserFacingException($"{InFile($"jira.{setting}")} must be a custom field ID such as {example}.");
+            }
+        }
+
+        foreach (var (statusId, role) in statusRoles)
+        {
+            if (TextOf(role) is not { } label || !IsRole(label))
+            {
+                // The status ID is shown: an ID with no role in the four is what the owner has to find.
+                throw new UserFacingException(
+                    $"{InFile("statusRoles")}: the role of status {statusId} is not one of: not started, work, blocked, done. Correct it in the file, then run discover again.");
+            }
+        }
+
+        if (jira["projectKeys"] is { } projectKeys && !(projectKeys is JsonArray keys && keys.All(key => JiraProjectKey.IsValid(TextOf(key)))))
+        {
+            throw new UserFacingException(
+                $"{InFile("jira.projectKeys")} must be a list of Jira project keys (an upper-case letter followed by upper-case letters, digits or underscores), and it is not. "
+                + "Correct it in the file, then run discover again.");
+        }
+    }
+
+    private static bool IsRole(string label)
+    {
+        try
+        {
+            StatusRole.Parse(label);
+            return true;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
+    private static void RequireBoardId(long boardId, string from)
+    {
+        if (boardId <= 0)
+        {
+            throw new UserFacingException($"{from} must be a positive number.");
+        }
+    }
+
+    /// <summary>The time zone is shown only when it came from the command line: a value in the file is never repeated.</summary>
+    private static void RequireTimeZone(string timeZone, string from, bool showValue)
+    {
+        if (!TimeZoneInfo.TryFindSystemTimeZoneById(timeZone, out _))
+        {
+            throw new UserFacingException(showValue ? $"{from}: '{timeZone}' is not a known IANA time zone ID." : $"{from} is not a known IANA time zone ID.");
+        }
+    }
+
+    private static void RequireDate(string date, string from)
+    {
+        if (!DateOnly.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+        {
+            throw new UserFacingException($"{from} must be a date written as yyyy-MM-dd.");
         }
     }
 

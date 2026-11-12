@@ -26,7 +26,7 @@ public static class ConfigFile
     };
 
     /// <summary>True for <c>customfield_</c> followed by digits only, the form of every Jira custom field ID.</summary>
-    private static bool IsCustomFieldId(string fieldId)
+    internal static bool IsCustomFieldId(string fieldId)
     {
         const string prefix = "customfield_";
         return fieldId.Length > prefix.Length

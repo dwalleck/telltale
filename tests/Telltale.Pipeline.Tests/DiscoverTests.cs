@@ -910,22 +910,81 @@ public class DiscoverTests
     }
 
     [Test]
-    [Arguments("\"finished\"", "'finished' is not a status role")]
-    [Arguments("null", "statusRoles")]
-    public async Task A_role_in_the_file_that_run_would_refuse_stops_a_rerun_and_is_neither_replaced_nor_copied(string role, string named)
+    [Arguments("\"finished\"")]
+    [Arguments("null")]
+    [Arguments("5")]
+    public async Task A_role_in_the_file_that_run_would_refuse_stops_a_rerun_and_is_neither_replaced_nor_copied_nor_shown(string role)
     {
         // A role the owner wrote is the owner's, even a wrong one: discover says so and does not put its proposal in its place.
         await using var pipeline = new PipelineHarness();
         await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
         var edited = (await File.ReadAllTextAsync(pipeline.ConfigPath)).Replace("\"600004\": \"work\"", $"\"600004\": {role}", StringComparison.Ordinal);
         await File.WriteAllTextAsync(pipeline.ConfigPath, edited);
+        var requestsBefore = pipeline.Jira.Handler.Requests.Count;
+        pipeline.Out.GetStringBuilder().Clear();
 
         var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover", "--time-zone", "Europe/London");
 
+        // The role could be anything pasted there, so the message names the status and not what was written.
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString()).Contains("run would refuse it").And.Contains(named);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"statusRoles in {pipeline.ConfigPath}: the role of status 600004 is not one of: not started, work, blocked, done. Correct it in the file, then run discover again.\n");
+        await Assert.That(pipeline.Out.ToString()).IsEmpty();
+        await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(requestsBefore);
         await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(edited).And.Contains($"\"600004\": {role}");
         await Assert.That((await pipeline.ReadAllFilesAsync()).Keys).IsEquivalentTo(["telltale.json"]);
+    }
+
+    [Test]
+    [Arguments("jira", "siteUrl", "--site-url", FakeJira.SiteUrl, "jira.siteUrl in {0} must be an absolute https:// address.")]
+    [Arguments("jira", "boardId", "--board", "400001", "jira.boardId in {0} must be a whole number.")]
+    [Arguments("", "timeZone", "--time-zone", "Europe/London", "timeZone in {0} is not a known IANA time zone ID.")]
+    [Arguments("jira", "backfillStart", "--backfill-start", "2024-06-01", "jira.backfillStart in {0} must be a date written as yyyy-MM-dd.")]
+    [Arguments("jira", "sprintFieldId", "--sprint-field", FakeJira.SprintFieldId, "jira.sprintFieldId in {0} must be a custom field ID such as customfield_10020.")]
+    [Arguments("jira", "storyPointFieldId", "--story-point-field", FakeJira.StoryPointFieldId, "jira.storyPointFieldId in {0} must be a custom field ID such as customfield_10016.")]
+    public async Task A_value_in_the_file_that_run_would_refuse_stops_a_rerun_even_when_an_option_replaces_it(string section, string setting, string option, string given, string message)
+    {
+        // A secret pasted as the value of a known setting. The option would replace it in the new file, but the
+        // old file would be copied into the backup, and the line about the change would show the old value.
+        await using var pipeline = new PipelineHarness();
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        await EditWrittenConfigAsync(pipeline, config => (section.Length == 0 ? config : config[section]!)[setting] = "synthetic-pasted-token");
+        var edited = await File.ReadAllTextAsync(pipeline.ConfigPath);
+        var requestsBefore = pipeline.Jira.Handler.Requests.Count;
+        pipeline.Out.GetStringBuilder().Clear();
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover", option, given);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(string.Format(CultureInfo.InvariantCulture, message, pipeline.ConfigPath) + "\n");
+        await Assert.That(pipeline.Out.ToString()).IsEmpty();
+        await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(requestsBefore);
+        await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(edited);
+        await Assert.That((await pipeline.ReadAllFilesAsync()).Keys).IsEquivalentTo(["telltale.json"]);
+    }
+
+    [Test]
+    [Arguments("""["FAKE", "synthetic-pasted-token"]""")]
+    [Arguments("""["FAKE", 5]""")]
+    [Arguments("\"synthetic-pasted-token\"")]
+    public async Task Project_keys_in_the_file_that_run_would_refuse_stop_a_rerun_and_are_never_shown(string projectKeys)
+    {
+        await using var pipeline = new PipelineHarness();
+        await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
+        await EditWrittenConfigAsync(pipeline, config => config["jira"]!["projectKeys"] = JsonNode.Parse(projectKeys));
+        var edited = await File.ReadAllTextAsync(pipeline.ConfigPath);
+        var requestsBefore = pipeline.Jira.Handler.Requests.Count;
+        pipeline.Out.GetStringBuilder().Clear();
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"jira.projectKeys in {pipeline.ConfigPath} must be a list of Jira project keys (an upper-case letter followed by upper-case letters, digits or underscores), and it is not. "
+            + "Correct it in the file, then run discover again.\n");
+        await Assert.That(pipeline.Out.ToString()).IsEmpty();
+        await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(requestsBefore);
+        await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(edited);
     }
 
     [Test]
@@ -1037,7 +1096,9 @@ public class DiscoverTests
     [Arguments("jira", "boardId", "\"four\"", "jira.boardId in {0} must be a whole number.")]
     [Arguments("jira", "boardId", "-1", "jira.boardId in {0} must be a positive number.")]
     [Arguments("jira", "backfillStart", "\"last year\"", "jira.backfillStart in {0} must be a date written as yyyy-MM-dd.")]
-    [Arguments("", "timeZone", "\"Fake/Nowhere\"", "timeZone in {0}: 'Fake/Nowhere' is not a known IANA time zone ID.")]
+    [Arguments("", "timeZone", "\"Fake/Nowhere\"", "timeZone in {0} is not a known IANA time zone ID.")]
+    [Arguments("jira", "sprintFieldId", "\"Sprint\"", "jira.sprintFieldId in {0} must be a custom field ID such as customfield_10020.")]
+    [Arguments("jira", "storyPointFieldId", "\"description\"", "jira.storyPointFieldId in {0} must be a custom field ID such as customfield_10016.")]
     [Arguments("", "timeZone", "[]", "timeZone in {0} must be text.")]
     public async Task A_bad_value_in_the_file_is_reported_as_the_files_and_not_as_an_option(string section, string setting, string json, string message)
     {
