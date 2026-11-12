@@ -15,3 +15,4 @@ replace: |-
 Claim (review finding 8): run refuses a status ID that is not digits, with a message that names the setting and not the value.
 Expected red: `A_status_id_that_is_not_digits_is_refused_and_not_shown` (it also ran red before the fix).
 - Verified 2026-11-12 at 73ad3e6: red, 1 failed of 52 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
+- Verified 2026-11-12 at 1e8622b: red, 1 failed of 52 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
