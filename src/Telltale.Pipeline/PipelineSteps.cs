@@ -97,10 +97,10 @@ public sealed class PipelineSteps
     /// </summary>
     public async Task DeriveAsync(CancellationToken cancellationToken)
     {
-        await RequireFilledUnderTheConfigurationAsync(cancellationToken);
+        var completeFrom = await RequireFilledUnderTheConfigurationAsync(cancellationToken);
         await RequireStoredSaltAsync(cancellationToken);
         var raw = await _store.ReadRawAsync(cancellationToken);
-        await RequireBaselineSprintsAsync(raw, cancellationToken);
+        RequireBaselineSprints(raw, completeFrom);
         var derived = Derivation.Derive(raw, _settings.Derivation, AsOf(raw));
         var previous = await _store.ReadAnomaliesAsync(cancellationToken);
         await _store.ReplaceDerivedAsync(derived, await SourceAsync(cancellationToken), cancellationToken);
@@ -150,9 +150,19 @@ public sealed class PipelineSteps
     /// under asked for. Under other settings (another site, board, projects, start date or history fields)
     /// its figures would be the old settings', so the command stops, as a sync does. A store nothing was ever
     /// fetched into has nothing of another setting's.
+    /// Returns the moment from which the store holds every issue (the start date it was last filled from; null
+    /// when it names none), so a step reads what the store was filled from once and passes this on.
     /// </summary>
-    private async Task RequireFilledUnderTheConfigurationAsync(CancellationToken cancellationToken) =>
-        (await _store.ReadWatermarkAsync(JiraCollector.WatermarkName, cancellationToken))?.Scope.RequireSameAs(JiraCollector.ScopeOf(_settings.Jira));
+    private async Task<DateTimeOffset?> RequireFilledUnderTheConfigurationAsync(CancellationToken cancellationToken)
+    {
+        if (await _store.ReadWatermarkAsync(JiraCollector.WatermarkName, cancellationToken) is not { } filled)
+        {
+            return null;
+        }
+
+        filled.Scope.RequireSameAs(JiraCollector.ScopeOf(_settings.Jira));
+        return JiraCollector.CompleteFrom(filled.Scope);
+    }
 
     /// <summary>
     /// Derive and report need no secret. But when the salt is at hand and is not the one the stored people
@@ -194,7 +204,7 @@ public sealed class PipelineSteps
     /// </summary>
     public async Task ReportAsync(long? sprintId, bool needsSprint, CancellationToken cancellationToken)
     {
-        await RequireCurrentDerivedDataAsync(cancellationToken);
+        var completeFrom = await RequireCurrentDerivedDataAsync(cancellationToken);
 
         var sprint = sprintId?.ToString(CultureInfo.InvariantCulture)
             ?? await SprintReport.MostRecentlyCompletedSprintAsync(_store, cancellationToken);
@@ -223,7 +233,6 @@ public sealed class PipelineSteps
 
         // Asked at every report, not only when the list or the raw data changed: a backfill from a later
         // start date can leave both as they were and still make a sprint one the store no longer covers.
-        var completeFrom = await CompleteFromAsync(cancellationToken);
         try
         {
             FetchedRange.RequireReportable(sprint, starts, completeFrom);
@@ -264,10 +273,11 @@ public sealed class PipelineSteps
     /// What every command that reads the metric views asks first: the store was filled under the configured
     /// collection settings, its people are hashed with the salt at hand, and the derived data was built from
     /// the raw data and the settings as they are now. Each refusal names the command that repairs it.
+    /// Returns the moment from which the store holds every issue (see <see cref="RequireFilledUnderTheConfigurationAsync"/>).
     /// </summary>
-    private async Task RequireCurrentDerivedDataAsync(CancellationToken cancellationToken)
+    private async Task<DateTimeOffset?> RequireCurrentDerivedDataAsync(CancellationToken cancellationToken)
     {
-        await RequireFilledUnderTheConfigurationAsync(cancellationToken);
+        var completeFrom = await RequireFilledUnderTheConfigurationAsync(cancellationToken);
         await RequireStoredSaltAsync(cancellationToken);
         var derivedFrom = await _store.ReadDerivedSourceAsync(cancellationToken)
             ?? throw new UserFacingException("The store has no derived data yet. Run derive first.");
@@ -297,9 +307,11 @@ public sealed class PipelineSteps
         if (derivedFrom.BaselineSprintIds != current.BaselineSprintIds)
         {
             // Deriving again is the remedy only for a list derive would accept; otherwise say what derive would.
-            await RequireBaselineSprintsAsync(await _store.ReadRawAsync(cancellationToken), cancellationToken);
+            RequireBaselineSprints(await _store.ReadRawAsync(cancellationToken), completeFrom);
             throw new UserFacingException("baselineSprintIds in the configuration file changed since the derived data was built. Run derive first.");
         }
+
+        return completeFrom;
     }
 
     /// <summary>
@@ -307,7 +319,7 @@ public sealed class PipelineSteps
     /// with a sprint window, and none started before the start date the store was last filled from. A team of
     /// five is the views' rule, and one that fails it is not refused (owner decision D50).
     /// </summary>
-    private async Task RequireBaselineSprintsAsync(RawData raw, CancellationToken cancellationToken)
+    private void RequireBaselineSprints(RawData raw, DateTimeOffset? completeFrom)
     {
         BaselineSprintRules.RequireCompleted(raw.Sprints, _settings.BaselineSprintIds);
         BaselineSprintRules.RequireWindow(raw.Sprints, _settings.BaselineSprintIds);
@@ -316,11 +328,7 @@ public sealed class PipelineSteps
             BaselineSprintRules.RequireWithinWhatWasFetched(
                 raw.Sprints.Where(sprint => sprint.Start is not null).Select(sprint => (sprint.SprintId, sprint.Start!.Value)),
                 _settings.BaselineSprintIds,
-                await CompleteFromAsync(cancellationToken));
+                completeFrom);
         }
     }
-
-    /// <summary>The moment from which the store holds every issue: the start date it was last filled from. Null when it names none.</summary>
-    private async Task<DateTimeOffset?> CompleteFromAsync(CancellationToken cancellationToken) =>
-        await _store.ReadWatermarkAsync(JiraCollector.WatermarkName, cancellationToken) is { } filled ? JiraCollector.CompleteFrom(filled.Scope) : null;
 }
