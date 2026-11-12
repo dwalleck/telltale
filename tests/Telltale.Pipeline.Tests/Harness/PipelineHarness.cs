@@ -46,6 +46,12 @@ public sealed class PipelineHarness : IAsyncDisposable
         [SecretName.HashingSalt] = HashingSalt,
     };
 
+    /// <summary>When set, the commands get this secret store in place of the in-memory one over <see cref="Secrets"/>.</summary>
+    public ISecretStore? SecretStore { get; set; }
+
+    /// <summary>What the person types when <c>secrets set</c> asks for a value, one entry per question.</summary>
+    public ScriptedSecretInput Input { get; } = new();
+
     /// <summary>The configuration file's content, written to disk before each run. Edit it to change a setting.</summary>
     public JsonObject Config { get; } = new()
     {
@@ -90,12 +96,15 @@ public sealed class PipelineHarness : IAsyncDisposable
         var services = new AppServices(
             Jira.Handler,
             Clock,
-            new InMemorySecretStore(Secrets),
+            SecretStore ?? new InMemorySecretStore(Secrets),
             Out,
             Error,
             ConfigPath,
             DatabasePath,
-            ReportDirectory);
+            ReportDirectory)
+        {
+            SecretInput = Input,
+        };
 
         return await CliApp.RunAsync(args, services, Cancellation.Token);
     }

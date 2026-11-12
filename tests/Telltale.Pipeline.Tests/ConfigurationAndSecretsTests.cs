@@ -300,7 +300,7 @@ public class ConfigurationAndSecretsTests
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo($"The secret {expectedName} is not set in the secret store.\n");
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo($"The secret {expectedName} is not set in the secret store. Add it to the secrets this in-memory store was built over.\n");
         await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
     }
 

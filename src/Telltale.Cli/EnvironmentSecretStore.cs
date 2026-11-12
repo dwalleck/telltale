@@ -5,6 +5,7 @@ namespace Telltale.Cli;
 /// <summary>
 /// Reads secrets from environment variables, for development off the work laptop:
 /// <c>TELLTALE_JIRA_EMAIL</c>, <c>TELLTALE_JIRA_API_TOKEN</c> and <c>TELLTALE_HASHING_SALT</c>.
+/// It is never used on Windows, and <c>secrets set</c> cannot write to it.
 /// </summary>
 public sealed class EnvironmentSecretStore : ISecretStore
 {
@@ -30,4 +31,6 @@ public sealed class EnvironmentSecretStore : ISecretStore
     };
 
     public string? Get(SecretName name) => _read(VariableName(name));
+
+    public string HowToSet(SecretName name) => $"Set the environment variable {VariableName(name)}.";
 }

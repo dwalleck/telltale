@@ -18,24 +18,35 @@ public interface ISecretStore
 {
     /// <summary>The secret's value, or null when it has not been set.</summary>
     string? Get(SecretName name);
+
+    /// <summary>One sentence telling the person running the tool how to set this secret in this store. It ends the message about a missing secret.</summary>
+    string HowToSet(SecretName name);
+}
+
+/// <summary>A secret store <c>secrets set</c> can write to. The environment-variable store is not one.</summary>
+public interface IWritableSecretStore : ISecretStore
+{
+    /// <summary>Stores the value, replacing any earlier one.</summary>
+    void Set(SecretName name, string value);
 }
 
 public static class SecretStoreExtensions
 {
-    /// <summary>The secret's value, without surrounding white space. Throws <see cref="UserFacingException"/> naming the secret when it is missing or blank.</summary>
+    /// <summary>The secret's value, without surrounding white space. Throws <see cref="UserFacingException"/> naming the secret and how to set it when it is missing or blank.</summary>
     public static string Require(this ISecretStore secrets, SecretName name)
     {
         var value = secrets.Get(name);
         if (string.IsNullOrWhiteSpace(value))
         {
-            throw new UserFacingException($"The secret {Describe(name)} is not set in the secret store.");
+            throw new UserFacingException($"The secret {name.Describe()} is not set in the secret store. {secrets.HowToSet(name)}");
         }
 
         // A value pasted with a trailing newline must behave like the clean one: for the salt, it decides every hash.
         return value.Trim();
     }
 
-    private static string Describe(SecretName name) => name switch
+    /// <summary>The secret's name as messages show it, in quotes. Never its value.</summary>
+    public static string Describe(this SecretName name) => name switch
     {
         SecretName.JiraEmail => "'Jira email'",
         SecretName.JiraApiToken => "'Jira API token'",
