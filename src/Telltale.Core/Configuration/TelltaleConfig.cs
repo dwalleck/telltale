@@ -15,6 +15,12 @@ public sealed record TelltaleConfig
 
     /// <summary>The team's time zone as an IANA ID, e.g. "America/Chicago".</summary>
     public required string TimeZone { get; init; }
+
+    /// <summary>
+    /// Company holidays as dates (<c>"2026-01-19"</c>), read in the team's time zone. Together with weekends
+    /// they are the days that are not business days. An empty list means weekends only.
+    /// </summary>
+    public required IReadOnlyList<DateOnly> Holidays { get; init; }
 }
 
 /// <summary>Where the team's work lives in Jira.</summary>

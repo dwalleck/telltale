@@ -1,3 +1,4 @@
+using Telltale.Core.Calendar;
 using Telltale.Core.Intervals;
 using Telltale.Core.Storage;
 using Telltale.Core.Workflow;
@@ -6,7 +7,7 @@ namespace Telltale.Core.Derive;
 
 /// <summary>
 /// Rebuilds all derived data from the raw rows. It is a pure function of the raw data, the
-/// configured board and status roles, and the as-of time, so changing a definition means rerunning it (ADR-0002).
+/// configured board, status roles and business calendar, and the as-of time, so changing a definition means rerunning it (ADR-0002).
 /// </summary>
 /// <remarks>
 /// Throws <see cref="UserFacingException"/> when an issue has been in a status that has no configured role, or when
@@ -14,7 +15,7 @@ namespace Telltale.Core.Derive;
 /// </remarks>
 public static class Derivation
 {
-    public static DerivedData Derive(RawData raw, long boardId, StatusRoles roles, DateTimeOffset asOf)
+    public static DerivedData Derive(RawData raw, long boardId, StatusRoles roles, BusinessCalendar calendar, DateTimeOffset asOf)
     {
         var statusChanges = raw.Changes
             .Where(change => change.Field == ChangeFields.Status && change.To is not null)
@@ -37,11 +38,15 @@ public static class Derivation
             var timeline = StatusTimeline.Build(issue.Created, issue.StatusId, statusChanges[issue.IssueId]);
             intervals.AddRange(timeline.Intervals.Select(interval => new IssueStatusInterval(issue.IssueId, interval.StatusId, interval.Start, interval.End)));
 
-            cycles.Add(Delivery.Of(issue.StatusId, timeline.Intervals, roles) switch
+            var cycle = Delivery.Of(issue.StatusId, timeline.Intervals, roles) switch
             {
-                Delivered delivered => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At)),
+                Delivered delivered => WithCycleTime(
+                    new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At)),
+                    Cycles.Measure(timeline.Intervals, roles, delivered.At, calendar),
+                    issue.StoryPoints),
                 NotDelivered => new IssueCycle(issue.IssueId, CycleEnd: null, Delivered: false, DeliverySprintId: null),
-            });
+            };
+            cycles.Add(cycle with { ReopenCount = Cycles.ReopenCount(timeline.Intervals, roles) });
         }
 
         // Every status has exactly one role. Guessing one for a status the configuration does not mention
@@ -59,6 +64,18 @@ public static class Derivation
             intervals,
             cycles);
     }
+
+    /// <summary>
+    /// Adds the cycle's measurements and the point bucket to a delivered issue's row. The bucket is the issue's
+    /// current estimate.
+    /// </summary>
+    private static IssueCycle WithCycleTime(IssueCycle delivered, Cycle? cycle, double? storyPoints) => delivered with
+    {
+        CycleStart = cycle?.Start,
+        CalendarDays = cycle?.CalendarDays,
+        BusinessDays = cycle?.BusinessDays,
+        PointBucket = storyPoints,
+    };
 
     /// <summary>
     /// When a sprint's window ends: at its completion; for a closed sprint Jira gives no completion time,

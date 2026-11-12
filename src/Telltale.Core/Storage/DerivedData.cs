@@ -7,7 +7,21 @@ public sealed record IssueStatusInterval(string IssueId, string StatusId, DateTi
 /// What derive concluded about one issue. <see cref="CycleEnd"/> is the delivery moment, and
 /// <see cref="DeliverySprintId"/> the sprint whose window contains it (null when it fell between sprints).
 /// </summary>
-public sealed record IssueCycle(string IssueId, DateTimeOffset? CycleEnd, bool Delivered, string? DeliverySprintId);
+public sealed record IssueCycle(string IssueId, DateTimeOffset? CycleEnd, bool Delivered, string? DeliverySprintId)
+{
+    /// <summary>When the cycle started. Null with the two day counts when the issue has no cycle time.</summary>
+    public DateTimeOffset? CycleStart { get; init; }
+
+    public double? CalendarDays { get; init; }
+
+    public double? BusinessDays { get; init; }
+
+    /// <summary>The story point estimate the issue is grouped by. Null means unestimated.</summary>
+    public double? PointBucket { get; init; }
+
+    /// <summary>How many times the issue moved out of a done-role status, delivered or not.</summary>
+    public int ReopenCount { get; init; }
+}
 
 /// <summary>
 /// The sprint window of one sprint of the configured board that has started. A null <see cref="End"/> means the sprint
