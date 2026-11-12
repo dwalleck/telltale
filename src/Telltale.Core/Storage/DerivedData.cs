@@ -19,8 +19,26 @@ public sealed record IssueCycle(string IssueId, DateTimeOffset? CycleEnd, bool D
 /// </summary>
 public sealed record DerivedSprintWindow(string SprintId, DateTimeOffset Start, DateTimeOffset? End);
 
+/// <summary>One membership interval of one issue in one sprint. A null <see cref="End"/> means the Sprint field still lists the sprint.</summary>
+public sealed record IssueMembershipInterval(string IssueId, string SprintId, DateTimeOffset Start, DateTimeOffset? End);
+
+/// <summary>
+/// One issue's time in one status during one sprint (GLOSSARY: Time in status), measured three ways:
+/// calendar time, business time and business days.
+/// </summary>
+public sealed record SprintStatusTime(string IssueId, string SprintId, string StatusId, TimeSpan CalendarTime, TimeSpan BusinessTime, double BusinessDays);
+
+/// <summary>
+/// A status the configuration gives a role, with its place in board order (the order the configuration
+/// lists the statuses in, from 1) and whether its role is done.
+/// </summary>
+public sealed record BoardStatus(string StatusId, int Position, bool IsDone);
+
 /// <summary>Everything derive computes. It replaces the previous derived data as a whole (ADR-0002).</summary>
 public sealed record DerivedData(
     IReadOnlyList<DerivedSprintWindow> SprintWindows,
     IReadOnlyList<IssueStatusInterval> StatusIntervals,
-    IReadOnlyList<IssueCycle> IssueCycles);
+    IReadOnlyList<IssueCycle> IssueCycles,
+    IReadOnlyList<IssueMembershipInterval> MembershipIntervals,
+    IReadOnlyList<SprintStatusTime> SprintStatusTimes,
+    IReadOnlyList<BoardStatus> BoardStatuses);

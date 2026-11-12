@@ -86,6 +86,9 @@ public sealed class FakeIssue
 
     public string? ResolutionId { get; private set; }
 
+    /// <summary>The sprints the issue's Sprint field lists now.</summary>
+    public IReadOnlyList<long> SprintIds { get; private set; } = [];
+
     public IReadOnlyList<FakeHistory> Histories => _histories;
 
     public FakeIssue OfType(FakeIssueType type)
@@ -131,6 +134,29 @@ public sealed class FakeIssue
         Status = to;
         return this;
     }
+
+    /// <summary>Sets the Sprint field without recording history, as for an issue created inside a sprint.</summary>
+    public FakeIssue InSprints(params long[] sprintIds)
+    {
+        SprintIds = sprintIds;
+        return this;
+    }
+
+    /// <summary>
+    /// Changes the Sprint field from what it lists now to <paramref name="sprintIds"/> and records the change.
+    /// No IDs means the issue was taken out of every sprint.
+    /// </summary>
+    public FakeIssue SprintsChanged(DateTimeOffset at, params long[] sprintIds)
+    {
+        AddHistory(at, FakeJira.SprintFieldId, "Sprint", SprintList(SprintIds), SprintNames(SprintIds), SprintList(sprintIds), SprintNames(sprintIds));
+        SprintIds = sprintIds;
+        return this;
+    }
+
+    // A Sprint changelog item holds comma-separated sprint IDs, and an empty text for no sprint (research note 05).
+    private static string SprintList(IReadOnlyList<long> sprintIds) => string.Join(", ", sprintIds.Select(id => id.ToString(CultureInfo.InvariantCulture)));
+
+    private static string SprintNames(IReadOnlyList<long> sprintIds) => string.Join(", ", sprintIds.Select(FakeJira.SprintName));
 
     /// <summary>Appends one changelog entry with the next history ID.</summary>
     public FakeIssue AddHistory(DateTimeOffset at, string fieldId, string fieldName, string? from, string? fromText, string? to, string? toText, FakePerson? author = null)
@@ -361,7 +387,7 @@ public sealed class FakeJira
                     ["assignee"] = issue.Assignee is null ? null : UserDetails(issue.Assignee),
                     ["created"] = PlatformTime(issue.Created),
                     ["updated"] = PlatformTime(issue.Updated),
-                    [SprintFieldId] = null,
+                    [SprintFieldId] = SprintField(issue),
                     [StoryPointFieldId] = issue.StoryPoints,
                 },
             });
@@ -371,6 +397,33 @@ public sealed class FakeJira
         AddLastPageToken(page);
         return page;
     }
+
+    /// <summary>The Sprint field of a search result: null when the issue is in no sprint, otherwise one object per sprint.</summary>
+    private JsonArray? SprintField(FakeIssue issue)
+    {
+        if (issue.SprintIds.Count == 0)
+        {
+            return null;
+        }
+
+        var known = SprintList().ToDictionary(sprint => sprint.Id);
+        return new JsonArray([.. issue.SprintIds.Select(id =>
+        {
+            // The field's shape differs from the board's sprint list: boardId, not originBoardId.
+            var value = new JsonObject { ["id"] = id, ["name"] = SprintName(id), ["state"] = "closed", ["boardId"] = BoardId };
+            if (known.TryGetValue(id, out var sprint))
+            {
+                value["name"] = sprint.Name;
+                value["state"] = sprint.State;
+                value["goal"] = sprint.Goal;
+            }
+
+            return (JsonNode)value;
+        })]);
+    }
+
+    /// <summary>The name the fake gives a sprint in changelog text.</summary>
+    internal static string SprintName(long id) => $"Fake Sprint {id}";
 
     private JsonObject Changelogs(StubRequest request)
     {

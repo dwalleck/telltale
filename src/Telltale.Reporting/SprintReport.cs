@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Globalization;
 using System.Text;
 using Telltale.Core;
@@ -31,7 +32,26 @@ public static class SprintReport
         var report = new StringBuilder();
         AppendTitle(report, sprint, teamTimeZone);
         AppendDeliveredCount(report, sprint);
+        AppendTimeInStatus(report, await ReadTimeInStatusAsync(store, sprintId, cancellationToken));
         return report.ToString();
+    }
+
+    private static async Task<IReadOnlyList<TimeInStatusRow>> ReadTimeInStatusAsync(ITelltaleStore store, string sprintId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await store.QueryViewsAsync<TimeInStatusRow>(
+                "SELECT status_name, issue_count, median_business_days FROM time_in_status_per_sprint WHERE sprint_id = @sprintId ORDER BY board_position;",
+                new { sprintId },
+                cancellationToken);
+        }
+        catch (DbException exception)
+        {
+            // The sprint was found a moment ago, so the store is readable: what is missing is this view.
+            throw new UserFacingException(
+                "The store's derived data has no time in status figures: it was built by an earlier version of this tool. Rebuild the derived data, then report again.",
+                exception);
+        }
     }
 
     /// <summary>Renders the report and writes it into <paramref name="directory"/>. Returns the file's path.</summary>
@@ -59,11 +79,39 @@ public static class SprintReport
     private static void AppendDeliveredCount(StringBuilder report, DeliveredRow sprint) =>
         report.Append("Delivered issues: ").Append(sprint.DeliveredCount.ToString(CultureInfo.InvariantCulture)).Append('\n');
 
+    /// <summary>One row per status issues spent time in during the sprint, in board order. A status nobody was in has no row.</summary>
+    private static void AppendTimeInStatus(StringBuilder report, IReadOnlyList<TimeInStatusRow> rows)
+    {
+        report.Append("\n## Time in status\n\n");
+        if (rows.Count == 0)
+        {
+            report.Append("No issue of this sprint spent time in a status that is not done.\n");
+            return;
+        }
+
+        report.Append("| Status | Issues | Median business days |\n| --- | ---: | ---: |\n");
+        foreach (var row in rows)
+        {
+            // A status name is Jira's text: a "|" in it would otherwise end the cell.
+            report.Append("| ").Append(row.StatusName.Replace("|", "\\|", StringComparison.Ordinal))
+                .Append(" | ").Append(row.IssueCount.ToString(CultureInfo.InvariantCulture))
+                .Append(" | ").Append(row.MedianBusinessDays.ToString("0.0", CultureInfo.InvariantCulture))
+                .Append(" |\n");
+        }
+    }
+
     /// <summary>A stored time as a date in the team's zone, e.g. 2026-01-05.</summary>
     private static string LocalDate(string storedUtc, TimeZoneInfo teamTimeZone)
     {
         var instant = StoredTime.FromStored(storedUtc);
         return TimeZoneInfo.ConvertTime(instant, teamTimeZone).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    }
+
+    private sealed class TimeInStatusRow
+    {
+        public string StatusName { get; init; } = "";
+        public long IssueCount { get; init; }
+        public double MedianBusinessDays { get; init; }
     }
 
     private sealed class DeliveredRow

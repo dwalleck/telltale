@@ -1,6 +1,7 @@
 using System.Globalization;
 using Telltale.Collectors.Jira;
 using Telltale.Core;
+using Telltale.Core.Calendar;
 using Telltale.Core.Configuration;
 using Telltale.Core.Derive;
 using Telltale.Core.Secrets;
@@ -47,10 +48,7 @@ internal sealed class PipelineSteps
 
         if (needsJira)
         {
-            foreach (var secret in Enum.GetValues<SecretName>())
-            {
-                services.Secrets.Require(secret);
-            }
+            await RequireSecretsAsync(services, cancellationToken);
         }
 
         var store = new SqliteStore(services.DatabasePath);
@@ -67,7 +65,7 @@ internal sealed class PipelineSteps
     public async Task DeriveAsync(CancellationToken cancellationToken)
     {
         var raw = await _store.ReadRawAsync(cancellationToken);
-        await _store.ReplaceDerivedAsync(Derivation.Derive(raw, _config.Jira.BoardId, _roles, _abandonedResolutionIds, AsOf(raw)), cancellationToken);
+        await _store.ReplaceDerivedAsync(Derivation.Derive(raw, _config.Jira.BoardId, _roles, _abandonedResolutionIds, new BusinessCalendar(_timeZone, _config.Holidays), AsOf(raw)), cancellationToken);
     }
 
     /// <summary>
@@ -94,6 +92,35 @@ internal sealed class PipelineSteps
     {
         var path = await SprintReport.WriteAsync(_store, sprintId.ToString(CultureInfo.InvariantCulture), _timeZone, _services.ReportDirectory, cancellationToken);
         await _services.Out.WriteLineAsync($"Wrote {path}");
+    }
+
+    /// <summary>
+    /// Stops with a message naming the first secret that is not set and how to set it. A missing hashing salt
+    /// is two different situations: on a database that holds nobody yet, any salt will do and one can be
+    /// generated; once people are stored under a salt, only that salt keeps each of them one person.
+    /// </summary>
+    private static async Task RequireSecretsAsync(AppServices services, CancellationToken cancellationToken)
+    {
+        foreach (var secret in SecretInfo.All)
+        {
+            if (secret.Name != SecretName.HashingSalt || !string.IsNullOrWhiteSpace(services.Secrets.Get(secret.Name)))
+            {
+                services.Secrets.Require(secret.Name);
+                continue;
+            }
+
+            var howToSet = services.Secrets.HowToSet(secret.Name);
+            if (await SqliteStore.HoldsHashedPeopleAsync(services.DatabasePath, cancellationToken))
+            {
+                throw new UserFacingException(
+                    $"The secret {secret.Label} is not set in the secret store, and the database already holds people hashed with the salt that was there before. "
+                    + $"A new salt would give every person a second hash, so each would count as two. Restore the original salt. {howToSet}");
+            }
+
+            // Only a store 'secrets set' can write to can be given a generated salt.
+            var generate = services.Secrets is IWritableSecretStore ? " Add --generate to have a new random salt made." : string.Empty;
+            throw new UserFacingException($"The secret {secret.Label} is not set in the secret store. {howToSet}{generate}");
+        }
     }
 
     private static StatusRoles ReadStatusRoles(TelltaleConfig config, string path)

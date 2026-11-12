@@ -23,7 +23,7 @@ A continuous period an issue belonged to a given sprint, rebuilt from the Sprint
 _Avoid_: Sprint assignment
 
 **Time in status**:
-How long an issue spent in a status during a sprint: its status intervals clipped to the sprint window and its membership intervals.
+How long an issue spent in a status during a sprint: its status intervals clipped to the sprint window and its membership intervals. Reported for statuses before delivery only (not Done or Shipped), and an issue counts toward a status only if it spent more than zero business days there.
 
 **Business day**:
 A day that is neither a weekend nor a company holiday, counted in full (24 hours) in the team's time zone.
