@@ -54,13 +54,21 @@ public static class Derivation
             var timeline = StatusTimeline.Build(issue.Created, issue.StatusId, statusChanges[issue.IssueId]);
             intervals.AddRange(timeline.Intervals.Select(interval => new IssueStatusInterval(issue.IssueId, interval.StatusId, interval.Start, interval.End)));
 
-            cycles.Add(Delivery.Of(issue.StatusId, issue.ResolutionId, timeline.Intervals, roles, abandonedResolutionIds) switch
+            var reopens = Cycles.ReopenCount(timeline.Entries, roles);
+            cycles.Add(Delivery.Of(issue.StatusId, issue.ResolutionId, timeline.Entries, roles, abandonedResolutionIds) switch
             {
-                Delivered delivered => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At)),
+                Delivered delivered => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At), reopens)
+                {
+                    Cycle = Cycles.Measure(timeline.Entries, roles, delivered.At, calendar),
 
-                // An abandoned issue reached done, so it has a cycle end, but it is not a delivery and belongs to no delivery sprint.
-                Abandoned abandoned => new IssueCycle(issue.IssueId, abandoned.At, Delivered: false, DeliverySprintId: null),
-                NotDelivered => new IssueCycle(issue.IssueId, CycleEnd: null, Delivered: false, DeliverySprintId: null),
+                    // The point bucket is the issue's current estimate.
+                    PointBucket = issue.StoryPoints,
+                },
+
+                // An abandoned issue reached done, so it has a cycle end, but it is not a delivery: it belongs to
+                // no delivery sprint and has no cycle time.
+                Abandoned abandoned => new IssueCycle(issue.IssueId, abandoned.At, Delivered: false, DeliverySprintId: null, reopens),
+                NotDelivered => new IssueCycle(issue.IssueId, CycleEnd: null, Delivered: false, DeliverySprintId: null, reopens),
             });
 
             var membership = SprintMembership.Build(issue.Created, SprintMembership.ParseSprintIds(issue.SprintIds), sprintChanges[issue.IssueId]);

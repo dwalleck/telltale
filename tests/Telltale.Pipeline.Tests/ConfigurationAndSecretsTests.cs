@@ -39,6 +39,7 @@ public class ConfigurationAndSecretsTests
 
     [Test]
     [Arguments("timeZone")]
+    [Arguments("holidays")]
     [Arguments("statusRoles")]
     [Arguments("jira")]
     public async Task A_required_setting_given_as_null_is_refused_and_named(string setting)
@@ -271,6 +272,39 @@ public class ConfigurationAndSecretsTests
 
         await Assert.That(exit).IsEqualTo(0);
         await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
+    }
+
+    [Test]
+    public async Task A_configuration_without_a_holiday_list_is_refused()
+    {
+        // ADR-0001: the holiday list is required. Left out, every holiday would silently count as a business day.
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config.Remove("holidays");
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid").And.Contains("holidays");
+        await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
+    }
+
+    [Test]
+    [Arguments("19 January 2026")]
+    [Arguments("2026-02-30")]
+    [Arguments("2026-01-19T00:00:00Z")]
+    public async Task A_holiday_that_is_not_a_calendar_date_is_refused(string holiday)
+    {
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config["holidays"] = new System.Text.Json.Nodes.JsonArray("2026-01-01", holiday);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid").And.Contains("holidays[1]");
+        await Assert.That(pipeline.Error.ToString()).DoesNotContain("   at ");
+        await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
     }
 
     [Test]

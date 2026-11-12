@@ -229,9 +229,16 @@ public sealed class SqliteStore : ITelltaleStore
         await InsertRowsAsync(
             connection,
             transaction,
-            "INSERT INTO issue_cycle (issue_id, cycle_end, delivered, delivery_sprint_id) VALUES (@issueId, @cycleEnd, @delivered, @deliverySprintId);",
-            ["@issueId", "@cycleEnd", "@delivered", "@deliverySprintId"],
-            derived.IssueCycles.Select(cycle => new object?[] { cycle.IssueId, StoredTime.ToStored(cycle.CycleEnd), cycle.Delivered ? 1L : 0L, cycle.DeliverySprintId }),
+            """
+            INSERT INTO issue_cycle (issue_id, cycle_start, cycle_end, calendar_days, business_days, point_bucket, delivered, delivery_sprint_id, reopen_count)
+            VALUES (@issueId, @cycleStart, @cycleEnd, @calendarDays, @businessDays, @pointBucket, @delivered, @deliverySprintId, @reopenCount);
+            """,
+            ["@issueId", "@cycleStart", "@cycleEnd", "@calendarDays", "@businessDays", "@pointBucket", "@delivered", "@deliverySprintId", "@reopenCount"],
+            derived.IssueCycles.Select(cycle => new object?[]
+            {
+                cycle.IssueId, StoredTime.ToStored(cycle.Cycle?.Start), StoredTime.ToStored(cycle.CycleEnd), cycle.Cycle?.CalendarDays, cycle.Cycle?.BusinessDays,
+                cycle.PointBucket, cycle.Delivered ? 1L : 0L, cycle.DeliverySprintId, (long)cycle.ReopenCount,
+            }),
             cancellationToken);
 
         await InsertRowsAsync(

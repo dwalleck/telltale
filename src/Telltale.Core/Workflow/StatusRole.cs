@@ -61,6 +61,9 @@ public sealed class StatusRoles
     /// <summary>The status's role, or null when the configuration does not mention the status.</summary>
     public StatusRole? RoleOf(string statusId) => _byStatusId.GetValueOrDefault(statusId);
 
+    /// <summary>True when the status has the work role.</summary>
+    public bool IsWork(string statusId) => RoleOf(statusId) is WorkRole;
+
     /// <summary>True when the status has the done role. Derive stops the run before a status with no role can matter.</summary>
     public bool IsDone(string statusId) => RoleOf(statusId) is DoneRole;
 }

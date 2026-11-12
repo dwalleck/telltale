@@ -1,3 +1,5 @@
+using Telltale.Core.Workflow;
+
 namespace Telltale.Core.Storage;
 
 /// <summary>One status interval of one issue. A null <see cref="End"/> means the issue is still in the status.</summary>
@@ -9,8 +11,16 @@ public sealed record IssueStatusInterval(string IssueId, string StatusId, DateTi
 /// <see cref="CycleEnd"/> but is not delivered. Read <see cref="Delivered"/>, never "has a cycle end", to find deliveries.
 /// <see cref="DeliverySprintId"/> is the sprint whose window contains a delivery (null when it fell between
 /// sprints, and for every issue that is not delivered).
+/// <see cref="ReopenCount"/> is how many times the issue moved out of a done-role status, delivered or not.
 /// </summary>
-public sealed record IssueCycle(string IssueId, DateTimeOffset? CycleEnd, bool Delivered, string? DeliverySprintId);
+public sealed record IssueCycle(string IssueId, DateTimeOffset? CycleEnd, bool Delivered, string? DeliverySprintId, int ReopenCount)
+{
+    /// <summary>The issue's cycle time. Null when it has none: it is not delivered, or it never entered a work-role status.</summary>
+    public Cycle? Cycle { get; init; }
+
+    /// <summary>The story point estimate the issue is grouped by. Null means unestimated.</summary>
+    public double? PointBucket { get; init; }
+}
 
 /// <summary>
 /// The sprint window of one sprint of the configured board that has started. A null <see cref="End"/> means the sprint

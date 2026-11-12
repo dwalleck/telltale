@@ -23,24 +23,27 @@ public union IssueOutcome(Delivered, Abandoned, NotDelivered);
 public static class Delivery
 {
     /// <summary>
-    /// Decides an issue's outcome from the status and resolution it has now, its status intervals (rebuilt
-    /// from its changelog, in time order), the configured status roles and the configured abandoned resolutions.
+    /// Decides an issue's outcome from the status and resolution it has now, the statuses it entered
+    /// (<see cref="StatusTimeline.Entries"/>, rebuilt from its changelog, in time order), the configured status
+    /// roles and the configured abandoned resolutions.
     /// </summary>
     /// <remarks>
     /// The issue's current status decides whether it is done; the changelog only dates the delivery.
     /// When the two disagree (the changelog ends in a status the issue is not in), or the changelog holds
     /// no move into done at all, there is no delivery moment and the issue is not delivered.
+    /// The entries are read, not the status intervals, because a status entered and left at the same instant
+    /// has no interval and is still a move: a reopen closed again in the same instant moves the delivery there.
     /// The resolution only tells an abandoned issue from a delivered one. An issue with no resolution, or with
     /// one that is not in the abandoned list, is delivered.
     /// </remarks>
     public static IssueOutcome Of(
         string currentStatusId,
         string? currentResolutionId,
-        IReadOnlyList<StatusInterval> intervals,
+        IReadOnlyList<StatusEntry> entries,
         StatusRoles roles,
         IReadOnlySet<string> abandonedResolutionIds)
     {
-        if (!roles.IsDone(currentStatusId) || intervals.Count == 0 || !roles.IsDone(intervals[^1].StatusId))
+        if (!roles.IsDone(currentStatusId) || entries.Count == 0 || !roles.IsDone(entries[^1].StatusId))
         {
             return new NotDelivered();
         }
@@ -48,8 +51,8 @@ public static class Delivery
         // Walk back over the unbroken run of done statuses the issue is in now. The run's start is
         // the last move into done from outside it: Done to Shipped stays inside the run, and an
         // earlier Done that was reopened lies before it.
-        var first = intervals.Count - 1;
-        while (first > 0 && roles.IsDone(intervals[first - 1].StatusId))
+        var first = entries.Count - 1;
+        while (first > 0 && roles.IsDone(entries[first - 1].StatusId))
         {
             first--;
         }
@@ -61,7 +64,7 @@ public static class Delivery
         }
 
         return currentResolutionId is not null && abandonedResolutionIds.Contains(currentResolutionId)
-            ? new Abandoned(intervals[first].Start)
-            : new Delivered(intervals[first].Start);
+            ? new Abandoned(entries[first].At)
+            : new Delivered(entries[first].At);
     }
 }

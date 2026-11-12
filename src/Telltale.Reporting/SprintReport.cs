@@ -32,6 +32,15 @@ public static class SprintReport
         var report = new StringBuilder();
         AppendTitle(report, sprint, teamTimeZone);
         AppendDeliveredCount(report, sprint);
+        AppendCycleTime(report, await store.QueryViewsAsync<CycleTimeRow>(
+            """
+            SELECT point_bucket, issue_count, median_business_days, p85_business_days, median_calendar_days, p85_calendar_days
+            FROM cycle_time_per_sprint_and_bucket
+            WHERE sprint_id = @sprintId
+            ORDER BY point_bucket IS NULL, point_bucket;
+            """,
+            new { sprintId },
+            cancellationToken));
         AppendTimeInStatus(report, await ReadTimeInStatusAsync(store, sprintId, cancellationToken));
         return report.ToString();
     }
@@ -79,6 +88,31 @@ public static class SprintReport
     private static void AppendDeliveredCount(StringBuilder report, DeliveredRow sprint) =>
         report.Append("Delivered issues: ").Append(sprint.DeliveredCount.ToString(CultureInfo.InvariantCulture)).Append('\n');
 
+    /// <summary>The cycle time table: one row per point bucket, smallest estimate first and unestimated issues last.</summary>
+    private static void AppendCycleTime(StringBuilder report, IReadOnlyList<CycleTimeRow> buckets)
+    {
+        report.Append("\n## Cycle time by point bucket\n\n");
+        if (buckets.Count == 0)
+        {
+            report.Append("No issue delivered in this sprint has a cycle time.\n");
+            return;
+        }
+
+        report.Append("| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |\n");
+        report.Append("|---|---|---|---|---|---|\n");
+
+        foreach (var bucket in buckets)
+        {
+            report.Append("| ").Append(BucketLabel(bucket.PointBucket))
+                .Append(" | ").Append(bucket.IssueCount.ToString(CultureInfo.InvariantCulture))
+                .Append(" | ").Append(Days(bucket.MedianBusinessDays))
+                .Append(" | ").Append(Days(bucket.P85BusinessDays))
+                .Append(" | ").Append(Days(bucket.MedianCalendarDays))
+                .Append(" | ").Append(Days(bucket.P85CalendarDays))
+                .Append(" |\n");
+        }
+    }
+
     /// <summary>One row per status issues spent time in during the sprint, in board order. A status nobody was in has no row.</summary>
     private static void AppendTimeInStatus(StringBuilder report, IReadOnlyList<TimeInStatusRow> rows)
     {
@@ -99,6 +133,16 @@ public static class SprintReport
                 .Append(" |\n");
         }
     }
+
+    /// <summary>
+    /// A point bucket's label: the estimate in full (3, 0.5, 2.001), so two buckets the view keeps apart
+    /// never print alike. The round-trip format gives the shortest text that identifies the number.
+    /// </summary>
+    private static string BucketLabel(double? pointBucket) =>
+        pointBucket?.ToString("R", CultureInfo.InvariantCulture) ?? "unestimated";
+
+    /// <summary>A duration in days to one decimal place, e.g. 2.5.</summary>
+    private static string Days(double days) => days.ToString("F1", CultureInfo.InvariantCulture);
 
     /// <summary>A stored time as a date in the team's zone, e.g. 2026-01-05.</summary>
     private static string LocalDate(string storedUtc, TimeZoneInfo teamTimeZone)
@@ -121,5 +165,15 @@ public static class SprintReport
         public string? PlannedEnd { get; init; }
         public string? Completed { get; init; }
         public long DeliveredCount { get; init; }
+    }
+
+    private sealed class CycleTimeRow
+    {
+        public double? PointBucket { get; init; }
+        public long IssueCount { get; init; }
+        public double MedianBusinessDays { get; init; }
+        public double P85BusinessDays { get; init; }
+        public double MedianCalendarDays { get; init; }
+        public double P85CalendarDays { get; init; }
     }
 }
