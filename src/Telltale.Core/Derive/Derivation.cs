@@ -61,22 +61,11 @@ public static class Derivation
             var reopens = Cycles.ReopenCount(timeline.Entries, roles);
             cycles.Add(Delivery.Of(issue.StatusId, issue.ResolutionId, timeline.Entries, roles, abandonedResolutionIds) switch
             {
-                Delivered delivered => Cycles.Measure(timeline.Entries, roles, delivered.At, calendar) switch
+                Delivered delivered => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At), reopens)
                 {
-                    { } cycle => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At), reopens)
-                    {
-                        Cycle = cycle,
-
-                        // Later re-estimates do not move the issue to another bucket (ADR-0006).
-                        PointBucket = PointHistory.EstimateAt(cycle.Start, issue.StoryPoints, pointChanges[issue.IssueId]),
-                    },
-
-                    // No cycle, so no cycle start to read the estimate at: the bucket is the current estimate.
-                    null => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At), reopens)
-                    {
-                        PointBucket = issue.StoryPoints,
-                    },
-                },
+                    Cycle = Cycles.Measure(timeline.Entries, roles, delivered.At, calendar),
+                    PointBucket = issue.StoryPoints,
+                }.WithBucketAtCycleStart(pointChanges[issue.IssueId]),
 
                 // An abandoned issue reached done, so it has a cycle end, but it is not a delivery: it belongs to
                 // no delivery sprint and has no cycle time.
@@ -114,6 +103,16 @@ public static class Derivation
             sprintStatusTimes,
             [.. roles.StatusIds.Select((statusId, index) => new BoardStatus(statusId, index + 1, roles.IsDone(statusId)))]);
     }
+
+    /// <summary>
+    /// Puts a delivered issue in the bucket of its estimate at the start of its cycle, so a later re-estimate
+    /// does not move it (ADR-0006). An issue with no cycle has no cycle start to read the estimate at and keeps
+    /// the bucket it came with.
+    /// </summary>
+    private static IssueCycle WithBucketAtCycleStart(this IssueCycle delivered, IEnumerable<PointChange> pointChanges) =>
+        delivered.Cycle is { } cycle
+            ? delivered with { PointBucket = PointHistory.EstimateAt(cycle.Start, cycle.StartHistoryId, delivered.PointBucket, pointChanges) }
+            : delivered;
 
     /// <summary>
     /// When a sprint's window ends: at its completion; for a closed sprint Jira gives no completion time,

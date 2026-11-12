@@ -231,6 +231,12 @@ public sealed class FakeJira
     /// </summary>
     public TimeZoneInfo AccountTimeZone { get; set; } = TimeZoneInfo.FindSystemTimeZoneById(TeamTime.ZoneId);
 
+    /// <summary>
+    /// Serves the values of story point history as JSON numbers instead of text. The schema says text; a number
+    /// field's values being numbers is the other thing a real site could do.
+    /// </summary>
+    public bool PointHistoryAsNumbers { get; set; }
+
     /// <summary>Which of the two documented response shapes to serve.</summary>
     public JiraShapes Shapes { get; set; } = JiraShapes.AsSchemas;
 
@@ -511,10 +517,10 @@ public sealed class FakeJira
                         ["field"] = history.FieldName,
                         ["fieldtype"] = history.FieldId.StartsWith("customfield_", StringComparison.Ordinal) ? "custom" : "jira",
                         ["fieldId"] = history.FieldId,
-                        ["from"] = history.From,
-                        ["fromString"] = history.FromText,
-                        ["to"] = history.To,
-                        ["toString"] = history.ToText,
+                        ["from"] = HistoryValue(history, history.From),
+                        ["fromString"] = HistoryValue(history, history.FromText),
+                        ["to"] = HistoryValue(history, history.To),
+                        ["toString"] = HistoryValue(history, history.ToText),
                     }),
                 });
             }
@@ -529,6 +535,11 @@ public sealed class FakeJira
         AddLastPageToken(page);
         return page;
     }
+
+    private JsonNode? HistoryValue(FakeHistory history, string? value) =>
+        value is not null && PointHistoryAsNumbers && history.FieldId == StoryPointFieldId
+            ? JsonValue.Create(double.Parse(value, CultureInfo.InvariantCulture))
+            : value;
 
     private void AddLastPageToken(JsonObject page)
     {

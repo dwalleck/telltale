@@ -18,11 +18,18 @@ public static class PointHistory
 {
     /// <summary>
     /// The story point estimate in effect at <paramref name="moment"/>, rebuilt from the estimate's history
-    /// (GLOSSARY: Point bucket). Null means the issue had no estimate then. It is what the last change at or
-    /// before the moment set; before the first change, what that change replaced; and with no history at all,
-    /// the current estimate, which then never changed.
+    /// (GLOSSARY: Point bucket). Null means the issue had no estimate then. It is what the last change before
+    /// the moment set; before the first change, what that change replaced; and with no history at all, the
+    /// current estimate, which then never changed.
     /// </summary>
-    public static double? EstimateAt(DateTimeOffset moment, double? currentEstimate, IEnumerable<PointChange> changes)
+    /// <remarks>
+    /// <paramref name="momentHistoryId"/> is the changelog entry that made the moment (the move into work that
+    /// started the cycle), or null when no entry did (the issue was created in a work status). Among changes
+    /// with the moment's own timestamp it decides: a change recorded before that entry, or in it, was in effect;
+    /// one recorded after it was not, and neither was any when there is no entry, since an issue's creation
+    /// comes before every change to it.
+    /// </remarks>
+    public static double? EstimateAt(DateTimeOffset moment, string? momentHistoryId, double? currentEstimate, IEnumerable<PointChange> changes)
     {
         var ordered = ChangeOrdering.DedupeAndSort(changes, change => change.HistoryId, change => change.At);
         if (ordered.Count == 0)
@@ -30,7 +37,9 @@ public static class PointHistory
             return currentEstimate;
         }
 
-        var last = ordered.LastOrDefault(change => change.At <= moment);
+        var last = ordered.LastOrDefault(change =>
+            change.At < moment
+            || (change.At == moment && momentHistoryId is not null && ChangeOrdering.CompareHistoryIds(change.HistoryId, momentHistoryId) <= 0));
         return last is null ? ordered[0].From : last.To;
     }
 }

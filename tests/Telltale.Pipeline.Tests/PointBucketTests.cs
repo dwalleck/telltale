@@ -17,6 +17,14 @@ public class PointBucketTests
     /// <summary>What follows the cycle time section. Asserting it after the last expected row shows the table has no further row.</summary>
     private const string NextSection = "\n## Time in status\n";
 
+    private const string NotAnEstimate =
+        "The history of the field named by jira.storyPointFieldId in the configuration file holds a value that is not a story point number this tool reads. "
+        + "Either the setting names another field, or Jira writes the number in another form. Nothing was stored.\n";
+
+    private const string HistoryNotCovered =
+        "The store was last filled without the history of the fields that jira.sprintFieldId and jira.storyPointFieldId name now, "
+        + "so sprint membership and point buckets could be wrong. Run backfill.\n";
+
     [Test]
     public async Task An_issue_re_estimated_after_its_cycle_started_stays_in_the_bucket_of_its_estimate_at_cycle_start()
     {
@@ -148,9 +156,18 @@ public class PointBucketTests
     [Arguments("fake-account-0001", "Fake Person One")]
     [Arguments(null, "Fake Person One")]
     [Arguments("NaN", "NaN")]
-    public async Task History_of_the_configured_story_point_field_that_does_not_hold_numbers_stops_the_run_and_stores_nothing_of_it(string? to, string toText)
+    [Arguments(null, "NaN")]
+    [Arguments(null, "Infinity")]
+    [Arguments("10001", "Fake Large")]
+    [Arguments("3", "5")]
+    [Arguments(null, "-3")]
+    [Arguments("-3", null)]
+    [Arguments(null, "1,5")]
+    public async Task History_of_the_configured_story_point_field_that_does_not_hold_estimates_stops_the_run_and_stores_nothing_of_it(string? to, string? toText)
     {
-        // storyPointFieldId mistyped as another field: its history holds account IDs or names, which must never be stored.
+        // storyPointFieldId mistyped as another field: its history holds account IDs, names or option IDs, which
+        // must never be stored. A user picker, a text field, a select list (a numeric option ID beside its name),
+        // two numbers that disagree, a negative number, and a number written with a decimal comma.
         const string otherFieldId = "customfield_10099";
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
@@ -161,13 +178,143 @@ public class PointBucketTests
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            "The history of the field named by jira.storyPointFieldId in the configuration file holds values that are not numbers, so it is not the story point field. Nothing was stored.\n");
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(NotAnEstimate);
         var files = await pipeline.ReadAllFilesAsync();
         await Assert.That(files.Keys).Contains("store.db");
         var found = pipeline.Jira.ForbiddenText.Where(text => files.Values.Any(content => content.Contains(text, StringComparison.Ordinal))).ToList();
         await Assert.That(found).IsEmpty();
         await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM change;")).IsEquivalentTo(new[] { 0L });
+    }
+
+    [Test]
+    public async Task Point_history_that_carries_the_same_number_in_both_places_is_read()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+
+        // Raised from 3 to 5 before development started; each number is in from or to and again, written another way, in the text beside it.
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(5)
+            .AddHistory(Local(2026, 1, 6, 9), FakeJira.StoryPointFieldId, "Fake Story Points", "3.0", "3", "5.0", "5")
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 5 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
+    }
+
+    [Test]
+    public async Task Point_history_whose_values_are_json_numbers_is_read()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+        pipeline.Jira.PointHistoryAsNumbers = true;
+
+        // Estimated 0.5 when development started on Tuesday; raised to 8 on Wednesday; done Thursday.
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(0.5)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Reestimated(Local(2026, 1, 7, 9), 8)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 0.5 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
+    }
+
+    [Test]
+    public async Task A_re_estimate_at_the_instant_of_the_cycle_start_but_recorded_after_the_move_into_work_does_not_move_the_issue()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+
+        // Tuesday 09:00: moved into development, and then, in a later changelog entry with the same time, raised from 3 to 8.
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Reestimated(Local(2026, 1, 6, 9), 8)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 3 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
+    }
+
+    [Test]
+    public async Task A_re_estimate_at_the_instant_of_the_cycle_start_recorded_before_the_move_into_work_is_the_issues_bucket()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+
+        // Tuesday 09:00: raised from 3 to 8, and then, in a later changelog entry with the same time, moved into development.
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
+            .Reestimated(Local(2026, 1, 6, 9), 8)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 8 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
+    }
+
+    [Test]
+    [Arguments("sprintFieldId")]
+    [Arguments("storyPointFieldId")]
+    public async Task A_sync_is_refused_when_a_field_whose_history_is_fetched_changed_since_the_store_was_filled(string setting)
+    {
+        // An issue the store already holds is fetched again only when it changes in Jira, so the history of a
+        // newly named field would be missing for every other issue, and "no history" would be read as "never changed".
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done);
+        await pipeline.RunAllAsync(["backfill"]);
+        var requestsBefore = pipeline.Jira.Handler.Requests.Count;
+
+        pipeline.Config["jira"]![setting] = "customfield_10098";
+        var sync = await pipeline.RunAsync("sync");
+        var run = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(sync).IsEqualTo(1);
+        await Assert.That(run).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(HistoryNotCovered + HistoryNotCovered);
+        await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(requestsBefore);
+    }
+
+    [Test]
+    public async Task A_sync_is_refused_on_a_store_filled_before_point_history_was_fetched()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done);
+        await pipeline.RunAllAsync(["backfill"]);
+
+        // Such a store's watermark names the board, the projects and the start date, and no history fields.
+        await pipeline.ExecuteAsync("UPDATE watermark SET covers = substr(covers, 1, instr(covers, '; history ') - 1);");
+        var sync = await pipeline.RunAsync("sync");
+
+        await Assert.That(sync).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(HistoryNotCovered);
+    }
+
+    [Test]
+    public async Task After_a_backfill_under_the_changed_history_field_sync_works_again()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+        var issue = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development);
+        await pipeline.RunAllAsync(["backfill"]);
+        pipeline.Config["jira"]!["sprintFieldId"] = "customfield_10098";
+
+        await pipeline.RunAllAsync(["backfill"]);
+        issue.Moved(Local(2026, 1, 8, 9), Workflow.Done);
+        await pipeline.RunAllAsync(["sync"], ["derive"], ["report", "--sprint", "41"]);
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 3 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
     }
 
     [Test]
