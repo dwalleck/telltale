@@ -141,6 +141,54 @@ public sealed class PipelineHarness : IAsyncDisposable
         return (await connection.QueryAsync<T>(sql, parameters)).AsList();
     }
 
+    /// <summary>
+    /// Every row of every table and view in the store as text, one block per table in name order with its rows
+    /// sorted, for comparing the whole store before and after a command. It names no table, so it holds
+    /// whatever the schema becomes.
+    /// </summary>
+    public async Task<string> ReadStoreContentAsync()
+    {
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = DatabasePath,
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false,
+        }.ToString();
+
+        await using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync();
+        var names = (await connection.QueryAsync<string>("SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name;")).AsList();
+
+        var content = new System.Text.StringBuilder();
+        foreach (var name in names)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT * FROM \"{name.Replace("\"", "\"\"", StringComparison.Ordinal)}\";";
+            await using var reader = await command.ExecuteReaderAsync();
+
+            var rows = new List<string>();
+            while (await reader.ReadAsync())
+            {
+                var values = new object[reader.FieldCount];
+                reader.GetValues(values);
+                rows.Add(string.Join(" | ", values.Select(value => value is DBNull ? "NULL" : Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture))));
+            }
+
+            rows.Sort(StringComparer.Ordinal);
+            content.Append("## ").Append(name).Append('\n');
+            content.AppendJoin('\n', rows).Append('\n');
+        }
+
+        return content.ToString();
+    }
+
+    /// <summary>
+    /// The bytes of the report file written for a sprint, exactly as they are on disk, as hexadecimal text:
+    /// two reports are byte for byte the same when these strings are equal.
+    /// </summary>
+    public async Task<string> ReadReportBytesAsync(long sprintId) =>
+        Convert.ToHexString(await File.ReadAllBytesAsync(Path.Combine(ReportDirectory, $"sprint-{sprintId}.md")));
+
     /// <summary>Runs a statement against the store with a writable connection, as the owner could from any SQLite client.</summary>
     public async Task ExecuteAsync(string sql)
     {

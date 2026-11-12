@@ -14,6 +14,20 @@ public static class SprintReport
     /// <summary>The report's file name for a sprint: reports are named by sprint ID.</summary>
     public static string FileName(string sprintId) => $"sprint-{sprintId}.md";
 
+    /// <summary>
+    /// The ID of the sprint that completed last, or null when none has. A closed sprint Jira gives no
+    /// completion time ended at its planned end (owner decision D7).
+    /// </summary>
+    public static async Task<string?> MostRecentlyCompletedSprintAsync(ITelltaleStore store, CancellationToken cancellationToken = default)
+    {
+        var sprints = await store.QueryViewsAsync<string>(
+            "SELECT sprint_id FROM delivered_per_sprint WHERE state = @closed ORDER BY COALESCE(completed, planned_end) DESC, started DESC, sprint_id DESC LIMIT 1;",
+            new { closed = SprintStates.Closed },
+            cancellationToken);
+
+        return sprints is [var sprintId] ? sprintId : null;
+    }
+
     /// <summary>Renders the report. Dates are shown in <paramref name="teamTimeZone"/>.</summary>
     public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, CancellationToken cancellationToken = default)
     {

@@ -90,10 +90,22 @@ internal sealed class PipelineSteps
         return newest >= now ? newest.AddMilliseconds(1) : now;
     }
 
-    /// <summary>Writes one sprint's report and says where.</summary>
-    public async Task ReportAsync(long sprintId, CancellationToken cancellationToken)
+    /// <summary>
+    /// Writes one sprint's report and says where. Without <paramref name="sprintId"/> it is the most recently
+    /// completed sprint's.
+    /// </summary>
+    public async Task ReportAsync(long? sprintId, CancellationToken cancellationToken)
     {
-        var path = await SprintReport.WriteAsync(_store, sprintId.ToString(CultureInfo.InvariantCulture), _timeZone, _services.ReportDirectory, cancellationToken);
+        if (!await _store.HasDerivedDataAsync(cancellationToken))
+        {
+            throw new UserFacingException("The store has no derived data yet. Run derive first.");
+        }
+
+        var sprint = sprintId?.ToString(CultureInfo.InvariantCulture)
+            ?? await SprintReport.MostRecentlyCompletedSprintAsync(_store, cancellationToken)
+            ?? throw new UserFacingException("No sprint in the store has completed yet. Name a sprint with --sprint.");
+
+        var path = await SprintReport.WriteAsync(_store, sprint, _timeZone, _services.ReportDirectory, cancellationToken);
         await _services.Out.WriteLineAsync($"Wrote {path}");
     }
 

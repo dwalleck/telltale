@@ -11,8 +11,8 @@ public interface ITelltaleStore
 
     /// <summary>
     /// Writes a batch of raw rows in one transaction, replacing rows with the same Jira IDs. With
-    /// <paramref name="reached"/>, the collector's watermark moves forward to it in the same transaction, so it
-    /// advances only when the whole batch is written. A watermark never moves backwards.
+    /// <paramref name="reached"/>, the collector's watermark is set to it in the same transaction, so it
+    /// advances only when the whole batch is written.
     /// </summary>
     Task WriteRawAsync(RawData batch, Watermark? reached = null, CancellationToken cancellationToken = default);
 
@@ -24,6 +24,9 @@ public interface ITelltaleStore
 
     /// <summary>Drops the derived tables and the metric views, and rebuilds them around <paramref name="derived"/>.</summary>
     Task ReplaceDerivedAsync(DerivedData derived, CancellationToken cancellationToken = default);
+
+    /// <summary>Whether the derived tables and metric views exist: true once <see cref="ReplaceDerivedAsync"/> has run.</summary>
+    Task<bool> HasDerivedDataAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Runs a query over metric views. <typeparamref name="T"/> is a class with <c>init</c> properties

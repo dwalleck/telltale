@@ -7,9 +7,9 @@ internal static class RunCommand
 {
     public static Command Create(AppServices services)
     {
-        var sprint = new Option<long>("--sprint") { Description = "The ID of the sprint to report on.", Required = true };
+        var sprint = SprintOption.Create();
 
-        var command = new Command("run", "Sync from Jira, rebuild the derived data and write the report for a sprint.") { sprint };
+        var command = new Command("run", "Sync from Jira, rebuild the derived data and write a sprint's report.") { sprint };
         command.SetAction((parse, cancellationToken) => CliApp.GuardAsync(services, async () =>
         {
             var pipeline = await PipelineSteps.StartAsync(services, needsJira: true, cancellationToken);

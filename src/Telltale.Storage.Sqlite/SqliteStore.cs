@@ -163,13 +163,14 @@ public sealed class SqliteStore : ITelltaleStore
 
         if (reached is not null)
         {
-            // Stored times sort as text the way they sort as time, so max() picks the later one.
+            // Set, not raised: a batch that reaches less far (a backfill starting over) leaves a watermark that
+            // makes the next sync fetch more, which is always safe.
             await connection.ExecuteAsync(Command(
                 cancellationToken,
                 """
                 INSERT INTO watermark (collector, updated_through)
                 VALUES (@Collector, @UpdatedThrough)
-                ON CONFLICT (collector) DO UPDATE SET updated_through = max(updated_through, excluded.updated_through);
+                ON CONFLICT (collector) DO UPDATE SET updated_through = excluded.updated_through;
                 """,
                 new { reached.Collector, UpdatedThrough = StoredTime.ToStored(reached.UpdatedThrough) },
                 transaction));
@@ -260,6 +261,12 @@ public sealed class SqliteStore : ITelltaleStore
             transaction));
 
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task<bool> HasDerivedDataAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
+        return await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object);"));
     }
 
     public async Task<IReadOnlyList<T>> QueryViewsAsync<T>(string sql, object? parameters = null, CancellationToken cancellationToken = default)
