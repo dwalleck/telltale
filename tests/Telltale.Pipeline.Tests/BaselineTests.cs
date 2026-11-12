@@ -359,6 +359,39 @@ public class BaselineTests
         await Assert.That(await pipeline.ReadReportAsync(42)).IsEqualTo(written);
     }
 
+    [Test]
+    public async Task A_report_asks_the_start_date_rule_again_for_an_unchanged_list_after_a_backfill_from_a_later_start_date()
+    {
+        // B7 of the final review. Every issue was updated after the later start date, so the backfill from it
+        // stores the same raw rows and the derived data is not stale; only the date the store is complete
+        // from has moved, past the start of baseline sprint 41.
+        await using var pipeline = new PipelineHarness();
+        AddSprints(pipeline.Jira);
+        AddSprintWithOneAssigneeInBucketThreeAndInReview(pipeline.Jira);
+        AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
+        foreach (var issue in pipeline.Jira.Issues)
+        {
+            issue.Moved(Local(2026, 2, 2, 9), Workflow.Shipped);
+        }
+
+        pipeline.Config["baselineSprintIds"] = new JsonArray("41", "42");
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+        var written = await pipeline.ReadReportAsync(42);
+        var digest = await pipeline.QueryAsync<string>("SELECT digest FROM raw_state;");
+        pipeline.Config["jira"]!["backfillStart"] = "2026-01-10";
+        await pipeline.RunAllAsync(["backfill"]);
+
+        var exit = await pipeline.RunAsync("report", "--sprint", "42");
+
+        await Assert.That(await pipeline.QueryAsync<string>("SELECT digest FROM raw_state;")).IsEquivalentTo(digest);
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "baselineSprintIds in the configuration file lists 41, which started before 2026-01-10, the jira.backfillStart the store was last filled from, "
+            + "so issues delivered in it can be missing and the baseline would be too low. "
+            + "Take it out of the list, or set jira.backfillStart to a date before it started and run backfill.\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).IsEqualTo(written);
+    }
+
     // Owner decision D50 (changes D47, which refused such a list). A reassignment in Jira can take a fixed
     // baseline sprint below five, and the owner should not have to edit a fixed list to get a report. So
     // nothing stops: every baseline figure is withheld, and the console and the report name the sprint. The

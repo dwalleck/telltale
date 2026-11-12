@@ -1,6 +1,4 @@
 using System.Globalization;
-using System.Security.Cryptography;
-using System.Text.Json;
 using Telltale.Collectors.Jira;
 using Telltale.Core;
 using Telltale.Core.Calendar;
@@ -120,7 +118,7 @@ internal sealed class PipelineSteps : IDisposable
         await RequireBaselineSprintsAsync(raw, cancellationToken);
         var derived = Derivation.Derive(raw, _roles, _abandonedResolutionIds, new BusinessCalendar(_timeZone, _config.Holidays), AsOf(raw));
         var previous = await _store.ReadAnomaliesAsync(cancellationToken);
-        await _store.ReplaceDerivedAsync(derived, SourceOf(raw), cancellationToken);
+        await _store.ReplaceDerivedAsync(derived, await SourceAsync(cancellationToken), cancellationToken);
 
         // Owner decision D51: such a sprint stops nothing. It is in no figure, and the console says so.
         foreach (var sprintId in derived.ClosedSprintsWithoutAnEnd)
@@ -151,10 +149,13 @@ internal sealed class PipelineSteps : IDisposable
         }
     }
 
-    /// <summary>What a rebuild from <paramref name="raw"/> under the current configuration is built from.</summary>
-    private DerivedSource SourceOf(RawData raw) =>
+    /// <summary>
+    /// What a rebuild from the stored raw data under the current configuration is built from. The store
+    /// keeps the digest of its raw data, so this reads one row and no raw row.
+    /// </summary>
+    private async Task<DerivedSource> SourceAsync(CancellationToken cancellationToken) =>
         new(
-            DigestOf(raw),
+            await _store.ReadRawDigestAsync(cancellationToken) ?? "",
             _config.TimeZone,
             string.Join(",", _config.Holidays.Order().Select(day => day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))),
             DerivedSource.BaselineSprintIdsOf(_baselineSprintIds),
@@ -182,14 +183,6 @@ internal sealed class PipelineSteps : IDisposable
             IdentityHash.RequireSaltOf(await _store.ReadSaltFingerprintAsync(cancellationToken), salt.Trim());
         }
     }
-
-    /// <summary>
-    /// Identifies the raw data's content: equal raw data gives an equal digest, whenever and however often it
-    /// was written. It covers every field of every raw row, so a field added to the raw records is covered
-    /// without a change here. Rows come from the store in a fixed order.
-    /// </summary>
-    private static string DigestOf(RawData raw) =>
-        Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(raw)));
 
     /// <summary>
     /// The as-of time that closes open intervals and the active sprint's window: the clock, read when
@@ -224,8 +217,7 @@ internal sealed class PipelineSteps : IDisposable
             ?? throw new UserFacingException("The store has no derived data yet. Run derive first.");
 
         // The views would answer from the old derived tables without a sign, so the report checks first.
-        var raw = await _store.ReadRawAsync(cancellationToken);
-        var current = SourceOf(raw);
+        var current = await SourceAsync(cancellationToken);
         if (derivedFrom.RawDigest != current.RawDigest)
         {
             throw new UserFacingException("The raw data changed since the derived data was built. Run derive first.");
@@ -249,7 +241,7 @@ internal sealed class PipelineSteps : IDisposable
         if (derivedFrom.BaselineSprintIds != current.BaselineSprintIds)
         {
             // Deriving again is the remedy only for a list derive would accept; otherwise say what derive would.
-            await RequireBaselineSprintsAsync(raw, cancellationToken);
+            await RequireBaselineSprintsAsync(await _store.ReadRawAsync(cancellationToken), cancellationToken);
             throw new UserFacingException("baselineSprintIds in the configuration file changed since the derived data was built. Run derive first.");
         }
 
@@ -266,12 +258,23 @@ internal sealed class PipelineSteps : IDisposable
             return;
         }
 
-        if (raw.Sprints.FirstOrDefault(stored => stored.SprintId == sprint) is { } named && SprintWindows.IsClosedWithoutAnEnd(named))
+        // When each sprint with a window started, from the views: a report reads no raw row unless it has to
+        // explain a refusal.
+        var starts = (await _store.QueryViewsAsync<(string SprintId, string Started)>("SELECT sprint_id, started FROM delivered_per_sprint;", cancellationToken: cancellationToken))
+            .Select(window => (window.SprintId, StoredTime.FromStored(window.Started)))
+            .ToList();
+        if (starts.All(window => window.SprintId != sprint)
+            && (await _store.ReadRawAsync(cancellationToken)).Sprints.FirstOrDefault(stored => stored.SprintId == sprint) is { } named
+            && SprintWindows.IsClosedWithoutAnEnd(named))
         {
             throw new UserFacingException($"{SprintWindows.ClosedWithoutAnEnd(sprint)} and no figures. No report was written.");
         }
 
-        await RequireSprintWithinWhatWasFetchedAsync(raw, sprint, cancellationToken);
+        // Asked at every report, not only when the list or the raw data changed: a backfill from a later
+        // start date can leave both as they were and still make a sprint one the store no longer covers.
+        var completeFrom = await CompleteFromAsync(cancellationToken);
+        FetchedRange.RequireReportable(sprint, starts, completeFrom);
+        BaselineSprintRules.RequireWithinWhatWasFetched(starts, _baselineSprintIds, completeFrom);
         var path = await SprintReport.WriteAsync(_store, sprint, _timeZone, [.. _baselineSprintIds.Order(StringComparer.Ordinal)], _services.ReportDirectory, cancellationToken);
         await _services.Out.WriteLineAsync($"Wrote {path}");
     }
@@ -287,30 +290,16 @@ internal sealed class PipelineSteps : IDisposable
         BaselineSprintRules.RequireWindow(raw.Sprints, _baselineSprintIds);
         if (_baselineSprintIds.Count > 0)
         {
-            BaselineSprintRules.RequireWithinWhatWasFetched(raw.Sprints, _baselineSprintIds, await CompleteFromAsync(cancellationToken));
+            BaselineSprintRules.RequireWithinWhatWasFetched(
+                raw.Sprints.Where(sprint => sprint.Start is not null).Select(sprint => (sprint.SprintId, sprint.Start!.Value)),
+                _baselineSprintIds,
+                await CompleteFromAsync(cancellationToken));
         }
     }
 
     /// <summary>The moment from which the store holds every issue: the start date it was last filled from. Null when it names none.</summary>
     private async Task<DateTimeOffset?> CompleteFromAsync(CancellationToken cancellationToken) =>
         await _store.ReadWatermarkAsync(JiraCollector.WatermarkName, cancellationToken) is { } filled ? JiraCollector.CompleteFrom(filled.Scope) : null;
-
-    /// <summary>
-    /// Refuses a sprint that started before the start date the store was last filled from. The store holds
-    /// only issues updated since that date, so issues delivered in such a sprint and not touched since are
-    /// missing, and the report would show too few deliveries without a sign.
-    /// </summary>
-    private async Task RequireSprintWithinWhatWasFetchedAsync(RawData raw, string sprintId, CancellationToken cancellationToken)
-    {
-        if (await CompleteFromAsync(cancellationToken) is { } completeFrom
-            && raw.Sprints.FirstOrDefault(sprint => sprint.SprintId == sprintId)?.Start < completeFrom)
-        {
-            throw new UserFacingException(
-                $"Sprint {sprintId} started before {completeFrom.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}, the jira.backfillStart the store was last filled from, "
-                + "so issues delivered in it can be missing and its figures would be too low. "
-                + "No report was written. To report on it, set jira.backfillStart to a date before the sprint started and run backfill.");
-        }
-    }
 
     /// <summary>
     /// Stops with a message naming the first secret that is not set and how to set it. A missing hashing salt

@@ -211,9 +211,10 @@ public class StoreTests
 
         await pipeline.RunAllAsync(["derive"]);
 
-        await Assert.That(recordedBefore).IsEquivalentTo(new[] { "0001_raw_tables.sql", "0002_issue_sprint_ids.sql", "0003_watermark.sql", "0004_person_hashing.sql", "0006_collection_scope.sql", "0007_drop_issue_key.sql" }, CollectionOrdering.Matching);
+        await Assert.That(recordedBefore).Contains("0006_collection_scope.sql");
+        await Assert.That(recordedBefore).DoesNotContain("0005_sprint_change_form.sql");
         await Assert.That(await pipeline.QueryAsync<string>("SELECT name FROM schema_migration ORDER BY name;"))
-            .IsEquivalentTo(new[] { "0001_raw_tables.sql", "0002_issue_sprint_ids.sql", "0003_watermark.sql", "0004_person_hashing.sql", "0005_sprint_change_form.sql", "0006_collection_scope.sql", "0007_drop_issue_key.sql" }, CollectionOrdering.Matching);
+            .IsEquivalentTo(recordedBefore.Append("0005_sprint_change_form.sql").Order(StringComparer.Ordinal), CollectionOrdering.Matching);
         await Assert.That(await pipeline.QueryAsync<string>("SELECT DISTINCT to_value FROM change WHERE field = 'sprint';")).IsEquivalentTo(new[] { "41,42" });
     }
 

@@ -482,6 +482,16 @@ public sealed partial class FakeJira
         }
     }
 
+    /// <summary>Puts an issue taken off the site with <see cref="Delete"/> back, in its old place.</summary>
+    public void Restore(FakeIssue issue)
+    {
+        lock (_gate)
+        {
+            _issues.Add(issue);
+            _issues.Sort((left, right) => long.Parse(left.Id, CultureInfo.InvariantCulture).CompareTo(long.Parse(right.Id, CultureInfo.InvariantCulture)));
+        }
+    }
+
     /// <summary>Takes a sprint off the board's sprint list, as when it is deleted: nothing says it is gone.</summary>
     public void RemoveSprint(FakeSprint sprint)
     {

@@ -219,6 +219,11 @@ public sealed class SqliteStore : ITelltaleStore
             transaction));
 
         await RecordSaltAsync(connection, transaction, batch, hashedWithBefore, cancellationToken);
+
+        // What the raw tables hold now, identified. Written with the batch, so the digest is never of anything
+        // but the stored rows, and whoever asks whether the raw data changed reads one row.
+        var digest = DigestOf(await ReadRawAsync(connection, transaction, cancellationToken));
+        await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM raw_state; INSERT INTO raw_state (digest) VALUES (@digest);", new { digest }, transaction));
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -272,14 +277,32 @@ public sealed class SqliteStore : ITelltaleStore
                 StoredTime.FromStoredOrNull(row.UpdatedThrough));
     }
 
+    public async Task<string?> ReadRawDigestAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
+        return await connection.QuerySingleOrDefaultAsync<string?>(Command(cancellationToken, "SELECT digest FROM raw_state;"));
+    }
+
+    /// <summary>
+    /// Identifies raw data by its content: equal raw data gives an equal digest, whenever and however often
+    /// it was written. It covers every field of every raw row, so a field added to the raw records is covered
+    /// without a change here. The rows must be in the store's fixed reading order.
+    /// </summary>
+    private static string DigestOf(RawData raw) =>
+        Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(raw)));
+
     public async Task<RawData> ReadRawAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
+        return await ReadRawAsync(connection, transaction: null, cancellationToken);
+    }
 
-        var issues = await connection.QueryAsync<IssueRow>(Command(cancellationToken, "SELECT * FROM issue ORDER BY issue_id;"));
-        var changes = await connection.QueryAsync<ChangeRow>(Command(cancellationToken, "SELECT * FROM change ORDER BY issue_id, at, history_id;"));
-        var sprints = await connection.QueryAsync<SprintRow>(Command(cancellationToken, "SELECT * FROM sprint ORDER BY sprint_id;"));
-        var statuses = await connection.QueryAsync<StatusRow>(Command(cancellationToken, "SELECT * FROM status ORDER BY status_id;"));
+    private static async Task<RawData> ReadRawAsync(DbConnection connection, DbTransaction? transaction, CancellationToken cancellationToken)
+    {
+        var issues = await connection.QueryAsync<IssueRow>(Command(cancellationToken, "SELECT * FROM issue ORDER BY issue_id;", transaction: transaction));
+        var changes = await connection.QueryAsync<ChangeRow>(Command(cancellationToken, "SELECT * FROM change ORDER BY issue_id, at, history_id;", transaction: transaction));
+        var sprints = await connection.QueryAsync<SprintRow>(Command(cancellationToken, "SELECT * FROM sprint ORDER BY sprint_id;", transaction: transaction));
+        var statuses = await connection.QueryAsync<StatusRow>(Command(cancellationToken, "SELECT * FROM status ORDER BY status_id;", transaction: transaction));
 
         return new RawData(
             [.. issues.Select(row => new RawIssue(row.IssueId, row.IssueTypeId, StoredTime.FromStored(row.Created), row.StatusId, row.ResolutionId, row.StoryPoints, row.AssigneeHash, StoredTime.FromStored(row.Updated), row.SprintIds))],

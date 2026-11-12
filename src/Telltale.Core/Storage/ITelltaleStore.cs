@@ -43,6 +43,13 @@ public interface ITelltaleStore
     /// </summary>
     Task<string?> ReadSaltFingerprintAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// A digest that identifies the content of the raw tables, or null when no batch was ever written. The
+    /// store writes it with every batch, so reading it is one row: equal raw data gives an equal digest,
+    /// however it was written. A rebuild records it (<see cref="DerivedSource.RawDigest"/>).
+    /// </summary>
+    Task<string?> ReadRawDigestAsync(CancellationToken cancellationToken = default);
+
     /// <summary>Reads every raw row.</summary>
     Task<RawData> ReadRawAsync(CancellationToken cancellationToken = default);
 

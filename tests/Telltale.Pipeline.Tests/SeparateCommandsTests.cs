@@ -187,6 +187,48 @@ public class SeparateCommandsTests
     }
 
     [Test]
+    public async Task Report_reads_one_row_about_the_raw_data_and_never_the_raw_rows()
+    {
+        // Final review C18: every report used to read and serialise every raw row to see whether the raw data
+        // had changed. The changelog table is the largest, and no metric view reads it, so without it a
+        // report can only succeed if it does not read the raw rows.
+        await using var pipeline = new PipelineHarness();
+        AddBoard(pipeline.Jira);
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+        await pipeline.ExecuteAsync("DROP TABLE change;");
+
+        var exit = await pipeline.RunAsync("report", "--sprint", "42");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
+    }
+
+    [Test]
+    public async Task What_identifies_the_raw_data_is_written_with_it_and_is_the_same_however_the_same_rows_got_there()
+    {
+        await using var once = new PipelineHarness();
+        AddBoard(once.Jira);
+        await once.RunAllAsync(["backfill"]);
+
+        // The same rows, written by a backfill of less and a sync of the rest.
+        await using var inTwoSteps = new PipelineHarness();
+        AddBoard(inTwoSteps.Jira);
+        var later = inTwoSteps.Jira.Issues[2];
+        inTwoSteps.Jira.Delete(later);
+        await inTwoSteps.RunAllAsync(["backfill"]);
+        var afterTheFirstStep = await inTwoSteps.QueryAsync<string>("SELECT digest FROM raw_state;");
+        inTwoSteps.Jira.Restore(later);
+        await inTwoSteps.RunAllAsync(["sync"]);
+
+        var digest = await once.QueryAsync<string>("SELECT digest FROM raw_state;");
+        await Assert.That(digest.Count).IsEqualTo(1);
+        await Assert.That(digest[0]).Matches("^[0-9A-F]{64}$");
+        await Assert.That(afterTheFirstStep).IsNotEquivalentTo(digest);
+        await Assert.That(await inTwoSteps.QueryAsync<string>("SELECT digest FROM raw_state;")).IsEquivalentTo(digest);
+    }
+
+    [Test]
     public async Task Report_after_a_sync_that_changed_nothing_needs_no_new_derive()
     {
         await using var pipeline = new PipelineHarness();

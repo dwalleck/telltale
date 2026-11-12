@@ -1,4 +1,3 @@
-using System.Globalization;
 using Telltale.Core.Storage;
 
 namespace Telltale.Core.Derive;
@@ -33,23 +32,18 @@ public static class BaselineSprintRules
     }
 
     /// <summary>
-    /// Stops when a baseline sprint started before <paramref name="completeFrom"/>, the start date the store was
-    /// last filled from (null when the store names none). The store holds only issues updated since that date,
-    /// so issues delivered in such a sprint and not touched since are missing, and a baseline pooled from it
-    /// would be too low without a sign.
+    /// Stops when a baseline sprint started before <paramref name="completeFrom"/> (<see cref="FetchedRange"/>):
+    /// a baseline pooled from it would be too low without a sign. <paramref name="starts"/> is when each sprint
+    /// started; a sprint that is not in it is not asked about.
     /// </summary>
-    public static void RequireWithinWhatWasFetched(IReadOnlyList<RawSprint> sprints, IReadOnlySet<string> baselineSprintIds, DateTimeOffset? completeFrom)
+    public static void RequireWithinWhatWasFetched(IEnumerable<(string SprintId, DateTimeOffset Start)> starts, IReadOnlySet<string> baselineSprintIds, DateTimeOffset? completeFrom)
     {
-        var tooEarly = sprints
-            .Where(sprint => baselineSprintIds.Contains(sprint.SprintId) && sprint.Start < completeFrom)
-            .Select(sprint => sprint.SprintId)
-            .Order(StringComparer.Ordinal)
-            .ToList();
+        var tooEarly = FetchedRange.StartedBefore(starts.Where(sprint => baselineSprintIds.Contains(sprint.SprintId)), completeFrom);
         if (tooEarly.Count > 0)
         {
             var one = tooEarly.Count == 1;
             throw new UserFacingException(
-                $"baselineSprintIds in the configuration file lists {string.Join(", ", tooEarly)}, which {(one ? "started" : "each started")} before {completeFrom?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}, the jira.backfillStart the store was last filled from, "
+                $"baselineSprintIds in the configuration file lists {string.Join(", ", tooEarly)}, which {(one ? "started" : "each started")} before {FetchedRange.Date(completeFrom)}, the jira.backfillStart the store was last filled from, "
                 + $"so issues delivered in {(one ? "it" : "them")} can be missing and the baseline would be too low. "
                 + $"Take {(one ? "it" : "them")} out of the list, or set jira.backfillStart to a date before {(one ? "it" : "they")} started and run backfill.");
         }
