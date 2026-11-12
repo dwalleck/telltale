@@ -28,6 +28,7 @@ public class DiscoverTests
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).AssignedTo(People.One)
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 15), Workflow.Done);
+        pipeline.Jira.AddIdleTeam(41);
 
         var discovered = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
         var written = await File.ReadAllTextAsync(pipeline.ConfigPath);

@@ -24,6 +24,15 @@ public class IdentityHashTests
         await Assert.That(IdentityHash.Of(accountId, salt)).IsEqualTo(expected);
     }
 
+    // printf 'telltale salt fingerprint' | openssl dgst -sha256 -hmac '<salt>'
+    [Test]
+    [Arguments("synthetic-salt-one", "ddd9d5eb5e8d1f52028ee5b9972e6e2a70fa201ab9e66a84198397e93f39bba5")]
+    [Arguments("synthetic-salt-two", "d49d1f8d271fe6c8f08fc49fb5e76dba3aa7a82f2c6e5e42b678e57321b11344")]
+    public async Task A_salts_fingerprint_is_a_digest_keyed_by_the_salt_so_it_tells_salts_apart_without_holding_one(string salt, string expected)
+    {
+        await Assert.That(IdentityHash.SaltFingerprint(salt)).IsEqualTo(expected);
+    }
+
     [Test]
     [Arguments("")]
     [Arguments("   ")]

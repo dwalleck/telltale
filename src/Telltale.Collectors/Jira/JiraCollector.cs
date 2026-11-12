@@ -91,6 +91,14 @@ public sealed class JiraCollector
 
         // All three secrets are checked before the first call, so a missing salt cannot surface after a long fetch.
         var salt = _secrets.Require(SecretName.HashingSalt);
+
+        // A sync adds to what the store holds, so it must hash with the salt the stored people were hashed with.
+        // A backfill fetches everyone again, and the store checks that it did (ITelltaleStore.WriteRawAsync).
+        if (mode == CollectionMode.Incremental)
+        {
+            IdentityHash.RequireSaltOf(await store.ReadSaltFingerprintAsync(cancellationToken), salt);
+        }
+
         using var jira = new JiraClient(_handler, _config.SiteUrl, _secrets.Require(SecretName.JiraEmail), _secrets.Require(SecretName.JiraApiToken), _clock, _notices);
 
         var statuses = await FetchStatusesAsync(jira, cancellationToken);
@@ -104,7 +112,7 @@ public sealed class JiraCollector
         // A fetch that found nothing reaches no further than the one before it. An out-of-scope issue's update
         // does not move it: the overlap brings that issue back, and deleting it again changes nothing.
         var reached = new Watermark(WatermarkName, covers, issues.Count > 0 ? issues.Max(issue => issue.Updated) : since);
-        await store.WriteRawAsync(new RawData(issues, changes, sprints, statuses) { OutOfScopeIssueIds = outOfScopeIssueIds }, reached, cancellationToken);
+        await store.WriteRawAsync(new RawData(issues, changes, sprints, statuses) { OutOfScopeIssueIds = outOfScopeIssueIds, SaltFingerprint = IdentityHash.SaltFingerprint(salt) }, reached, cancellationToken);
     }
 
     // Separates the two parts of what a watermark covers. A project key cannot hold it.

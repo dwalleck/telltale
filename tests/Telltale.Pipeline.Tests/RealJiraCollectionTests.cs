@@ -11,16 +11,18 @@ public class RealJiraCollectionTests
     [Arguments(JiraShapes.AsExamples)]
     public async Task Issues_spread_over_several_search_pages_are_all_collected(JiraShapes shapes)
     {
+        // Ten issues, two to a page: the five delivered ones and the team's five.
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.Shapes = shapes;
         pipeline.Jira.SearchPageSize = 2;
         AddSprint41(pipeline.Jira);
         AddDeliveredIssues(pipeline.Jira, count: 5);
+        AddTeamAfterTheOthers(pipeline.Jira);
 
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
 
         await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 5\n");
-        await Assert.That(pipeline.Jira.Handler.Requests.Count(request => request.Path == "/rest/api/3/search/jql")).IsEqualTo(3);
+        await Assert.That(pipeline.Jira.Handler.Requests.Count(request => request.Path == "/rest/api/3/search/jql")).IsEqualTo(5);
     }
 
     [Test]
@@ -32,10 +34,11 @@ public class RealJiraCollectionTests
         pipeline.Jira.RepeatsIssueOnNextPage = true;
         AddSprint41(pipeline.Jira);
         AddDeliveredIssues(pipeline.Jira, count: 3);
+        AddTeamAfterTheOthers(pipeline.Jira);
 
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
 
-        await Assert.That(pipeline.Jira.SearchAnswers[0]).IsEquivalentTo(new[] { "FAKE-1", "FAKE-2", "FAKE-2", "FAKE-3" }, TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(pipeline.Jira.SearchAnswers[0]).IsEquivalentTo(new[] { "FAKE-1", "FAKE-2", "FAKE-2", "FAKE-3", "FAKE-9001", "FAKE-9001", "FAKE-9002", "FAKE-9003", "FAKE-9003", "FAKE-9004", "FAKE-9005" }, TUnit.Assertions.Enums.CollectionOrdering.Matching);
         var changelogRequest = pipeline.Jira.Handler.Requests.Single(request => request.Path == "/rest/api/3/changelog/bulkfetch");
         using var body = System.Text.Json.JsonDocument.Parse(changelogRequest.Body);
         var askedFor = body.RootElement.GetProperty("issueIdsOrKeys").EnumerateArray().Select(id => id.GetString()!).ToList();
@@ -53,10 +56,11 @@ public class RealJiraCollectionTests
         pipeline.Jira.AddIssue("FAKE-101", Local(2026, 1, 5, 10)).OfType(FakeIssueType.Epic);
         pipeline.Jira.AddIssue("FAKE-102", Local(2026, 1, 5, 11)).OfType(FakeIssueType.SubTask);
         AddDeliveredIssues(pipeline.Jira, count: 2);
+        AddTeamAfterTheOthers(pipeline.Jira);
 
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
 
-        await Assert.That(pipeline.Jira.SearchAnswers[0]).IsEquivalentTo(new[] { "FAKE-101", "FAKE-102", "FAKE-1", "FAKE-2" }, TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(pipeline.Jira.SearchAnswers[0]).IsEquivalentTo(new[] { "FAKE-101", "FAKE-102", "FAKE-1", "FAKE-2", "FAKE-9001", "FAKE-9002", "FAKE-9003", "FAKE-9004", "FAKE-9005" }, TUnit.Assertions.Enums.CollectionOrdering.Matching);
         await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 2\n");
     }
 
@@ -72,6 +76,7 @@ public class RealJiraCollectionTests
         pipeline.Jira.ChangelogPageSize = 2;
         AddSprint41(pipeline.Jira);
         AddDeliveredIssues(pipeline.Jira, count: 3);
+        AddTeamAfterTheOthers(pipeline.Jira);
 
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
 
@@ -90,6 +95,7 @@ public class RealJiraCollectionTests
             pipeline.Jira.ChangelogPageSize = 2;
             AddSprint41(pipeline.Jira);
             AddDeliveredIssues(pipeline.Jira, count: 3);
+            AddTeamAfterTheOthers(pipeline.Jira);
         }
 
         repeating.Jira.RepeatsHistoryOnNextPage = true;
@@ -128,6 +134,9 @@ public class RealJiraCollectionTests
             .Moved(Local(2025, 12, 31, 9), Workflow.Development)
             .Moved(Local(2026, 1, 2, 9), Workflow.Done);
 
+        // A team of five in every sprint, there since before the first one, so each delivered count is shown.
+        pipeline.Jira.AddIdleTeam(Local(2025, 11, 1, 9), 41, 42, 43, 44, 45);
+
         await pipeline.RunAllAsync(["run"]);
 
         var delivered = await pipeline.QueryAsync<(string SprintId, long DeliveredCount)>("SELECT sprint_id, delivered_count FROM delivered_per_sprint ORDER BY sprint_id;");
@@ -141,6 +150,7 @@ public class RealJiraCollectionTests
         await using var pipeline = new PipelineHarness();
         AddSprint41(pipeline.Jira);
         AddDeliveredIssues(pipeline.Jira, count: 1);
+        AddTeamAfterTheOthers(pipeline.Jira);
         pipeline.Jira.Handler.AnswerNext(HttpMethod.Post, "/rest/api/3/search/jql", StubHttpHandler.RateLimited(30), StubHttpHandler.RateLimited(7));
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -190,6 +200,7 @@ public class RealJiraCollectionTests
         await using var pipeline = new PipelineHarness();
         AddSprint41(pipeline.Jira);
         AddDeliveredIssues(pipeline.Jira, count: 1);
+        AddTeamAfterTheOthers(pipeline.Jira);
         pipeline.Jira.Handler.AnswerNext(HttpMethod.Get, "/rest/api/3/status", StubHttpHandler.RateLimited(null), StubHttpHandler.RateLimited(null), StubHttpHandler.RateLimited(null));
 
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
@@ -205,6 +216,7 @@ public class RealJiraCollectionTests
         await using var pipeline = new PipelineHarness();
         AddSprint41(pipeline.Jira);
         AddDeliveredIssues(pipeline.Jira, count: 1);
+        AddTeamAfterTheOthers(pipeline.Jira);
         var start = pipeline.Clock.GetUtcNow();
         pipeline.Jira.Handler.AnswerNext(HttpMethod.Get, $"/rest/agile/1.0/board/{FakeJira.BoardId}/sprint", StubHttpHandler.RateLimitedUntil(start.AddSeconds(90)));
 
@@ -366,6 +378,7 @@ public class RealJiraCollectionTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint41(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // In Development since the Friday before the sprint; added to the sprint on Wednesday 09:00; Done on Friday 09:00.
         // Both changes are in the old form: the field's name only, and null where the issue was in no sprint.
@@ -376,8 +389,8 @@ public class RealJiraCollectionTests
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
 
         var report = await pipeline.ReadReportAsync(41);
-        await Assert.That(report).Contains("\nDelivered issues: 1\n");
-        await Assert.That(report).Contains("\n| Fake Development | 1 | 2.0 |\n");
+        await Assert.That(report).Contains("\nDelivered issues: 5\n");
+        await Assert.That(report).Contains("\n| Fake Development | 5 | 2.0 |\n");
     }
 
     [Test]
@@ -386,6 +399,7 @@ public class RealJiraCollectionTests
         await using var pipeline = new PipelineHarness();
         AddSprint41(pipeline.Jira);
         AddDeliveredIssues(pipeline.Jira, count: 1);
+        AddTeamAfterTheOthers(pipeline.Jira);
         pipeline.Jira.Issues[0].AddHistory(Local(2026, 1, 8, 9), "customfield_10999", "status", null, null, "700001", "Synthetic custom value", withoutFieldId: true);
 
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
@@ -440,6 +454,12 @@ public class RealJiraCollectionTests
     /// <summary>A bulk changelog answer with one history entry for the first issue of the fake, holding <paramref name="item"/>.</summary>
     private static string ChangelogWithOneItem(string item) =>
         """{"issueChangeLogs":[{"issueId":"900001","changeHistories":[{"id":"200001","created":"2026-01-08T15:00:00.000+0000","items":[""" + item + """]}]}]}""";
+
+    /// <summary>
+    /// A team of five in sprint 41, so its delivered count is shown (SuppressionTests): five idle issues created
+    /// on Monday 12 January, after every other issue's last update, so the search returns them last. They have no history.
+    /// </summary>
+    private static void AddTeamAfterTheOthers(FakeJira jira) => jira.AddIdleTeam(Local(2026, 1, 12, 9), 41);
 
     private static void AddSprint41(FakeJira jira) =>
         jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));

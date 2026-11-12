@@ -86,9 +86,9 @@ public sealed class FakeIssue
 
     public string Key { get; }
 
-    public string Summary { get; }
+    public string Summary { get; private init; }
 
-    public string Description { get; }
+    public string Description { get; private init; }
 
     public DateTimeOffset Created { get; }
 
@@ -110,6 +110,28 @@ public sealed class FakeIssue
     public IReadOnlyList<long> SprintIds { get; private set; } = [];
 
     public IReadOnlyList<FakeHistory> Histories => _histories;
+
+    /// <summary>
+    /// The issue as it is now under another ID, key and assignee, for <see cref="FakeJira.ServeEachIssueOncePer"/>.
+    /// History IDs get <paramref name="suffix"/>, so they stay unique. The free text is the original's, so the
+    /// privacy scans cover it.
+    /// </summary>
+    internal FakeIssue CopyFor(FakePerson person, string suffix)
+    {
+        var copy = new FakeIssue(_jira, Id + suffix, suffix.Length == 0 ? Key : $"{FakeJira.ProjectKey}-{Id}{suffix}", Created, Status)
+        {
+            Summary = Summary,
+            Description = Description,
+            Updated = Updated,
+            Type = Type,
+            Assignee = person,
+            StoryPoints = StoryPoints,
+            ResolutionId = ResolutionId,
+            SprintIds = SprintIds,
+        };
+        copy._histories.AddRange(_histories.Select(history => history with { Id = history.Id + suffix }));
+        return copy;
+    }
 
     public FakeIssue OfType(FakeIssueType type)
     {
@@ -254,6 +276,7 @@ public sealed partial class FakeJira
     private readonly List<IReadOnlyList<string>> _searchAnswers = [];
     private readonly Dictionary<string, (List<FakeIssue> Found, int Answer, int Offset)> _searchPages = [];
     private readonly Dictionary<string, string> _statusNames = Workflow.BoardOrder.ToDictionary(status => status.Id, status => status.DefaultName);
+    private List<FakePerson>? _servedOncePer;
     private int _nextIssueId = 900001;
     private readonly Dictionary<string, (List<(FakeIssue Issue, FakeHistory History)> Found, int Offset)> _changelogPages = [];
     private int _nextHistoryId = 200001;
@@ -312,6 +335,33 @@ public sealed partial class FakeJira
     /// (ADR-0004: the endpoint can return duplicate entries depending on page size).
     /// </summary>
     public bool RepeatsHistoryOnNextPage { get; set; }
+
+    /// <summary>
+    /// Serves every issue once per person from now on: copies alike in everything but ID, key and assignee
+    /// (an issue's own <see cref="FakeIssue.AssignedTo"/> is not used). A figure is shown only for a team of
+    /// five with three assignees behind the figure (ADR-0003), so a test about any other rule calls this with
+    /// <see cref="People.Team"/> and expects every count multiplied by the number of people. A figure taken from
+    /// one value, or from values that are all alike, is unchanged. A test about how values are ranked (a median
+    /// or P85 over different values) must not use this: it gives each issue its own assignee instead.
+    /// </summary>
+    public void ServeEachIssueOncePer(IReadOnlyList<FakePerson> people)
+    {
+        lock (_gate)
+        {
+            _servedOncePer = [.. people];
+        }
+    }
+
+    /// <summary>The issues as the site serves them: each one as it is, or once per person (<see cref="ServeEachIssueOncePer"/>).</summary>
+    private List<FakeIssue> Served()
+    {
+        lock (_gate)
+        {
+            return _servedOncePer is null
+                ? [.. _issues]
+                : [.. _issues.SelectMany(issue => _servedOncePer.Select((person, copy) => issue.CopyFor(person, copy == 0 ? "" : $"{copy:00}")))];
+        }
+    }
 
     public IReadOnlyList<FakeIssue> Issues
     {
@@ -395,6 +445,27 @@ public sealed partial class FakeJira
             var issue = new FakeIssue(this, (_nextIssueId++).ToString(CultureInfo.InvariantCulture), key, created, createdIn ?? Workflow.New);
             _issues.Add(issue);
             return issue;
+        }
+    }
+
+    /// <summary>
+    /// Gives the sprints a team of five without delivering anything: one issue per person of
+    /// <see cref="People.Team"/>, listed in the sprints since 2 January 2026 and left in New. A delivered count is
+    /// shown only for a sprint with five distinct assignees (ADR-0003), so a test about delivered counts calls
+    /// this and keeps its own counts. The five issues do show in New in the sprints' time in status.
+    /// </summary>
+    public void AddIdleTeam(params long[] sprintIds) => AddIdleTeam(TeamTime.Local(2026, 1, 2, 9), sprintIds);
+
+    /// <summary>
+    /// <see cref="AddIdleTeam(long[])"/> with the five issues created at <paramref name="created"/>: earlier, for
+    /// sprints before January 2026, or later than the test's other issues, so that a search ordered by update
+    /// time returns them last.
+    /// </summary>
+    public void AddIdleTeam(DateTimeOffset created, params long[] sprintIds)
+    {
+        foreach (var (person, number) in People.Team.Select((person, index) => (person, index + 1)))
+        {
+            AddIssue($"{ProjectKey}-{9000 + number}", created).AssignedTo(person).InSprints(sprintIds);
         }
     }
 
@@ -508,7 +579,7 @@ public sealed partial class FakeJira
         {
             RequireStableOrder(request);
             var updatedSince = UpdatedSince(request);
-            found = [.. Issues.Where(issue => issue.Updated >= updatedSince).OrderBy(issue => issue.Updated).ThenBy(issue => long.Parse(issue.Id, CultureInfo.InvariantCulture))];
+            found = [.. Served().Where(issue => issue.Updated >= updatedSince).OrderBy(issue => issue.Updated).ThenBy(issue => long.Parse(issue.Id, CultureInfo.InvariantCulture))];
             offset = 0;
             lock (_gate)
             {
@@ -677,7 +748,7 @@ public sealed partial class FakeJira
             // An entry without a field ID is served whatever fields were asked for: nothing documents what the
             // filter does with one, and this is the harder case for the tool.
             // Oldest history first, then by issue ID: one issue's histories can be spread over several pages (research note 05).
-            found = [.. Issues.Where(issue => asked.Contains(issue.Id) || asked.Contains(issue.Key))
+            found = [.. Served().Where(issue => asked.Contains(issue.Id) || asked.Contains(issue.Key))
                 .SelectMany(issue => issue.Histories.Where(history => fieldIds is null || history.WithoutFieldId || fieldIds.Contains(history.FieldId)).Select(history => (issue, history)))
                 .OrderBy(entry => entry.history.At)
                 .ThenBy(entry => entry.issue.Id, StringComparer.Ordinal)];

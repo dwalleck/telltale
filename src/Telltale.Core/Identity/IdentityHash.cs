@@ -17,4 +17,28 @@ public static class IdentityHash
 
         return Convert.ToHexStringLower(HMACSHA256.HashData(Encoding.UTF8.GetBytes(salt), Encoding.UTF8.GetBytes(accountId)));
     }
+
+    /// <summary>
+    /// A value that identifies the salt without holding it: the HMAC-SHA256 of a fixed text keyed by the salt,
+    /// the same construction as a person's hash. The store keeps it beside the hashes, so a salt that is not
+    /// the one they were made with is noticed. Getting the salt back from it means inverting the HMAC's key,
+    /// which is as hard as getting it back from any person hash already in the store. The fixed text has
+    /// spaces, which a Jira account ID never has, so the fingerprint equals no person's hash.
+    /// </summary>
+    public static string SaltFingerprint(string salt) => Of("telltale salt fingerprint", salt);
+
+    /// <summary>
+    /// Stops when the people in a store were hashed with another salt than <paramref name="salt"/>: counted
+    /// under two salts, one person is two distinct assignees, and the minimum group size counts distinct
+    /// assignees (ADR-0003). <paramref name="storedFingerprint"/> is what the store records (null: it holds nobody yet).
+    /// </summary>
+    public static void RequireSaltOf(string? storedFingerprint, string salt)
+    {
+        if (storedFingerprint is not null && storedFingerprint != SaltFingerprint(salt))
+        {
+            throw new UserFacingException(
+                "The hashing salt in the secret store is not the one the people in the database were hashed with, so one person would count as two. "
+                + "Restore the original salt, or run backfill to hash everyone again with this one.");
+        }
+    }
 }
