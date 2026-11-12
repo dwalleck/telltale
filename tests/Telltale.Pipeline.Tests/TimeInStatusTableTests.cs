@@ -151,6 +151,35 @@ public class TimeInStatusTableTests
     }
 
     [Test]
+    public async Task An_issue_that_spent_no_business_time_in_a_status_does_not_count_toward_it()
+    {
+        // Owner decision D21. Without it the weekend-only issue would make the Review row "2 issues, median 0.5".
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+
+        // In Review only from Saturday 09:00 to Sunday 09:00: a calendar day, and no business time.
+        // Development before that: 15 hours of Monday and Tuesday to Friday, 4.625 business days.
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41)
+            .Moved(Local(2026, 1, 10, 9), Workflow.Review)
+            .Moved(Local(2026, 1, 11, 9), Workflow.Done);
+
+        // Development from the sprint's start to Tuesday 09:00 (1 day), Review to Wednesday 09:00 (1 day).
+        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Review)
+            .Moved(Local(2026, 1, 7, 9), Workflow.Done);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        // Development: 4.625 and 1, median 2.8125. Review: FAKE-2 alone.
+        await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(
+            new[] { "| Fake Development | 2 | 2.8 |", "| Fake Review | 1 | 1.0 |" }, CollectionOrdering.Matching);
+        var rows = await pipeline.QueryAsync<(string StatusId, long IssueCount, double MedianBusinessDays)>(
+            "SELECT status_id, issue_count, ROUND(median_business_days, 6) FROM time_in_status_per_sprint WHERE sprint_id = '41' ORDER BY board_position;");
+        await Assert.That(rows).IsEquivalentTo(
+            new[] { (Workflow.Development.Id, 2L, 2.8125), (Workflow.Review.Id, 1L, 1.0) }, CollectionOrdering.Matching);
+    }
+
+    [Test]
     public async Task Time_in_shipped_is_stored_in_status_intervals_and_done_statuses_are_not_in_the_table()
     {
         await using var pipeline = new PipelineHarness();

@@ -1,5 +1,5 @@
 -- Per sprint and status: how many issues spent time in the status during the sprint, and the median
--- business days they spent. A status no issue was in has no row. Order by board_position for board order.
+-- business days they spent. A status no issue spent business time in has no row. Order by board_position for board order.
 -- Statuses with the done role are left out: an issue in one is not waiting on the team. Their time
 -- stays in sprint_status_time and status_interval.
 CREATE VIEW time_in_status_per_sprint AS
@@ -10,6 +10,9 @@ WITH ranked AS (
            ROW_NUMBER() OVER (PARTITION BY t.sprint_id, t.status_id ORDER BY t.business_days) AS rn,
            COUNT(*)     OVER (PARTITION BY t.sprint_id, t.status_id)                          AS n
     FROM sprint_status_time t
+    -- An issue counts toward a status only if it spent business time there (owner decision D21): one that
+    -- was in the status only over a weekend or a holiday is in neither the count nor the median.
+    WHERE t.business_days > 0
 )
 SELECT r.sprint_id,
        r.status_id,
