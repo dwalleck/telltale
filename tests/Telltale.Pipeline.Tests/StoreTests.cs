@@ -65,16 +65,16 @@ public class StoreTests
         await pipeline.RunAsync("run", "--sprint", "41");
         var store = new SqliteStore(pipeline.DatabasePath);
 
-        var rows = await store.QueryViewsAsync<long>(
+        var rows = await store.QueryViewsAsync<(long Sprints, long Buckets, long Statuses)>(
             """
-            SELECT (SELECT COUNT(*) FROM delivered_per_sprint WHERE sprint_id = @sprintId)
-                 + (SELECT COUNT(*) FROM cycle_time_per_sprint_and_bucket c WHERE c.sprint_id = @sprintId)
-                 + (SELECT COUNT(t.status_id) FROM time_in_status_per_sprint t WHERE t.sprint_id = @sprintId);
+            SELECT (SELECT COUNT(*) FROM delivered_per_sprint WHERE sprint_id = @sprintId),
+                   (SELECT COUNT(*) FROM cycle_time_per_sprint_and_bucket c WHERE c.sprint_id = @sprintId),
+                   (SELECT COUNT(t.status_id) FROM time_in_status_per_sprint t WHERE t.sprint_id = @sprintId);
             """,
             new { sprintId = "41" });
 
         // One sprint, one point bucket, and the two statuses the issues spent business time in.
-        await Assert.That(rows).IsEquivalentTo(new[] { 4L });
+        await Assert.That(rows).IsEquivalentTo(new[] { (1L, 1L, 2L) });
     }
 
     private static void AddSprintAndIssue(FakeJira jira)
