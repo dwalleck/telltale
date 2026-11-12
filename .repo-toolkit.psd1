@@ -9,6 +9,7 @@
     UseSubst        = $false
     TestProjects    = @(
         @{ Name = 'Core'; Path = 'tests/Telltale.Core.Tests/Telltale.Core.Tests.csproj'; Kind = 'tunit'; NeedsSql = $false; AllowEmpty = $false }
+        @{ Name = 'Pipeline'; Path = 'tests/Telltale.Pipeline.Tests/Telltale.Pipeline.Tests.csproj'; Kind = 'tunit'; NeedsSql = $false; AllowEmpty = $false }
     )
     # No project uses SQL Server (the store is SQLite). The toolkit requires this section; nothing reads it
     # while every project has NeedsSql = $false.

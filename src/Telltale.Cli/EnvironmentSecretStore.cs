@@ -1,0 +1,33 @@
+using Telltale.Core.Secrets;
+
+namespace Telltale.Cli;
+
+/// <summary>
+/// Reads secrets from environment variables, for development off the work laptop:
+/// <c>TELLTALE_JIRA_EMAIL</c>, <c>TELLTALE_JIRA_API_TOKEN</c> and <c>TELLTALE_HASHING_SALT</c>.
+/// </summary>
+public sealed class EnvironmentSecretStore : ISecretStore
+{
+    private readonly Func<string, string?> _read;
+
+    public EnvironmentSecretStore()
+        : this(Environment.GetEnvironmentVariable)
+    {
+    }
+
+    /// <param name="read">Looks up a variable by name. Tests pass their own, because the process environment is shared.</param>
+    public EnvironmentSecretStore(Func<string, string?> read)
+    {
+        _read = read;
+    }
+
+    public static string VariableName(SecretName name) => name switch
+    {
+        SecretName.JiraEmail => "TELLTALE_JIRA_EMAIL",
+        SecretName.JiraApiToken => "TELLTALE_JIRA_API_TOKEN",
+        SecretName.HashingSalt => "TELLTALE_HASHING_SALT",
+        _ => throw new ArgumentOutOfRangeException(nameof(name), name, "Unknown secret."),
+    };
+
+    public string? Get(SecretName name) => _read(VariableName(name));
+}
