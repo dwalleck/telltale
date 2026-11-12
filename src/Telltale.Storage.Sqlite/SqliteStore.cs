@@ -273,6 +273,25 @@ public sealed class SqliteStore : ITelltaleStore
         return (await connection.QueryAsync<T>(new CommandDefinition(sql, parameters, cancellationToken: cancellationToken))).AsList();
     }
 
+    /// <summary>
+    /// Whether the database at this path holds at least one hashed person. A hash is only worth something with
+    /// the salt that made it, so this is what a missing or new salt would break. The file is opened read-only
+    /// and never created: no file, or one from before the raw tables existed, holds nobody.
+    /// </summary>
+    public static async Task<bool> HoldsHashedPeopleAsync(string databasePath, CancellationToken cancellationToken = default)
+    {
+        if (!File.Exists(databasePath))
+        {
+            return false;
+        }
+
+        var readOnly = new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false, Mode = SqliteOpenMode.ReadOnly }.ToString();
+        await using var connection = await OpenAsync(readOnly, cancellationToken);
+        var hasIssues = await connection.ExecuteScalarAsync<long>(Command(cancellationToken, "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'issue';"));
+        return hasIssues > 0
+            && await connection.ExecuteScalarAsync<long>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM issue WHERE assignee_hash IS NOT NULL);")) > 0;
+    }
+
     private static CommandDefinition Command(CancellationToken cancellationToken, string sql, object? parameters = null, DbTransaction? transaction = null) =>
         new(sql, parameters, transaction, cancellationToken: cancellationToken);
 

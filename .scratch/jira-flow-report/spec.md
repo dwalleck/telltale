@@ -140,7 +140,7 @@ Metric views (the only thing Reporting and ad hoc SQL should read):
 
 - Delivered count per sprint.
 - Cycle time per sprint and point bucket: issue count, median, P85, in business and calendar days.
-- Time in status per sprint and status: issue count and median.
+- Time in status per sprint and status: issue count and median. Done-role statuses are left out, and an issue counts only if it spent more than zero business days in the status (owner decisions D20, D21, 2026-11-12).
 - Baseline equivalents of the two above, pooled over the configured baseline sprints.
 - Each view row carries its distinct-assignee count check inside the view: when the sprint has fewer than five distinct assignees, or the row has fewer than three, the figures are null and a suppressed flag is set. Delivered count per sprint is subject to the five-person team check only.
 
@@ -153,6 +153,7 @@ Metric views (the only thing Reporting and ad hoc SQL should read):
 - Point bucket: the story point value in effect at cycle start, reconstructed from point history; the current value if there is no history; unestimated if none.
 - Delivery sprint: the sprint whose window (start to completion) contains the cycle end.
 - Time in status per sprint: existing Core behaviour, over issues that were members of the sprint.
+- Owner decisions of 2026-11-12 (D12-D32) refine these rules at their edges; they are listed in the tickets they changed (02, 03, 05, 09, 11, 12).
 - Median: the middle value, or the mean of the two middle values. P85: nearest rank (the smallest value with at least 85% of values at or below it). Percentiles are computed in SQL with window functions.
 - Assignee for the suppression rule: the issue's assignee at the time of the sync. Unassigned issues count toward nobody.
 - All per-issue durations are computed in C# during `derive`; the views only aggregate.

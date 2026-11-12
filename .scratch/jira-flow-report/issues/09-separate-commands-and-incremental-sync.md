@@ -2,6 +2,8 @@
 
 **What to build:** `backfill`, `sync`, `derive` and `report` each work on their own, and `run` is sync then derive then report. `backfill` fetches everything from the configured start date. `sync` fetches only issues updated since the watermark, overlapping by a few minutes, and upserts by Jira's own IDs. `derive` drops and rebuilds all derived data from raw. `report` defaults to the most recently completed sprint and accepts a sprint ID.
 
+Owner decisions (2026-11-12): `sync` asks for issues updated since the watermark minus 48 hours, as a quoted JQL date; the overlap covers any Jira account time zone and search-index lag (D26). `sync` on an empty store fetches from the start date (D27). `run` without a sprint reports the most recently completed sprint; when none has completed it updates the store, says so and exits successfully (D28).
+
 **Blocked by:** 01
 
 **Status:** ready-for-agent
