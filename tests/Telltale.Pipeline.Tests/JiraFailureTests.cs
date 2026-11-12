@@ -213,6 +213,7 @@ public class JiraFailureTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprintAndIssue(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41);
         pipeline.Jira.Handler.Override(HttpMethod.Get, $"/rest/agile/1.0/board/{FakeJira.BoardId}/sprint", _ => true,
             StubHttpHandler.Json("""{"maxResults":50,"startAt":0,"total":1,"values":[{"id":41,"state":"closed","name":"Fake Sprint 41","startDate":"2026-01-05T15:00:00.000Z","completeDate":"2026-01-19T16:00:00.000Z"}]}"""));
 
