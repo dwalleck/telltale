@@ -576,7 +576,7 @@ public class DiscoverTests
     {
         // Without the slash, https://host/tenant + rest/api would become https://host/rest/api.
         await using var pipeline = new PipelineHarness();
-        pipeline.Jira.Handler.On(HttpMethod.Get, "/tenant/rest/api/3/status",
+        pipeline.Jira.Handler.On(HttpMethod.Get, "/tenant/rest/api/3/status", _ => true,
             _ => throw new HttpRequestException(HttpRequestError.ConnectionError, "synthetic: the tenant path is not served"));
         string[] args = [.. FirstDiscover];
         args[Array.IndexOf(args, "--site-url") + 1] = "https://example.invalid/tenant";
