@@ -10,23 +10,29 @@ public interface ITelltaleStore
     Task InitializeAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Writes a batch of raw rows in one transaction, replacing rows with the same Jira IDs. With
-    /// <paramref name="reached"/>, the collector's watermark is set to it in the same transaction, so it
-    /// advances only when the whole batch is written.
+    /// Writes a batch of raw rows in one transaction, replacing rows with the same Jira IDs, and sets the
+    /// collector's watermark to <paramref name="reached"/> in that transaction: the watermark advances only
+    /// when the whole batch is written, and no batch is written without saying how far it reaches.
     /// </summary>
-    Task WriteRawAsync(RawData batch, Watermark? reached = null, CancellationToken cancellationToken = default);
+    Task WriteRawAsync(RawData batch, Watermark reached, CancellationToken cancellationToken = default);
 
-    /// <summary>How far <paramref name="collector"/> has got, or null when it has never written a batch.</summary>
-    Task<DateTimeOffset?> ReadWatermarkAsync(string collector, CancellationToken cancellationToken = default);
+    /// <summary>The watermark <paramref name="collector"/> last wrote, or null when it has never written a batch.</summary>
+    Task<Watermark?> ReadWatermarkAsync(string collector, CancellationToken cancellationToken = default);
 
     /// <summary>Reads every raw row.</summary>
     Task<RawData> ReadRawAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Drops the derived tables and the metric views, and rebuilds them around <paramref name="derived"/>.</summary>
-    Task ReplaceDerivedAsync(DerivedData derived, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Drops the derived tables and the metric views, and rebuilds them around <paramref name="derived"/>.
+    /// <paramref name="rawDigest"/> identifies the raw data it was derived from (see <see cref="ReadDerivedSourceAsync"/>).
+    /// </summary>
+    Task ReplaceDerivedAsync(DerivedData derived, string rawDigest, CancellationToken cancellationToken = default);
 
-    /// <summary>Whether the derived tables and metric views exist: true once <see cref="ReplaceDerivedAsync"/> has run.</summary>
-    Task<bool> HasDerivedDataAsync(CancellationToken cancellationToken = default);
+    /// <summary>
+    /// The digest the last <see cref="ReplaceDerivedAsync"/> was given, or null when the derived tables and
+    /// metric views have never been built.
+    /// </summary>
+    Task<string?> ReadDerivedSourceAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Runs a query over metric views. <typeparamref name="T"/> is a class with <c>init</c> properties

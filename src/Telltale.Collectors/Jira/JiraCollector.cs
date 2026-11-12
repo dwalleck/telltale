@@ -57,21 +57,36 @@ public sealed class JiraCollector
 
     public async Task BringUpToDateAsync(ITelltaleStore store, CollectionMode mode, CancellationToken cancellationToken = default)
     {
+        // What the watermark stands for is checked before anything is asked of Jira. It is only true for the
+        // board, projects and start date it was fetched under; continuing from it under other settings would
+        // pass over every older issue the new settings bring in, without a sign.
+        var covers = Covers();
+        var watermark = await store.ReadWatermarkAsync(WatermarkName, cancellationToken);
+        if (mode == CollectionMode.Incremental && watermark is not null && watermark.Covers != covers)
+        {
+            throw new UserFacingException("boardId, projectKeys or backfillStart in the configuration file changed since the store was last filled, so a sync could miss issues. Run backfill.");
+        }
+
         // All three secrets are checked before the first call, so a missing salt cannot surface after a long fetch.
         var salt = _secrets.Require(SecretName.HashingSalt);
         using var jira = new JiraClient(_handler, _config.SiteUrl, _secrets.Require(SecretName.JiraEmail), _secrets.Require(SecretName.JiraApiToken));
 
         var statuses = await FetchStatusesAsync(jira, cancellationToken);
         var sprints = await FetchSprintsAsync(jira, cancellationToken);
-        var watermark = mode == CollectionMode.Incremental ? await store.ReadWatermarkAsync(WatermarkName, cancellationToken) : null;
-        var issues = await FetchIssuesAsync(jira, salt, UpdatedSince(watermark), cancellationToken);
+        var since = mode == CollectionMode.Incremental ? watermark?.UpdatedThrough : null;
+        var issues = await FetchIssuesAsync(jira, salt, UpdatedSince(since), cancellationToken);
         var changes = await FetchChangesAsync(jira, issues, cancellationToken);
 
         // The watermark is Jira's own time, the newest update fetched, and is written with the batch: if anything
         // above or the write itself fails, it stays where it was and the next sync fetches the same issues again.
-        var reached = issues.Count > 0 ? new Watermark(WatermarkName, issues.Max(issue => issue.Updated)) : null;
+        // A fetch that found nothing reaches no further than the one before it.
+        var reached = new Watermark(WatermarkName, covers, issues.Count > 0 ? issues.Max(issue => issue.Updated) : since);
         await store.WriteRawAsync(new RawData(issues, changes, sprints, statuses), reached, cancellationToken);
     }
+
+    /// <summary>What a fetch under the current configuration covers: the settings that decide which issues and sprints are asked for.</summary>
+    private string Covers() =>
+        $"board {_config.BoardId.ToString(CultureInfo.InvariantCulture)}; projects {string.Join(",", _config.ProjectKeys.Order(StringComparer.Ordinal))}; from {_config.BackfillStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}";
 
     /// <summary>
     /// The JQL value for the lower bound on <c>updated</c>. From a watermark it is an unquoted number, which

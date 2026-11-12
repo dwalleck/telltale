@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json.Nodes;
 using Telltale.Pipeline.Tests.Harness;
 using static Telltale.Pipeline.Tests.Harness.TeamTime;
 
@@ -138,6 +139,124 @@ public class IncrementalSyncTests
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo("Jira answered 500 (InternalServerError) to POST rest/api/3/changelog/bulkfetch.\n");
         await Assert.That(pipeline.Jira.SearchAnswers[^1]).IsEquivalentTo(new[] { "FAKE-1", "FAKE-2" });
         await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 2\n");
+    }
+
+    [Test]
+    public async Task A_batch_that_fails_while_it_is_written_leaves_nothing_behind_and_does_not_move_the_watermark()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        var first = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
+            .Moved(Local(2026, 1, 21, 9), Workflow.Development);
+        var second = pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 20, 9))
+            .Moved(Local(2026, 1, 21, 9), Workflow.Development);
+        await pipeline.RunAllAsync(["backfill"]);
+        var storeBefore = await pipeline.ReadStoreContentAsync();
+
+        // The database refuses a write late in the batch, after the issues and their changes have gone in.
+        first.Moved(Local(2026, 1, 26, 9), Workflow.Done);
+        second.Moved(Local(2026, 1, 30, 9), Workflow.Done);
+        await pipeline.ExecuteAsync("CREATE TRIGGER synthetic_failure BEFORE INSERT ON status BEGIN SELECT RAISE(ABORT, 'synthetic write failure'); END;");
+        var failed = await pipeline.RunAsync("sync");
+        await pipeline.ExecuteAsync("DROP TRIGGER synthetic_failure;");
+        var storeAfterFailure = await pipeline.ReadStoreContentAsync();
+
+        await pipeline.RunAllAsync(["sync"], ["derive"], ["report", "--sprint", "42"]);
+
+        await Assert.That(failed).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("synthetic write failure");
+        await Assert.That(storeAfterFailure).IsEqualTo(storeBefore);
+        await Assert.That(pipeline.Jira.SearchAnswers[^1]).IsEquivalentTo(new[] { "FAKE-1", "FAKE-2" });
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 2\n");
+    }
+
+    [Test]
+    [Arguments("projectKeys")]
+    [Arguments("backfillStart")]
+    [Arguments("boardId")]
+    public async Task A_sync_is_refused_when_the_setting_that_decides_what_is_fetched_changed_since_the_store_was_filled(string setting)
+    {
+        // The watermark only says how far the old projects, board and start date were fetched. Trusting it
+        // after one of them changes would pass over every older issue the new setting brings in.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
+            .Moved(Local(2026, 1, 21, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 22, 9), Workflow.Done);
+        await pipeline.RunAllAsync(["backfill"]);
+        var requestsBefore = pipeline.Jira.Handler.Requests.Count;
+
+        pipeline.Config["jira"]![setting] = setting switch
+        {
+            "projectKeys" => new JsonArray(FakeJira.ProjectKey, "MORE"),
+            "backfillStart" => "2024-01-01",
+            _ => FakeJira.BoardId + 1,
+        };
+        var sync = await pipeline.RunAsync("sync");
+        var run = await pipeline.RunAsync("run", "--sprint", "42");
+
+        const string Refusal = "boardId, projectKeys or backfillStart in the configuration file changed since the store was last filled, so a sync could miss issues. Run backfill.\n";
+        await Assert.That(sync).IsEqualTo(1);
+        await Assert.That(run).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(Refusal + Refusal);
+        await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(requestsBefore);
+    }
+
+    [Test]
+    public async Task After_a_backfill_under_the_changed_setting_sync_works_again()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        var issue = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
+            .Moved(Local(2026, 1, 21, 9), Workflow.Development);
+        await pipeline.RunAllAsync(["backfill"]);
+        pipeline.Config["jira"]!["projectKeys"] = new JsonArray(FakeJira.ProjectKey, "MORE");
+
+        await pipeline.RunAllAsync(["backfill"]);
+        issue.Moved(Local(2026, 1, 22, 9), Workflow.Done);
+        await pipeline.RunAllAsync(["sync"], ["derive"], ["report", "--sprint", "42"]);
+
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+    }
+
+    [Test]
+    public async Task A_backfill_run_again_after_the_board_changed_gives_the_same_store_as_one_backfill_of_the_changed_board()
+    {
+        // Every row is fetched and written a second time: issues with new field values, changelog entries
+        // old and new, the sprints and the renamed status.
+        await using var twice = new PipelineHarness();
+        BuildBoard(twice.Jira);
+        await twice.RunAllAsync(["backfill"], ["derive"]);
+        ChangeBoard(twice.Jira);
+        await twice.RunAllAsync(["backfill"], ["derive"]);
+
+        await using var once = new PipelineHarness();
+        BuildBoard(once.Jira);
+        ChangeBoard(once.Jira);
+        await once.RunAllAsync(["backfill"], ["derive"]);
+
+        await Assert.That(twice.Jira.SearchAnswers[1]).IsEquivalentTo(new[] { "FAKE-1", "FAKE-2", "FAKE-3" });
+        var store = await twice.ReadStoreContentAsync();
+        await Assert.That(store).Contains("FAKE-3");
+        await Assert.That(store).Contains("Fake Renamed");
+        await Assert.That(store).IsEqualTo(await once.ReadStoreContentAsync());
+
+        static void BuildBoard(FakeJira jira)
+        {
+            AddTwoSprints(jira);
+            jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9)).AssignedTo(People.One).Estimated(3)
+                .Moved(Local(2026, 1, 21, 9), Workflow.Development);
+            jira.AddIssue("FAKE-2", Local(2026, 1, 20, 9))
+                .Moved(Local(2026, 1, 21, 9), Workflow.Development)
+                .Moved(Local(2026, 1, 22, 9), Workflow.Done);
+        }
+
+        static void ChangeBoard(FakeJira jira)
+        {
+            jira.Issues[0].AssignedTo(People.Two).Estimated(5).Resolved("700001").Moved(Local(2026, 1, 28, 9), Workflow.Done);
+            jira.AddIssue("FAKE-3", Local(2026, 1, 27, 9));
+            jira.RenameStatus(Workflow.Review, "Fake Renamed");
+        }
     }
 
     /// <summary>Sprint 41 (5 to 19 January 2026) and sprint 42 (19 January to 2 February), both completed.</summary>

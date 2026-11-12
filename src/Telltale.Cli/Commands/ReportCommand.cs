@@ -8,14 +8,12 @@ internal static class ReportCommand
     public static Command Create(AppServices services)
     {
         var sprint = SprintOption.Create();
-
-        var command = new Command("report", "Write a sprint's report from the derived data in the store. Jira is not called.") { sprint };
-        command.SetAction((parse, cancellationToken) => CliApp.GuardAsync(services, async () =>
-        {
-            var pipeline = await PipelineSteps.StartAsync(services, needsJira: false, cancellationToken);
-            await pipeline.ReportAsync(parse.GetValue(sprint), cancellationToken);
-        }));
-
-        return command;
+        return PipelineCommand.Create(
+            services,
+            "report",
+            "Write a sprint's report from the derived data in the store. Jira is not called.",
+            fetches: false,
+            (pipeline, parse, cancellationToken) => pipeline.ReportAsync(parse.GetValue(sprint), cancellationToken),
+            sprint);
     }
 }

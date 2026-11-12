@@ -125,6 +125,77 @@ public class SeparateCommandsTests
     }
 
     [Test]
+    public async Task Report_after_a_sync_that_changed_the_raw_data_is_refused_until_derive_runs_again()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddBoard(pipeline.Jira);
+        await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "43"]);
+        var reportBefore = await pipeline.ReadReportBytesAsync(43);
+
+        // FAKE-3 is finished in the running sprint 43.
+        pipeline.Jira.Issues[2].Moved(Local(2026, 2, 3, 9), Workflow.Done);
+        await pipeline.RunAllAsync(["sync"]);
+        var stale = await pipeline.RunAsync("report", "--sprint", "43");
+        var staleReport = await pipeline.ReadReportBytesAsync(43);
+        await pipeline.RunAllAsync(["derive"], ["report", "--sprint", "43"]);
+
+        await Assert.That(stale).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo("The raw data changed since the derived data was built. Run derive first.\n");
+        await Assert.That(staleReport).IsEqualTo(reportBefore);
+        await Assert.That(await pipeline.ReadReportAsync(43)).Contains("\nDelivered issues: 1\n");
+    }
+
+    [Test]
+    public async Task Report_after_a_sync_that_changed_nothing_needs_no_new_derive()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddBoard(pipeline.Jira);
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+
+        await pipeline.RunAllAsync(["sync"]);
+        var exit = await pipeline.RunAsync("report", "--sprint", "42");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+    }
+
+    [Test]
+    [Arguments("derive")]
+    [Arguments("report")]
+    public async Task A_command_that_only_reads_the_store_is_refused_before_any_backfill_and_creates_no_database(string command)
+    {
+        await using var pipeline = new PipelineHarness();
+
+        var exit = await pipeline.RunAsync(command);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo($"There is no database at {pipeline.DatabasePath} yet. Run backfill first.\n");
+        await Assert.That((await pipeline.ReadAllFilesAsync()).Keys).IsEquivalentTo(new[] { "telltale.json" });
+    }
+
+    [Test]
+    public async Task A_command_started_while_another_is_using_the_store_is_refused_and_the_first_one_finishes()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddBoard(pipeline.Jira);
+        await pipeline.RunAllAsync(["backfill"]);
+
+        // While the sync waits for Jira's first answer, a second command starts on the same store.
+        int? second = null;
+        pipeline.Jira.BeforeResponse = () => second ??= pipeline.RunAsync("derive").GetAwaiter().GetResult();
+        var first = await pipeline.RunAsync("sync");
+
+        await Assert.That(second).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo($"Another Telltale command is using the database {pipeline.DatabasePath}. Wait for it to finish, then run this one again.\n");
+        await Assert.That(first).IsEqualTo(0);
+
+        // The store is free again once the first command has ended.
+        await pipeline.RunAllAsync(["derive"], ["report", "--sprint", "42"]);
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+    }
+
+    [Test]
     public async Task Derive_and_report_need_no_secrets_and_never_call_jira()
     {
         await using var pipeline = new PipelineHarness();

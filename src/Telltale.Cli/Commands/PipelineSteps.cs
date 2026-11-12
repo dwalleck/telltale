@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text.Json;
 using Telltale.Collectors.Jira;
 using Telltale.Core;
 using Telltale.Core.Configuration;
@@ -15,16 +17,18 @@ namespace Telltale.Cli.Commands;
 /// The steps commands are made of, over one loaded configuration and one opened store.
 /// <c>run</c> is sync, derive, report; a command for a single step calls just that one.
 /// </summary>
-internal sealed class PipelineSteps
+internal sealed class PipelineSteps : IDisposable
 {
     private readonly AppServices _services;
     private readonly TelltaleConfig _config;
     private readonly StatusRoles _roles;
     private readonly TimeZoneInfo _timeZone;
     private readonly ITelltaleStore _store;
+    private readonly IDisposable _storeLock;
 
-    private PipelineSteps(AppServices services, TelltaleConfig config, StatusRoles roles, TimeZoneInfo timeZone, ITelltaleStore store)
+    private PipelineSteps(AppServices services, TelltaleConfig config, StatusRoles roles, TimeZoneInfo timeZone, ITelltaleStore store, IDisposable storeLock)
     {
+        _storeLock = storeLock;
         _services = services;
         _config = config;
         _roles = roles;
@@ -33,8 +37,11 @@ internal sealed class PipelineSteps
     }
 
     /// <summary>
-    /// Loads and checks the configuration and opens the store. With <paramref name="needsJira"/> (the command will
-    /// sync), the secrets are checked first, so a run that cannot start leaves no empty database behind.
+    /// Loads and checks the configuration, takes the store for this command alone (<see cref="StoreLock"/>) and
+    /// opens it. With <paramref name="needsJira"/> (the command will fetch), the secrets are checked first, so a
+    /// run that cannot start leaves no empty database behind, and the database is created if it is missing.
+    /// Without it the command only works on what the store holds, so a missing database is refused, not created.
+    /// Dispose the result to release the store.
     /// </summary>
     public static async Task<PipelineSteps> StartAsync(AppServices services, bool needsJira, CancellationToken cancellationToken)
     {
@@ -49,27 +56,50 @@ internal sealed class PipelineSteps
                 services.Secrets.Require(secret);
             }
         }
+        else if (!File.Exists(services.DatabasePath))
+        {
+            throw new UserFacingException($"There is no database at {services.DatabasePath} yet. Run backfill first.");
+        }
 
-        var store = new SqliteStore(services.DatabasePath);
-        await store.InitializeAsync(cancellationToken);
-
-        return new PipelineSteps(services, config, roles, timeZone, store);
+        var storeLock = StoreLock.Acquire(services.DatabasePath);
+        try
+        {
+            var store = new SqliteStore(services.DatabasePath);
+            await store.InitializeAsync(cancellationToken);
+            return new PipelineSteps(services, config, roles, timeZone, store, storeLock);
+        }
+        catch
+        {
+            storeLock.Dispose();
+            throw;
+        }
     }
 
+    public void Dispose() => _storeLock.Dispose();
+
     /// <summary>Fetches everything from the configured start date into the raw tables.</summary>
-    public Task BackfillAsync(CancellationToken cancellationToken) =>
-        new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets).BringUpToDateAsync(_store, CollectionMode.Backfill, cancellationToken);
+    public Task BackfillAsync(CancellationToken cancellationToken) => CollectAsync(CollectionMode.Backfill, cancellationToken);
 
     /// <summary>Brings the raw tables up to date with what changed in Jira since the last sync or backfill.</summary>
-    public Task SyncAsync(CancellationToken cancellationToken) =>
-        new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets).BringUpToDateAsync(_store, CollectionMode.Incremental, cancellationToken);
+    public Task SyncAsync(CancellationToken cancellationToken) => CollectAsync(CollectionMode.Incremental, cancellationToken);
+
+    private Task CollectAsync(CollectionMode mode, CancellationToken cancellationToken) =>
+        new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets).BringUpToDateAsync(_store, mode, cancellationToken);
 
     /// <summary>Rebuilds every derived table and metric view from the raw tables.</summary>
     public async Task DeriveAsync(CancellationToken cancellationToken)
     {
         var raw = await _store.ReadRawAsync(cancellationToken);
-        await _store.ReplaceDerivedAsync(Derivation.Derive(raw, _config.Jira.BoardId, _roles, AsOf(raw)), cancellationToken);
+        await _store.ReplaceDerivedAsync(Derivation.Derive(raw, _config.Jira.BoardId, _roles, AsOf(raw)), DigestOf(raw), cancellationToken);
     }
+
+    /// <summary>
+    /// Identifies the raw data's content: equal raw data gives an equal digest, whenever and however often it
+    /// was written. It covers every field of every raw row, so a field added to the raw records is covered
+    /// without a change here. Rows come from the store in a fixed order.
+    /// </summary>
+    private static string DigestOf(RawData raw) =>
+        Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(raw)));
 
     /// <summary>
     /// The as-of time that closes open intervals and the active sprint's window: the clock, read when
@@ -96,9 +126,13 @@ internal sealed class PipelineSteps
     /// </summary>
     public async Task ReportAsync(long? sprintId, CancellationToken cancellationToken)
     {
-        if (!await _store.HasDerivedDataAsync(cancellationToken))
+        var derivedFrom = await _store.ReadDerivedSourceAsync(cancellationToken)
+            ?? throw new UserFacingException("The store has no derived data yet. Run derive first.");
+
+        // The views would answer from the old derived tables without a sign, so the report checks first.
+        if (derivedFrom != DigestOf(await _store.ReadRawAsync(cancellationToken)))
         {
-            throw new UserFacingException("The store has no derived data yet. Run derive first.");
+            throw new UserFacingException("The raw data changed since the derived data was built. Run derive first.");
         }
 
         var sprint = sprintId?.ToString(CultureInfo.InvariantCulture)

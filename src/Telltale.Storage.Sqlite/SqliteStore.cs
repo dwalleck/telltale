@@ -73,7 +73,7 @@ public sealed class SqliteStore : ITelltaleStore
         }
     }
 
-    public async Task WriteRawAsync(RawData batch, Watermark? reached = null, CancellationToken cancellationToken = default)
+    public async Task WriteRawAsync(RawData batch, Watermark reached, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -161,29 +161,26 @@ public sealed class SqliteStore : ITelltaleStore
             batch.Statuses,
             transaction));
 
-        if (reached is not null)
-        {
-            // Set, not raised: a batch that reaches less far (a backfill starting over) leaves a watermark that
-            // makes the next sync fetch more, which is always safe.
-            await connection.ExecuteAsync(Command(
-                cancellationToken,
-                """
-                INSERT INTO watermark (collector, updated_through)
-                VALUES (@Collector, @UpdatedThrough)
-                ON CONFLICT (collector) DO UPDATE SET updated_through = excluded.updated_through;
-                """,
-                new { reached.Collector, UpdatedThrough = StoredTime.ToStored(reached.UpdatedThrough) },
-                transaction));
-        }
+        // Set, not raised: a batch that reaches less far (a backfill starting over) leaves a watermark that
+        // makes the next sync fetch more, which is always safe.
+        await connection.ExecuteAsync(Command(
+            cancellationToken,
+            """
+            INSERT INTO watermark (collector, covers, updated_through)
+            VALUES (@Collector, @Covers, @UpdatedThrough)
+            ON CONFLICT (collector) DO UPDATE SET covers = excluded.covers, updated_through = excluded.updated_through;
+            """,
+            new { reached.Collector, reached.Covers, UpdatedThrough = StoredTime.ToStored(reached.UpdatedThrough) },
+            transaction));
 
         await transaction.CommitAsync(cancellationToken);
     }
 
-    public async Task<DateTimeOffset?> ReadWatermarkAsync(string collector, CancellationToken cancellationToken = default)
+    public async Task<Watermark?> ReadWatermarkAsync(string collector, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
-        var stored = await connection.QuerySingleOrDefaultAsync<string?>(Command(cancellationToken, "SELECT updated_through FROM watermark WHERE collector = @collector;", new { collector }));
-        return StoredTime.FromStoredOrNull(stored);
+        var row = await connection.QuerySingleOrDefaultAsync<WatermarkRow>(Command(cancellationToken, "SELECT covers, updated_through FROM watermark WHERE collector = @collector;", new { collector }));
+        return row is null ? null : new Watermark(collector, row.Covers, StoredTime.FromStoredOrNull(row.UpdatedThrough));
     }
 
     public async Task<RawData> ReadRawAsync(CancellationToken cancellationToken = default)
@@ -202,7 +199,7 @@ public sealed class SqliteStore : ITelltaleStore
             [.. statuses.Select(row => new RawStatus(row.StatusId, row.Name, row.Category))]);
     }
 
-    public async Task ReplaceDerivedAsync(DerivedData derived, CancellationToken cancellationToken = default)
+    public async Task ReplaceDerivedAsync(DerivedData derived, string rawDigest, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -248,6 +245,8 @@ public sealed class SqliteStore : ITelltaleStore
             derived.IssueCycles.Select(cycle => new object?[] { cycle.IssueId, StoredTime.ToStored(cycle.CycleEnd), cycle.Delivered ? 1L : 0L, cycle.DeliverySprintId }),
             cancellationToken);
 
+        await connection.ExecuteAsync(Command(cancellationToken, "INSERT INTO derived_source (raw_digest) VALUES (@rawDigest);", new { rawDigest }, transaction));
+
         foreach (var (_, sql) in Scripts.InFolder("Views"))
         {
             await connection.ExecuteAsync(Command(cancellationToken, sql, transaction: transaction));
@@ -263,10 +262,15 @@ public sealed class SqliteStore : ITelltaleStore
         await transaction.CommitAsync(cancellationToken);
     }
 
-    public async Task<bool> HasDerivedDataAsync(CancellationToken cancellationToken = default)
+    public async Task<string?> ReadDerivedSourceAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
-        return await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object);"));
+
+        // The table is itself derived: before the first rebuild it does not exist.
+        var built = await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object WHERE name = 'derived_source');"));
+        return built
+            ? await connection.QuerySingleOrDefaultAsync<string?>(Command(cancellationToken, "SELECT raw_digest FROM derived_source;"))
+            : null;
     }
 
     public async Task<IReadOnlyList<T>> QueryViewsAsync<T>(string sql, object? parameters = null, CancellationToken cancellationToken = default)
@@ -356,6 +360,12 @@ public sealed class SqliteStore : ITelltaleStore
         public string? Started { get; init; }
         public string? PlannedEnd { get; init; }
         public string? Completed { get; init; }
+    }
+
+    private sealed class WatermarkRow
+    {
+        public string Covers { get; init; } = "";
+        public string? UpdatedThrough { get; init; }
     }
 
     private sealed class StatusRow
