@@ -450,8 +450,9 @@ public class TimeInStatusTableTests
         await Assert.That(exit).IsEqualTo(0);
         var files = await pipeline.ReadAllFilesAsync();
 
-        // The scan means something only if the sprint data went through: the report has the issue's row.
-        await Assert.That(files[Path.Combine("reports", "sprint-41.md")]).Contains("| Fake Development | 1 | ");
+        // The scan means something only if the sprint data went through: the report has the status's row.
+        // One person's sprint, so the row's count and figure are withheld.
+        await Assert.That(files[Path.Combine("reports", "sprint-41.md")]).Contains("| Fake Development | suppressed | suppressed |");
         await Assert.That(pipeline.Jira.ForbiddenText).Contains(People.Two.AccountId).And.Contains("Synthetic goal of sprint 41 that must never be stored");
         var found = pipeline.Jira.ForbiddenText.Where(text => files.Values.Any(content => content.Contains(text, StringComparison.Ordinal))).ToList();
         await Assert.That(found).IsEmpty();

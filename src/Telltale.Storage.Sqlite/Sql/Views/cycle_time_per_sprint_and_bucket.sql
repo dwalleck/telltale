@@ -8,9 +8,11 @@
 -- without floating point. Business and calendar days are ranked separately, since they can order issues differently.
 --
 -- Minimum group size (GLOSSARY, ADR-0003): the four figures are null and suppressed is 1 when the sprint has
--- fewer than five distinct assignees (sprint_team) or the bucket has fewer than three behind it. issue_count
--- stays (owner decision D5). An issue counts toward its assignee at the time of the sync, and an unassigned
--- issue toward nobody.
+-- fewer than five distinct assignees (sprint_team) or the bucket has fewer than three behind it. A bucket
+-- short of three keeps its issue_count (owner decision D5). In a sprint short of five issue_count is null
+-- too (D41): the counts of a small sprint are its people's throughput, and summed they give back the
+-- delivered count that is withheld. An issue counts toward its assignee at the time of the sync, and an
+-- unassigned issue toward nobody.
 CREATE VIEW cycle_time_per_sprint_and_bucket AS
 WITH ranked AS (
     SELECT c.delivery_sprint_id AS sprint_id,
@@ -39,7 +41,7 @@ bucket AS (
 )
 SELECT b.sprint_id,
        b.point_bucket,
-       b.issue_count,
+       CASE WHEN t.suppressed = 0 THEN b.issue_count END AS issue_count,
        CASE WHEN t.suppressed = 0 AND b.assignees >= 3 THEN b.median_business_days END AS median_business_days,
        CASE WHEN t.suppressed = 0 AND b.assignees >= 3 THEN b.p85_business_days END    AS p85_business_days,
        CASE WHEN t.suppressed = 0 AND b.assignees >= 3 THEN b.median_calendar_days END AS median_calendar_days,

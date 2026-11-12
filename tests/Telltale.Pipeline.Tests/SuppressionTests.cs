@@ -6,7 +6,8 @@ namespace Telltale.Pipeline.Tests;
 
 /// <summary>
 /// The minimum group size (GLOSSARY, ADR-0003): a figure is shown only when the sprint has at least five
-/// distinct assignees and the figure itself has at least three behind it. Sprint 41 runs from 5 to 19 January 2026.
+/// distinct assignees and the figure itself has at least three behind it. A row short of three keeps its issue
+/// count (owner decision D5); a sprint short of five shows no count either (D41). Sprint 41 runs from 5 to 19 January 2026.
 /// </summary>
 public class SuppressionTests
 {
@@ -59,7 +60,7 @@ public class SuppressionTests
         var rows = await pipeline.QueryAsync<CycleTimeRow>("SELECT * FROM cycle_time_per_sprint_and_bucket WHERE sprint_id = '41' ORDER BY point_bucket;");
         await Assert.That(rows.Select(row => (row.PointBucket, row.IssueCount, row.Suppressed, row.MedianBusinessDays, row.P85BusinessDays, row.MedianCalendarDays, row.P85CalendarDays)))
             .IsEquivalentTo(
-                new (double?, long, long, double?, double?, double?, double?)[]
+                new (double?, long?, long, double?, double?, double?, double?)[]
                 {
                     (3, 3, 0, 2, 2, 2, 2),
                     (5, 3, 1, null, null, null, null),
@@ -68,7 +69,7 @@ public class SuppressionTests
     }
 
     [Test]
-    public async Task A_sprint_with_four_assignees_suppresses_every_figure_including_the_delivered_count_and_shows_no_blank_or_zero()
+    public async Task A_sprint_with_four_assignees_suppresses_every_figure_and_every_issue_count_and_shows_no_blank_or_zero()
     {
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
@@ -85,24 +86,34 @@ public class SuppressionTests
             "# Fake Sprint 41 (2026-01-05 to 2026-01-19)\n\n"
             + "Delivered issues: suppressed\n"
             + CycleTimeHeader
-            + "| 3 | 4 | suppressed | suppressed | suppressed | suppressed |\n"
+            + "| 3 | suppressed | suppressed | suppressed | suppressed | suppressed |\n"
             + TimeInStatusHeading
             + "\n| Status | Issues | Median business days |\n| --- | ---: | ---: |\n"
-            + "| Fake New | 4 | suppressed |\n"
-            + "| Fake Development | 4 | suppressed |\n");
+            + "| Fake New | suppressed | suppressed |\n"
+            + "| Fake Development | suppressed | suppressed |\n");
 
         var delivered = await pipeline.QueryAsync<(long? DeliveredCount, long Suppressed)>("SELECT delivered_count, suppressed FROM delivered_per_sprint WHERE sprint_id = '41';");
         await Assert.That(delivered).IsEquivalentTo(new (long?, long)[] { (null, 1) });
 
         var cycleTime = await pipeline.QueryAsync<CycleTimeRow>("SELECT * FROM cycle_time_per_sprint_and_bucket WHERE sprint_id = '41';");
         await Assert.That(cycleTime.Select(row => (row.IssueCount, row.Suppressed, row.MedianBusinessDays, row.P85BusinessDays, row.MedianCalendarDays, row.P85CalendarDays)))
-            .IsEquivalentTo(new (long, long, double?, double?, double?, double?)[] { (4, 1, null, null, null, null) });
+            .IsEquivalentTo(new (long?, long, double?, double?, double?, double?)[] { (null, 1, null, null, null, null) });
 
-        var timeInStatus = await pipeline.QueryAsync<(string StatusName, long IssueCount, long Suppressed, double? MedianBusinessDays)>(
+        var timeInStatus = await pipeline.QueryAsync<(string StatusName, long? IssueCount, long Suppressed, double? MedianBusinessDays)>(
             "SELECT status_name, issue_count, suppressed, median_business_days FROM time_in_status_per_sprint WHERE sprint_id = '41' ORDER BY board_position;");
         await Assert.That(timeInStatus).IsEquivalentTo(
-            new (string, long, long, double?)[] { ("Fake New", 4, 1, null), ("Fake Development", 4, 1, null) },
+            new (string, long?, long, double?)[] { ("Fake New", null, 1, null), ("Fake Development", null, 1, null) },
             CollectionOrdering.Matching);
+
+        // Owner decision D41: nothing countable is left either. The counts of a small sprint are its people's
+        // throughput, and summed they would give back the delivered count that is withheld.
+        var sums = await pipeline.QueryAsync<(long? Delivered, long? InBuckets, long? InStatuses)>(
+            """
+            SELECT (SELECT SUM(delivered_count) FROM delivered_per_sprint WHERE sprint_id = '41'),
+                   (SELECT SUM(issue_count) FROM cycle_time_per_sprint_and_bucket WHERE sprint_id = '41'),
+                   (SELECT SUM(issue_count) FROM time_in_status_per_sprint WHERE sprint_id = '41');
+            """);
+        await Assert.That(sums).IsEquivalentTo(new (long?, long?, long?)[] { (null, null, null) });
     }
 
     [Test]
@@ -204,7 +215,7 @@ public class SuppressionTests
 
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).Contains("\nDelivered issues: suppressed\n");
-        await Assert.That(report).Contains(CycleTimeHeader + "| 3 | 6 | suppressed | suppressed | suppressed | suppressed |\n" + TimeInStatusHeading);
+        await Assert.That(report).Contains(CycleTimeHeader + "| 3 | suppressed | suppressed | suppressed | suppressed | suppressed |\n" + TimeInStatusHeading);
     }
 
     [Test]
@@ -251,7 +262,7 @@ public class SuppressionTests
     private sealed class CycleTimeRow
     {
         public double? PointBucket { get; init; }
-        public long IssueCount { get; init; }
+        public long? IssueCount { get; init; }
         public long Suppressed { get; init; } = -1;
         public double? MedianBusinessDays { get; init; }
         public double? P85BusinessDays { get; init; }

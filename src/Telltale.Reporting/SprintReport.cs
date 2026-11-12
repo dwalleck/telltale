@@ -114,7 +114,7 @@ public static class SprintReport
         foreach (var bucket in buckets)
         {
             report.Append("| ").Append(BucketLabel(bucket.PointBucket))
-                .Append(" | ").Append(bucket.IssueCount.ToString(CultureInfo.InvariantCulture))
+                .Append(" | ").Append(bucket.IssueCount?.ToString(CultureInfo.InvariantCulture) ?? Suppressed)
                 .Append(" | ").Append(Days(bucket.Suppressed, bucket.MedianBusinessDays))
                 .Append(" | ").Append(Days(bucket.Suppressed, bucket.P85BusinessDays))
                 .Append(" | ").Append(Days(bucket.Suppressed, bucket.MedianCalendarDays))
@@ -138,7 +138,7 @@ public static class SprintReport
         {
             // A status name is Jira's text: a "|" in it would otherwise end the cell.
             report.Append("| ").Append(row.StatusName.Replace("|", "\\|", StringComparison.Ordinal))
-                .Append(" | ").Append(row.IssueCount.ToString(CultureInfo.InvariantCulture))
+                .Append(" | ").Append(row.IssueCount?.ToString(CultureInfo.InvariantCulture) ?? Suppressed)
                 .Append(" | ").Append(Days(row.Suppressed, row.MedianBusinessDays))
                 .Append(" |\n");
         }
@@ -171,7 +171,8 @@ public static class SprintReport
     private sealed class TimeInStatusRow
     {
         public string StatusName { get; init; } = "";
-        public long IssueCount { get; init; }
+        /// <summary>Null when the sprint is short of five assignees: its counts are withheld with its figures (owner decision D41).</summary>
+        public long? IssueCount { get; init; }
         public double? MedianBusinessDays { get; init; }
         public long Suppressed { get; init; } = 1;
     }
@@ -189,7 +190,8 @@ public static class SprintReport
     private sealed class CycleTimeRow
     {
         public double? PointBucket { get; init; }
-        public long IssueCount { get; init; }
+        /// <summary>Null when the sprint is short of five assignees: its counts are withheld with its figures (owner decision D41).</summary>
+        public long? IssueCount { get; init; }
         public double? MedianBusinessDays { get; init; }
         public double? P85BusinessDays { get; init; }
         public double? MedianCalendarDays { get; init; }

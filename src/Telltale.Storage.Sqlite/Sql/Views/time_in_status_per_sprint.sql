@@ -3,8 +3,9 @@
 -- Statuses with the done role are left out: an issue in one is not waiting on the team. Their time
 -- stays in sprint_status_time and status_interval.
 -- Minimum group size (GLOSSARY, ADR-0003): the median is null and suppressed is 1 when the sprint has fewer
--- than five distinct assignees (sprint_team) or fewer than three are behind the row's issues. issue_count
--- stays (owner decision D5). An unassigned issue counts toward nobody.
+-- than five distinct assignees (sprint_team) or fewer than three are behind the row's issues. A row short
+-- of three keeps its issue_count (owner decision D5); in a sprint short of five issue_count is null too (D41).
+-- An unassigned issue counts toward nobody.
 CREATE VIEW time_in_status_per_sprint AS
 WITH ranked AS (
     SELECT t.sprint_id,
@@ -33,7 +34,7 @@ SELECT st.sprint_id,
        st.status_id,
        COALESCE(s.name, st.status_id) AS status_name,
        b.position                     AS board_position,
-       st.issue_count,
+       CASE WHEN t.suppressed = 0 THEN st.issue_count END AS issue_count,
        CASE WHEN t.suppressed = 0 AND st.assignees >= 3 THEN st.median_business_days END AS median_business_days,
        CASE WHEN t.suppressed = 0 AND st.assignees >= 3 THEN 0 ELSE 1 END                AS suppressed
 FROM status_time st
