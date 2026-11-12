@@ -37,7 +37,14 @@ public sealed class StatusRoles
     public StatusRoles(IReadOnlyDictionary<string, StatusRole> byStatusId)
     {
         _byStatusId = new Dictionary<string, StatusRole>(byStatusId, StringComparer.Ordinal);
+        StatusIds = [.. byStatusId.Keys];
     }
+
+    /// <summary>
+    /// Every status that has a role, in the order the configuration lists them. That order is board order:
+    /// it is how reports order statuses.
+    /// </summary>
+    public IReadOnlyList<string> StatusIds { get; }
 
     /// <summary>Builds the map from configuration labels, e.g. <c>{ "10001": "done" }</c>.</summary>
     public static StatusRoles Parse(IReadOnlyDictionary<string, string> labelsByStatusId) =>

@@ -54,6 +54,11 @@ public static class ConfigFile
                 throw new UserFacingException($"The configuration file {path} is not valid: jira.storyPointFieldId must not be empty.");
             }
 
+            if (string.IsNullOrWhiteSpace(config.Jira.SprintFieldId))
+            {
+                throw new UserFacingException($"The configuration file {path} is not valid: jira.sprintFieldId must not be empty.");
+            }
+
             if (config.Jira.ProjectKeys is not { Count: > 0 })
             {
                 throw new UserFacingException($"The configuration file {path} is not valid: jira.projectKeys must list at least one project key.");

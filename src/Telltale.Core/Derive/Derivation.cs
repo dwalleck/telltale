@@ -1,3 +1,4 @@
+using Telltale.Core.Calendar;
 using Telltale.Core.Intervals;
 using Telltale.Core.Storage;
 using Telltale.Core.Workflow;
@@ -6,7 +7,7 @@ namespace Telltale.Core.Derive;
 
 /// <summary>
 /// Rebuilds all derived data from the raw rows. It is a pure function of the raw data, the
-/// configured board and status roles, and the as-of time, so changing a definition means rerunning it (ADR-0002).
+/// configured board, status roles and business calendar, and the as-of time, so changing a definition means rerunning it (ADR-0002).
 /// </summary>
 /// <remarks>
 /// Throws <see cref="UserFacingException"/> when an issue has been in a status that has no configured role, or when
@@ -14,8 +15,12 @@ namespace Telltale.Core.Derive;
 /// </remarks>
 public static class Derivation
 {
-    public static DerivedData Derive(RawData raw, long boardId, StatusRoles roles, DateTimeOffset asOf)
+    public static DerivedData Derive(RawData raw, long boardId, StatusRoles roles, BusinessCalendar calendar, DateTimeOffset asOf)
     {
+        var sprintChanges = raw.Changes
+            .Where(change => change.Field == ChangeFields.Sprint)
+            .ToLookup(change => change.IssueId, change => SprintChange.FromRaw(change.HistoryId, change.At, change.From, change.To));
+
         var statusChanges = raw.Changes
             .Where(change => change.Field == ChangeFields.Status && change.To is not null)
             .ToLookup(change => change.IssueId, change => new StatusChange(change.HistoryId, change.At, change.From, change.To!));
@@ -31,6 +36,8 @@ public static class Derivation
         var deliverySprints = new DeliverySprints(windows, asOf);
         var intervals = new List<IssueStatusInterval>();
         var cycles = new List<IssueCycle>();
+        var memberships = new List<IssueMembershipInterval>();
+        var sprintStatusTimes = new List<SprintStatusTime>();
 
         foreach (var issue in raw.Issues)
         {
@@ -42,6 +49,18 @@ public static class Derivation
                 Delivered delivered => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At)),
                 NotDelivered => new IssueCycle(issue.IssueId, CycleEnd: null, Delivered: false, DeliverySprintId: null),
             });
+
+            var membership = SprintMembership.Build(issue.Created, SprintMembership.ParseSprintIds(issue.SprintIds), sprintChanges[issue.IssueId]);
+            memberships.AddRange(membership.Intervals.Select(interval => new IssueMembershipInterval(issue.IssueId, interval.SprintId, interval.Start, interval.End)));
+
+            // Time in status exists only for sprints that count (the windows above) and that the issue was ever in.
+            var everIn = membership.Intervals.Select(interval => interval.SprintId).ToHashSet(StringComparer.Ordinal);
+            foreach (var window in windows.Where(window => everIn.Contains(window.SprintId)))
+            {
+                sprintStatusTimes.AddRange(TimeInStatus.ForSprint(window, timeline.Intervals, membership.Intervals, calendar, asOf)
+                    .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                    .Select(pair => new SprintStatusTime(issue.IssueId, window.SprintId, pair.Key, pair.Value.CalendarTime, pair.Value.BusinessTime, pair.Value.BusinessDays)));
+            }
         }
 
         // Every status has exactly one role. Guessing one for a status the configuration does not mention
@@ -57,7 +76,10 @@ public static class Derivation
         return new DerivedData(
             [.. windows.Select(window => new DerivedSprintWindow(window.SprintId, window.Start, window.Completed))],
             intervals,
-            cycles);
+            cycles,
+            memberships,
+            sprintStatusTimes,
+            [.. roles.StatusIds.Select((statusId, index) => new BoardStatus(statusId, index + 1, roles.IsDone(statusId)))]);
     }
 
     /// <summary>

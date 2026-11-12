@@ -29,6 +29,9 @@ public sealed record JiraConfig
     /// <summary>The keys of the board's projects, e.g. <c>PAY</c>. Issues are searched in these projects only.</summary>
     public required IReadOnlyList<string> ProjectKeys { get; init; }
 
+    /// <summary>The Sprint custom field, e.g. <c>customfield_10020</c>. Its value and history say which sprints an issue belonged to, and when.</summary>
+    public required string SprintFieldId { get; init; }
+
     /// <summary>The story point custom field, e.g. <c>customfield_10016</c>.</summary>
     public required string StoryPointFieldId { get; init; }
 

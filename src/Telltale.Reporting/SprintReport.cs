@@ -31,6 +31,10 @@ public static class SprintReport
         var report = new StringBuilder();
         AppendTitle(report, sprint, teamTimeZone);
         AppendDeliveredCount(report, sprint);
+        AppendTimeInStatus(report, await store.QueryViewsAsync<TimeInStatusRow>(
+            "SELECT status_name, issue_count, median_business_days FROM time_in_status_per_sprint WHERE sprint_id = @sprintId ORDER BY board_position;",
+            new { sprintId },
+            cancellationToken));
         return report.ToString();
     }
 
@@ -59,11 +63,38 @@ public static class SprintReport
     private static void AppendDeliveredCount(StringBuilder report, DeliveredRow sprint) =>
         report.Append("Delivered issues: ").Append(sprint.DeliveredCount.ToString(CultureInfo.InvariantCulture)).Append('\n');
 
+    /// <summary>One row per status issues spent time in during the sprint, in board order. A status nobody was in has no row.</summary>
+    private static void AppendTimeInStatus(StringBuilder report, IReadOnlyList<TimeInStatusRow> rows)
+    {
+        report.Append("\n## Time in status\n\n");
+        if (rows.Count == 0)
+        {
+            report.Append("No issue spent time in this sprint.\n");
+            return;
+        }
+
+        report.Append("| Status | Issues | Median business days |\n| --- | ---: | ---: |\n");
+        foreach (var row in rows)
+        {
+            report.Append("| ").Append(row.StatusName)
+                .Append(" | ").Append(row.IssueCount.ToString(CultureInfo.InvariantCulture))
+                .Append(" | ").Append(row.MedianBusinessDays.ToString("0.0", CultureInfo.InvariantCulture))
+                .Append(" |\n");
+        }
+    }
+
     /// <summary>A stored time as a date in the team's zone, e.g. 2026-01-05.</summary>
     private static string LocalDate(string storedUtc, TimeZoneInfo teamTimeZone)
     {
         var instant = StoredTime.FromStored(storedUtc);
         return TimeZoneInfo.ConvertTime(instant, teamTimeZone).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    }
+
+    private sealed class TimeInStatusRow
+    {
+        public string StatusName { get; init; } = "";
+        public long IssueCount { get; init; }
+        public double MedianBusinessDays { get; init; }
     }
 
     private sealed class DeliveredRow
