@@ -192,6 +192,7 @@ public sealed class FakeJira
     private readonly Lock _gate = new();
     private readonly List<FakeSprint> _sprints = [];
     private readonly List<FakeIssue> _issues = [];
+    private readonly List<IReadOnlyList<string>> _searchAnswers = [];
     private readonly Dictionary<string, string> _statusNames = Workflow.BoardOrder.ToDictionary(status => status.Id, status => status.DefaultName);
     private List<FakePerson>? _servedOncePer;
     private int _nextIssueId = 900001;
@@ -202,7 +203,7 @@ public sealed class FakeJira
         Handler = new StubHttpHandler()
             .On(HttpMethod.Get, $"/rest/agile/1.0/board/{BoardId}/sprint", _ => Respond(Sprints()))
             .On(HttpMethod.Get, "/rest/api/3/status", _ => Respond(Statuses()))
-            .On(HttpMethod.Post, "/rest/api/3/search/jql", _ => Respond(Search()))
+            .On(HttpMethod.Post, "/rest/api/3/search/jql", request => Respond(Search(request)))
             .On(HttpMethod.Post, "/rest/api/3/changelog/bulkfetch", request => Respond(Changelogs(request)));
     }
 
@@ -210,6 +211,12 @@ public sealed class FakeJira
 
     /// <summary>Runs before each of the site's own answers, for example to move the clock as if the fetch took time.</summary>
     public Action? BeforeResponse { get; set; }
+
+    /// <summary>
+    /// The time zone of the Jira account the tool signs in with: a quoted JQL date is read in it (research
+    /// note 05). The team's zone by default; the tool does not know it.
+    /// </summary>
+    public TimeZoneInfo AccountTimeZone { get; set; } = TimeZoneInfo.FindSystemTimeZoneById(TeamTime.ZoneId);
 
     /// <summary>Which of the two documented response shapes to serve.</summary>
     public JiraShapes Shapes { get; set; } = JiraShapes.AsSchemas;
@@ -252,6 +259,21 @@ public sealed class FakeJira
             lock (_gate)
             {
                 return [.. _issues];
+            }
+        }
+    }
+
+    /// <summary>
+    /// The issue keys each search answered with, one entry per search, oldest first: what the tool fetched,
+    /// whatever JQL it used to ask.
+    /// </summary>
+    public IReadOnlyList<IReadOnlyList<string>> SearchAnswers
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return [.. _searchAnswers];
             }
         }
     }
@@ -412,10 +434,17 @@ public sealed class FakeJira
 
     private JsonArray Statuses() => new(Workflow.BoardOrder.Select(status => (JsonNode)StatusDetails(status)).ToArray());
 
-    private JsonObject Search()
+    private JsonObject Search(StubRequest request)
     {
+        var updatedSince = UpdatedSince(request);
+        var found = Served().Where(served => served.Issue.Updated >= updatedSince).OrderBy(served => served.Issue.Updated).ToList();
+        lock (_gate)
+        {
+            _searchAnswers.Add([.. found.Select(served => served.Key)]);
+        }
+
         var issues = new JsonArray();
-        foreach (var served in Served().OrderBy(served => served.Issue.Updated))
+        foreach (var served in found)
         {
             var issue = served.Issue;
             issues.Add(new JsonObject
@@ -443,6 +472,25 @@ public sealed class FakeJira
         var page = new JsonObject { ["issues"] = issues, ["isLast"] = true };
         AddLastPageToken(page);
         return page;
+    }
+
+    /// <summary>
+    /// The lower bound on <c>updated</c> in the search's JQL: a quoted date, or date and minute, read in
+    /// <see cref="AccountTimeZone"/> (research note 05; owner decision D26). A search without one fails the
+    /// test: Jira refuses unbounded JQL.
+    /// </summary>
+    private DateTimeOffset UpdatedSince(StubRequest request)
+    {
+        using var body = JsonDocument.Parse(request.Body);
+        var jql = body.RootElement.GetProperty("jql").GetString() ?? "";
+        var bound = System.Text.RegularExpressions.Regex.Match(jql, """\bupdated >= "(?<quoted>[^"]+)"(?= |$)""");
+        if (bound.Groups["quoted"].Success)
+        {
+            var wallClock = DateTime.ParseExact(bound.Groups["quoted"].Value, ["yyyy-MM-dd", "yyyy-MM-dd HH:mm", "yyyy/MM/dd", "yyyy/MM/dd HH:mm"], CultureInfo.InvariantCulture, DateTimeStyles.None);
+            return new DateTimeOffset(wallClock, AccountTimeZone.GetUtcOffset(wallClock));
+        }
+
+        throw new InvalidOperationException($"FakeJira: the search JQL has no lower bound on updated that the fake understands: {jql}");
     }
 
     /// <summary>The Sprint field of a search result: null when the issue is in no sprint, otherwise one object per sprint.</summary>

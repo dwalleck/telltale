@@ -181,10 +181,10 @@ public class SprintStateTests
         await pipeline.RunAsync("run", "--sprint", "77");
         await Assert.That(await pipeline.ReadReportAsync(77)).Contains("\nDelivered issues: 1\n");
 
+        // A sync is refused once the board ID has changed (the watermark was for the other board), so the owner backfills.
         pipeline.Config["jira"]!["boardId"] = FakeJira.BoardId;
-        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
 
-        await Assert.That(exit).IsEqualTo(0);
         var rows = await pipeline.QueryAsync<(string SprintId, long DeliveredCount)>(
             "SELECT sprint_id, delivered_count FROM delivered_per_sprint ORDER BY sprint_id;");
         await Assert.That(rows).IsEquivalentTo(new[] { ("41", 1L), ("42", 0L) }, CollectionOrdering.Matching);

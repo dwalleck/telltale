@@ -416,7 +416,8 @@ public class CycleTimeTests
             Issues: [.. Enumerable.Range(1, 10).Select(id => new RawIssue($"{id}", $"FAKE-{id}", FakeJira.IssueTypeStoryId, start, Workflow.Done.Id, ResolutionId: null, StoryPoints: 3, AssigneeHash: $"synthetic-hash-{((id - 1) % 5) + 1}", Updated: end, SprintIds: ""))],
             Changes: [],
             Sprints: [],
-            Statuses: []));
+            Statuses: []),
+            new Watermark("synthetic-collector", Covers: "synthetic", UpdatedThrough: end));
 
         await store.ReplaceDerivedAsync(new DerivedData(
             SprintWindows: [new DerivedSprintWindow("41", Local(2026, 1, 5, 9), Local(2026, 1, 19, 9))],
@@ -428,7 +429,7 @@ public class CycleTimeTests
             ],
             MembershipIntervals: [],
             SprintStatusTimes: [],
-            BoardStatuses: []));
+            BoardStatuses: []), rawDigest: "synthetic-digest");
 
         var rows = await CycleTimeRowsAsync(pipeline, 41);
         await Assert.That(rows.Select(row => (row.PointBucket, row.IssueCount, row.P85BusinessDays, row.P85CalendarDays)))
