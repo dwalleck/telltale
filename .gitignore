@@ -483,3 +483,8 @@ $RECYCLE.BIN/
 
 # Claude Code per-user settings
 .claude/settings.local.json
+
+# Repo toolkit: logs, worktrees, machine-local overlay
+.ipe-logs/
+.worktrees/
+.repo-toolkit.local.psd1

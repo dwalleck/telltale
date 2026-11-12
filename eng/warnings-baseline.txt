@@ -1,0 +1,1 @@
+# Known compiler warnings, one per line as "<repo-relative file>: <code>". Empty: the build treats warnings as errors.
