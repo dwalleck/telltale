@@ -12,15 +12,16 @@ public sealed record Cycle(DateTimeOffset Start, double CalendarDays, double Bus
 public static class Cycles
 {
     /// <summary>
-    /// Measures the cycle of an issue delivered at <paramref name="deliveredAt"/> from the statuses it entered
+    /// Measures the cycle of an issue delivered at <paramref name="deliveredAt"/> (the moment
+    /// <see cref="Delivery.Of"/> gives for the same entries) from the statuses it entered
     /// (<see cref="StatusTimeline.Entries"/>). The cycle starts at the first entry into a work-role status,
     /// whichever one it is; time before that does not count, in a blocked status or any other, and everything
     /// after it does. A work-role status entered at the delivery moment itself gives a cycle of zero days.
-    /// An issue that did not enter a work-role status by then has no cycle: the result is null.
+    /// An issue that never entered a work-role status has no cycle: the result is null.
     /// </summary>
     public static Cycle? Measure(IReadOnlyList<StatusEntry> entries, StatusRoles roles, DateTimeOffset deliveredAt, BusinessCalendar calendar)
     {
-        var started = entries.FirstOrDefault(entry => roles.IsWork(entry.StatusId) && entry.At <= deliveredAt);
+        var started = entries.FirstOrDefault(entry => roles.IsWork(entry.StatusId));
         if (started is null)
         {
             return null;

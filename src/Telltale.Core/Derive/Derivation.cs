@@ -55,7 +55,7 @@ public static class Derivation
             intervals.AddRange(timeline.Intervals.Select(interval => new IssueStatusInterval(issue.IssueId, interval.StatusId, interval.Start, interval.End)));
 
             var reopens = Cycles.ReopenCount(timeline.Entries, roles);
-            cycles.Add(Delivery.Of(issue.StatusId, issue.ResolutionId, timeline.Intervals, roles, abandonedResolutionIds) switch
+            cycles.Add(Delivery.Of(issue.StatusId, issue.ResolutionId, timeline.Entries, roles, abandonedResolutionIds) switch
             {
                 Delivered delivered => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At), reopens)
                 {

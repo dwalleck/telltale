@@ -1,5 +1,8 @@
 using System.Text.Json.Nodes;
+using Telltale.Core.Storage;
+using Telltale.Core.Workflow;
 using Telltale.Pipeline.Tests.Harness;
+using Telltale.Storage.Sqlite;
 using TUnit.Assertions.Enums;
 using static Telltale.Pipeline.Tests.Harness.TeamTime;
 
@@ -316,7 +319,8 @@ public class CycleTimeTests
             .Moved(Local(2026, 1, 8, 9), Workflow.Development)
             .Moved(Local(2026, 1, 8, 9), Workflow.Done);
 
-        // Reopened and closed again in one instant, a day after it was done.
+        // Reopened and closed again in one instant, a day after it was done. That instant is its last move
+        // into done, so its cycle runs from Tuesday 09:00 to Thursday 09:00.
         pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 5, 9)).Estimated(8)
             .Moved(Local(2026, 1, 6, 9), Workflow.Development)
             .Moved(Local(2026, 1, 7, 9), Workflow.Done)
@@ -325,7 +329,11 @@ public class CycleTimeTests
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 3 | 1 | 0.0 | 0.0 | 0.0 | 0.0 |\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(
+            TableHeader
+            + "| 3 | 1 | 0.0 | 0.0 | 0.0 | 0.0 |\n"
+            + "| 8 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n"
+            + NextSection);
         var reopens = await pipeline.QueryAsync<(string IssueKey, long ReopenCount)>(
             "SELECT i.issue_key, c.reopen_count FROM issue_cycle c JOIN issue i ON i.issue_id = c.issue_id ORDER BY i.issue_key;");
         await Assert.That(reopens).IsEquivalentTo(new[] { ("FAKE-1", 0L), ("FAKE-2", 1L) }, CollectionOrdering.Matching);
@@ -350,6 +358,55 @@ public class CycleTimeTests
             + "| 2.001 | 1 | 1.0 | 1.0 | 1.0 | 1.0 |\n"
             + "| 2.004 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n"
             + NextSection);
+    }
+
+    [Test]
+    public async Task An_abandoned_issue_that_was_worked_on_is_in_no_cycle_time_row()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Config["abandonedResolutionIds"] = new JsonArray("300002");
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done)
+            .Resolved("300001");
+        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 5, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done)
+            .Resolved("300002");
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 3 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
+    }
+
+    [Test]
+    public async Task The_cycle_time_view_reads_only_rows_marked_delivered_whatever_else_they_carry()
+    {
+        // Derive gives an abandoned issue a cycle end and nothing else. The view must not lean on that:
+        // "delivered" is the one test of a delivery (issue_cycle.sql), so a row that is not delivered stays
+        // out even if it carries a cycle end, a sprint and a cycle time.
+        await using var pipeline = new PipelineHarness();
+        var store = new SqliteStore(pipeline.DatabasePath);
+        await store.InitializeAsync();
+        var start = Local(2026, 1, 6, 9);
+        var end = Local(2026, 1, 8, 9);
+
+        await store.ReplaceDerivedAsync(new DerivedData(
+            SprintWindows: [],
+            StatusIntervals: [],
+            IssueCycles:
+            [
+                new IssueCycle("1", end, Delivered: true, DeliverySprintId: "41", ReopenCount: 0) { Cycle = new Cycle(start, 2, 2), PointBucket = 3 },
+                new IssueCycle("2", end, Delivered: false, DeliverySprintId: "41", ReopenCount: 0) { Cycle = new Cycle(start, 6, 4), PointBucket = 3 },
+            ],
+            MembershipIntervals: [],
+            SprintStatusTimes: [],
+            BoardStatuses: []));
+
+        var rows = await CycleTimeRowsAsync(pipeline, 41);
+        await Assert.That(rows.Select(row => (row.PointBucket, row.IssueCount, row.P85BusinessDays, row.P85CalendarDays)))
+            .IsEquivalentTo(new (double?, long, double?, double?)[] { (3, 1, 2, 2) });
     }
 
     [Test]

@@ -151,17 +151,18 @@ public class CyclesTests
     }
 
     [Test]
-    public async Task A_work_status_first_entered_after_the_delivery_moment_starts_no_cycle()
+    public async Task A_work_status_first_entered_in_a_same_instant_reopen_gives_a_cycle_of_zero_days()
     {
-        // Straight to Done, then reopened into Development and closed again in one instant. Delivery dates the
-        // issue at its first move into Done (the visit to Development has no interval), so the only work
-        // status it entered lies after its delivery moment.
+        // Straight to Done, then reopened into Development and closed again in one instant. The delivery
+        // moment is that instant, the last move into done, and the cycle starts and ends there.
         var cycle = CycleOf(Done,
             new StatusChange("1", Local(2026, 11, 3, 9), New, Done),
             new StatusChange("2", Local(2026, 11, 5, 9), Done, Development),
             new StatusChange("3", Local(2026, 11, 5, 9), Development, Done));
 
-        await Assert.That(cycle).IsNull();
+        await Assert.That(cycle).IsNotNull();
+        await Assert.That(cycle!.Start).IsEqualTo(Local(2026, 11, 5, 9));
+        await Assert.That(cycle.CalendarDays).IsEqualTo(0.0);
     }
 
     [Test]
@@ -207,7 +208,7 @@ public class CyclesTests
     private static Cycle? CycleOf(string currentStatusId, params StatusChange[] changes)
     {
         var timeline = StatusTimeline.Build(Created, currentStatusId, changes);
-        var delivered = (Delivered)Delivery.Of(currentStatusId, currentResolutionId: null, timeline.Intervals, Roles, NoAbandonedResolutions).Value!;
+        var delivered = (Delivered)Delivery.Of(currentStatusId, currentResolutionId: null, timeline.Entries, Roles, NoAbandonedResolutions).Value!;
         return Cycles.Measure(timeline.Entries, Roles, delivered.At, TeamCalendar());
     }
 
