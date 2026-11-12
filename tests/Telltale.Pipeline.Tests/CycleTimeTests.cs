@@ -427,7 +427,7 @@ public class CycleTimeTests
             Changes: [],
             Sprints: [],
             Statuses: []),
-            new Watermark("synthetic-collector", Covers: "synthetic", UpdatedThrough: end));
+            new Watermark("synthetic-collector", new CollectionScope("https://example.invalid/", FakeJira.BoardId, FakeJira.ProjectKey, new DateOnly(2025, 1, 1), "status"), UpdatedThrough: end));
 
         await store.ReplaceDerivedAsync(new DerivedData(
             SprintWindows: [new DerivedSprintWindow("41", Local(2026, 1, 5, 9), Local(2026, 1, 19, 9))],

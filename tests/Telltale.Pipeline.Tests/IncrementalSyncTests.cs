@@ -183,6 +183,7 @@ public class IncrementalSyncTests
     }
 
     [Test]
+    [Arguments("siteUrl")]
     [Arguments("projectKeys")]
     [Arguments("backfillStart")]
     [Arguments("boardId")]
@@ -198,21 +199,116 @@ public class IncrementalSyncTests
         await pipeline.RunAllAsync(["backfill"]);
         var requestsBefore = pipeline.Jira.Handler.Requests.Count;
 
+        ChangeSetting(pipeline, setting);
+        var sync = await pipeline.RunAsync("sync");
+        var run = await pipeline.RunAsync("run", "--sprint", "42");
+
+        var refusal = FilledUnderAnother(setting);
+        await Assert.That(sync).IsEqualTo(1);
+        await Assert.That(run).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(refusal + refusal);
+        await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(requestsBefore);
+    }
+
+    [Test]
+    [Arguments("derive", "siteUrl")]
+    [Arguments("derive", "projectKeys")]
+    [Arguments("derive", "backfillStart")]
+    [Arguments("derive", "boardId")]
+    [Arguments("report", "siteUrl")]
+    [Arguments("report", "projectKeys")]
+    [Arguments("report", "backfillStart")]
+    [Arguments("report", "boardId")]
+    public async Task A_command_that_only_reads_the_store_is_refused_when_a_setting_that_decides_what_is_fetched_changed_since_the_store_was_filled(string command, string setting)
+    {
+        // The store holds what the old site, board, projects and start date gave. Figures derived or reported
+        // from it under the new settings would be the old settings' figures, without a sign.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41, 42);
+        await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "42"]);
+        var storeBefore = await pipeline.ReadStoreContentAsync();
+        var reportBefore = await pipeline.ReadReportBytesAsync(42);
+
+        ChangeSetting(pipeline, setting);
+        var exit = await pipeline.RunAsync(command == "report" ? ["report", "--sprint", "42"] : [command]);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(FilledUnderAnother(setting));
+        await Assert.That(await pipeline.ReadStoreContentAsync()).IsEqualTo(storeBefore);
+        await Assert.That(await pipeline.ReadReportBytesAsync(42)).IsEqualTo(reportBefore);
+    }
+
+    [Test]
+    [Arguments("derive")]
+    [Arguments("report")]
+    public async Task A_command_that_only_reads_the_store_is_refused_when_a_field_whose_history_is_fetched_changed_since_the_store_was_filled(string command)
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41, 42);
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+
+        pipeline.Config["jira"]!["storyPointFieldId"] = "customfield_10098";
+        var exit = await pipeline.RunAsync(command == "report" ? ["report", "--sprint", "42"] : [command]);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "The store was last filled without the history of the fields that jira.sprintFieldId and jira.storyPointFieldId name now, "
+            + "so sprint membership and point buckets could be wrong. Run backfill.\n");
+    }
+
+    [Test]
+    [Arguments("sync")]
+    [Arguments("derive")]
+    [Arguments("report")]
+    public async Task A_store_whose_watermark_does_not_say_what_it_was_filled_from_is_refused_until_a_backfill(string command)
+    {
+        // A store filled by a version of the tool that kept what the watermark covers as one sentence: the
+        // migration cannot tell the settings apart, so the columns are empty, and no setting equals an empty one.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41, 42);
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+        await pipeline.ExecuteAsync("UPDATE watermark SET site_url = '', board_id = 0, project_keys = '', start_date = NULL, history_fields = '';");
+
+        var exit = await pipeline.RunAsync(command == "report" ? ["report", "--sprint", "42"] : [command]);
+        await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "42"]);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "The store does not record which Jira site, board, projects and start date it was last filled from: an earlier version of this tool filled it. Run backfill.\n");
+    }
+
+    [Test]
+    public async Task What_the_store_was_filled_from_is_kept_one_setting_to_a_column()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Config["jira"]!["projectKeys"] = new JsonArray("MORE", FakeJira.ProjectKey);
+
+        await pipeline.RunAllAsync(["backfill"]);
+
+        var filledFrom = await pipeline.QueryAsync<(string SiteUrl, long BoardId, string ProjectKeys, string StartDate, string HistoryFields)>(
+            "SELECT site_url, board_id, project_keys, start_date, history_fields FROM watermark;");
+        await Assert.That(filledFrom).IsEquivalentTo(new[]
+        {
+            (FakeJira.SiteUrl, FakeJira.BoardId, $"{FakeJira.ProjectKey},MORE", "2025-01-01", $"status,{FakeJira.SprintFieldId},{FakeJira.StoryPointFieldId}"),
+        });
+    }
+
+    /// <summary>Changes one of the settings that decide which site, issues and sprints a fetch asks for.</summary>
+    private static void ChangeSetting(PipelineHarness pipeline, string setting) =>
         pipeline.Config["jira"]![setting] = setting switch
         {
+            "siteUrl" => "https://other.example.invalid/",
             "projectKeys" => new JsonArray(FakeJira.ProjectKey, "MORE"),
             "backfillStart" => "2024-01-01",
             _ => FakeJira.BoardId + 1,
         };
-        var sync = await pipeline.RunAsync("sync");
-        var run = await pipeline.RunAsync("run", "--sprint", "42");
 
-        const string Refusal = "boardId, projectKeys or backfillStart in the configuration file changed since the store was last filled, so a sync could miss issues. Run backfill.\n";
-        await Assert.That(sync).IsEqualTo(1);
-        await Assert.That(run).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(Refusal + Refusal);
-        await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(requestsBefore);
-    }
+    private static string FilledUnderAnother(string setting) =>
+        $"jira.{setting} in the configuration file changed since the store was last filled, so the store holds what the old setting asked for. Run backfill.\n";
 
     [Test]
     public async Task After_a_backfill_under_the_changed_setting_sync_works_again()

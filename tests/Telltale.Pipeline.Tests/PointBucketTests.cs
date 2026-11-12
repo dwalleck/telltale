@@ -306,8 +306,8 @@ public class PointBucketTests
             .Moved(Local(2026, 1, 8, 9), Workflow.Done);
         await pipeline.RunAllAsync(["backfill"]);
 
-        // Such a store's watermark names the board, the projects and the start date, and no history fields.
-        await pipeline.ExecuteAsync("UPDATE watermark SET covers = substr(covers, 1, instr(covers, '; history ') - 1);");
+        // Such a store's watermark names the site, the board, the projects and the start date, and no history fields.
+        await pipeline.ExecuteAsync("UPDATE watermark SET history_fields = '';");
         var sync = await pipeline.RunAsync("sync");
 
         await Assert.That(sync).IsEqualTo(1);

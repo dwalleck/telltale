@@ -82,19 +82,13 @@ public sealed class JiraCollector
     public async Task BringUpToDateAsync(ITelltaleStore store, CollectionMode mode, bool allowEmpty, CancellationToken cancellationToken = default)
     {
         // What the watermark stands for is checked before anything is asked of Jira. It is only true for the
-        // board, projects and start date it was fetched under; continuing from it under other settings would
-        // pass over every older issue the new settings bring in, without a sign.
-        var covers = $"{IssueScope()}{HistoryMarker}{HistoryFields()}";
+        // site, board, projects, start date and history fields it was fetched under; continuing from it under
+        // other settings would pass over every older issue the new settings bring in, without a sign.
+        var scope = ScopeOf(_config);
         var watermark = await store.ReadWatermarkAsync(WatermarkName, cancellationToken);
-        if (mode == CollectionMode.Incremental && watermark is not null && watermark.Covers != covers)
+        if (mode == CollectionMode.Incremental)
         {
-            // The same holds for the fields whose history is fetched. An issue already stored comes back only
-            // when it changes in Jira, so every other issue would lack the history of a newly named field, and
-            // an issue without history reads as one whose sprints or estimate never changed. A store filled
-            // before the watermark named these fields is in the same position.
-            throw new UserFacingException(watermark.Covers.Split(HistoryMarker)[0] != IssueScope()
-                ? "boardId, projectKeys or backfillStart in the configuration file changed since the store was last filled, so a sync could miss issues. Run backfill."
-                : "The store was last filled without the history of the fields that jira.sprintFieldId and jira.storyPointFieldId name now, so sprint membership and point buckets could be wrong. Run backfill.");
+            watermark?.Scope.RequireSameAs(scope);
         }
 
         // All three secrets are checked before the first call, so a missing salt cannot surface after a long fetch.
@@ -124,7 +118,7 @@ public sealed class JiraCollector
         // above or the write itself fails, it stays where it was and the next sync fetches the same issues again.
         // A fetch that found nothing reaches no further than the one before it. An out-of-scope issue's update
         // does not move it: the overlap brings that issue back, and deleting it again changes nothing.
-        var reached = new Watermark(WatermarkName, covers, issues.Count > 0 ? issues.Max(issue => issue.Updated) : since);
+        var reached = new Watermark(WatermarkName, scope, issues.Count > 0 ? issues.Max(issue => issue.Updated) : since);
         // A backfill asked for everything, so its batch replaces what the store holds; a sync's is added to it.
         var batch = new RawData(issues, changes, sprints, statuses) { OutOfScopeIssueIds = outOfScopeIssueIds, SaltFingerprint = IdentityHash.SaltFingerprint(salt) };
         await (mode == CollectionMode.Backfill ? store.ReplaceRawAsync(batch, reached, cancellationToken) : store.WriteRawAsync(batch, reached, cancellationToken));
@@ -155,34 +149,25 @@ public sealed class JiraCollector
         }
     }
 
-    // Separates the two parts of what a watermark covers. A project key cannot hold it.
-    private const string HistoryMarker = "; history ";
-
-    /// <summary>The fields whose history a fetch under the current configuration asks for.</summary>
-    private string HistoryFields() => $"status,{_config.SprintFieldId},{_config.StoryPointFieldId}";
-
-    /// <summary>The settings that decide which issues and sprints a fetch under the current configuration asks for.</summary>
-    private string IssueScope() =>
-        $"board {_config.BoardId.ToString(CultureInfo.InvariantCulture)}; projects {string.Join(",", _config.ProjectKeys.Order(StringComparer.Ordinal))}{StartDateMarker}{_config.BackfillStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}";
-
-    // Introduces the start date in what a watermark covers. A project key cannot hold it.
-    private const string StartDateMarker = "; from ";
+    /// <summary>
+    /// What a fetch under <paramref name="config"/> asks for: the store records it with the rows it writes,
+    /// and every command compares it with what the store was last filled from (<see cref="CollectionScope.RequireSameAs"/>).
+    /// </summary>
+    public static CollectionScope ScopeOf(JiraConfig config) => new(
+        config.SiteUrl.AbsoluteUri,
+        config.BoardId,
+        string.Join(",", config.ProjectKeys.Order(StringComparer.Ordinal)),
+        config.BackfillStart,
+        $"{StatusFieldId},{config.SprintFieldId},{config.StoryPointFieldId}");
 
     /// <summary>
-    /// The earliest moment from which the store holds every issue update, read from what this collector's
-    /// watermark covers: the start of the <c>backfillStart</c> date the store was filled from. Jira reads that
-    /// date in the time zone of the account asking, which the tool does not know, so this is where the date
-    /// begins last, twelve hours behind UTC. Null when <paramref name="covers"/> names no start date.
-    /// A sprint that started earlier can lack issues delivered in it.
+    /// The earliest moment from which a store filled under <paramref name="scope"/> holds every issue update:
+    /// the start of its start date. Jira reads that date in the time zone of the account asking, which the
+    /// tool does not know, so this is where the date begins last, twelve hours behind UTC. Null when the scope
+    /// names no start date. A sprint that started earlier can lack issues delivered in it.
     /// </summary>
-    public static DateTimeOffset? CompleteFrom(string covers)
-    {
-        var marker = covers.IndexOf(StartDateMarker, StringComparison.Ordinal);
-        var date = marker < 0 ? "" : covers[(marker + StartDateMarker.Length)..];
-        return date.Length >= 10 && DateOnly.TryParseExact(date[..10], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var start)
-            ? new DateTimeOffset(start.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(-12))
-            : null;
-    }
+    public static DateTimeOffset? CompleteFrom(CollectionScope scope) =>
+        scope.StartDate is { } start ? new DateTimeOffset(start.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(-12)) : null;
 
     /// <summary>
     /// The JQL value for the lower bound on <c>updated</c>, a quoted JQL date. From a watermark it is the

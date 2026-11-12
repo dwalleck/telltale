@@ -194,24 +194,26 @@ public class StoreTests
     public async Task A_migration_numbered_below_one_already_applied_is_still_applied_and_a_gap_in_the_numbers_is_accepted()
     {
         // Two branches each add a migration, and the higher number can reach a store first. The store is put in
-        // that state by hand: 0005 is recorded, and 0003 (the watermark table) is neither recorded nor there.
+        // that state by hand: 0006 is recorded and 0005 is not. (0005 rewrites Sprint changes in the stored
+        // form; TimeInStatusTableTests shows what it does to the rows.)
         // (Until ticket 06 brought 0004, the tree held 0001 to 0003 and 0005, and every run accepted that gap.)
         await using var pipeline = new PipelineHarness();
         AddSprintAndIssue(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 6, 9)).InSprints(41).SprintsChanged(Local(2026, 1, 7, 9), 41, 42);
         await pipeline.RunAllAsync(["backfill"]);
         await pipeline.ExecuteAsync(
             """
-            DROP TABLE watermark;
-            DELETE FROM schema_migration WHERE name = '0003_watermark.sql';
+            UPDATE change SET to_value = '41, 42' WHERE field = 'sprint';
+            DELETE FROM schema_migration WHERE name = '0005_sprint_change_form.sql';
             """);
         var recordedBefore = await pipeline.QueryAsync<string>("SELECT name FROM schema_migration ORDER BY name;");
 
         await pipeline.RunAllAsync(["derive"]);
 
-        await Assert.That(recordedBefore).IsEquivalentTo(new[] { "0001_raw_tables.sql", "0002_issue_sprint_ids.sql", "0004_person_hashing.sql", "0005_sprint_change_form.sql" }, CollectionOrdering.Matching);
+        await Assert.That(recordedBefore).IsEquivalentTo(new[] { "0001_raw_tables.sql", "0002_issue_sprint_ids.sql", "0003_watermark.sql", "0004_person_hashing.sql", "0006_collection_scope.sql" }, CollectionOrdering.Matching);
         await Assert.That(await pipeline.QueryAsync<string>("SELECT name FROM schema_migration ORDER BY name;"))
-            .IsEquivalentTo(new[] { "0001_raw_tables.sql", "0002_issue_sprint_ids.sql", "0003_watermark.sql", "0004_person_hashing.sql", "0005_sprint_change_form.sql" }, CollectionOrdering.Matching);
-        await Assert.That(await pipeline.QueryAsync<string>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'watermark';")).IsEquivalentTo(new[] { "watermark" });
+            .IsEquivalentTo(new[] { "0001_raw_tables.sql", "0002_issue_sprint_ids.sql", "0003_watermark.sql", "0004_person_hashing.sql", "0005_sprint_change_form.sql", "0006_collection_scope.sql" }, CollectionOrdering.Matching);
+        await Assert.That(await pipeline.QueryAsync<string>("SELECT DISTINCT to_value FROM change WHERE field = 'sprint';")).IsEquivalentTo(new[] { "41,42" });
     }
 
     private static void AddSprintAndIssue(FakeJira jira)

@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -197,11 +198,26 @@ public sealed class SqliteStore : ITelltaleStore
         await connection.ExecuteAsync(Command(
             cancellationToken,
             """
-            INSERT INTO watermark (collector, covers, updated_through)
-            VALUES (@Collector, @Covers, @UpdatedThrough)
-            ON CONFLICT (collector) DO UPDATE SET covers = excluded.covers, updated_through = excluded.updated_through;
+            INSERT INTO watermark (collector, site_url, board_id, project_keys, start_date, history_fields, updated_through)
+            VALUES (@Collector, @SiteUrl, @BoardId, @ProjectKeys, @StartDate, @HistoryFields, @UpdatedThrough)
+            ON CONFLICT (collector) DO UPDATE SET
+                site_url = excluded.site_url,
+                board_id = excluded.board_id,
+                project_keys = excluded.project_keys,
+                start_date = excluded.start_date,
+                history_fields = excluded.history_fields,
+                updated_through = excluded.updated_through;
             """,
-            new { reached.Collector, reached.Covers, UpdatedThrough = StoredTime.ToStored(reached.UpdatedThrough) },
+            new
+            {
+                reached.Collector,
+                reached.Scope.SiteUrl,
+                reached.Scope.BoardId,
+                reached.Scope.ProjectKeys,
+                StartDate = reached.Scope.StoredStartDate,
+                reached.Scope.HistoryFields,
+                UpdatedThrough = StoredTime.ToStored(reached.UpdatedThrough),
+            },
             transaction));
 
         await RecordSaltAsync(connection, transaction, batch, hashedWithBefore, cancellationToken);
@@ -241,8 +257,21 @@ public sealed class SqliteStore : ITelltaleStore
     public async Task<Watermark?> ReadWatermarkAsync(string collector, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
-        var row = await connection.QuerySingleOrDefaultAsync<WatermarkRow>(Command(cancellationToken, "SELECT covers, updated_through FROM watermark WHERE collector = @collector;", new { collector }));
-        return row is null ? null : new Watermark(collector, row.Covers, StoredTime.FromStoredOrNull(row.UpdatedThrough));
+        var row = await connection.QuerySingleOrDefaultAsync<WatermarkRow>(Command(
+            cancellationToken,
+            "SELECT site_url, board_id, project_keys, start_date, history_fields, updated_through FROM watermark WHERE collector = @collector;",
+            new { collector }));
+        return row is null
+            ? null
+            : new Watermark(
+                collector,
+                new CollectionScope(
+                    row.SiteUrl,
+                    row.BoardId,
+                    row.ProjectKeys,
+                    row.StartDate is null ? null : DateOnly.ParseExact(row.StartDate, "yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    row.HistoryFields),
+                StoredTime.FromStoredOrNull(row.UpdatedThrough));
     }
 
     public async Task<RawData> ReadRawAsync(CancellationToken cancellationToken = default)
@@ -618,7 +647,11 @@ public sealed class SqliteStore : ITelltaleStore
 
     private sealed class WatermarkRow
     {
-        public string Covers { get; init; } = "";
+        public string SiteUrl { get; init; } = "";
+        public long BoardId { get; init; }
+        public string ProjectKeys { get; init; } = "";
+        public string? StartDate { get; init; }
+        public string HistoryFields { get; init; } = "";
         public string? UpdatedThrough { get; init; }
     }
 

@@ -114,6 +114,7 @@ internal sealed class PipelineSteps : IDisposable
     /// </summary>
     public async Task DeriveAsync(CancellationToken cancellationToken)
     {
+        await RequireFilledUnderTheConfigurationAsync(cancellationToken);
         await RequireStoredSaltAsync(cancellationToken);
         var raw = await _store.ReadRawAsync(cancellationToken);
         await RequireBaselineSprintsAsync(raw, cancellationToken);
@@ -143,6 +144,15 @@ internal sealed class PipelineSteps : IDisposable
             _config.TimeZone,
             string.Join(",", _config.Holidays.Order().Select(day => day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))),
             DerivedSource.BaselineSprintIdsOf(_baselineSprintIds));
+
+    /// <summary>
+    /// Derive and report read what the store holds, and the store holds what the settings it was last filled
+    /// under asked for. Under other settings (another site, board, projects, start date or history fields)
+    /// its figures would be the old settings', so the command stops, as a sync does. A store nothing was ever
+    /// fetched into has nothing of another setting's.
+    /// </summary>
+    private async Task RequireFilledUnderTheConfigurationAsync(CancellationToken cancellationToken) =>
+        (await _store.ReadWatermarkAsync(JiraCollector.WatermarkName, cancellationToken))?.Scope.RequireSameAs(JiraCollector.ScopeOf(_config.Jira));
 
     /// <summary>
     /// Derive and report need no secret. But when the salt is at hand and is not the one the stored people
@@ -192,6 +202,7 @@ internal sealed class PipelineSteps : IDisposable
     /// </summary>
     public async Task ReportAsync(long? sprintId, bool needsSprint, CancellationToken cancellationToken)
     {
+        await RequireFilledUnderTheConfigurationAsync(cancellationToken);
         await RequireStoredSaltAsync(cancellationToken);
         var derivedFrom = await _store.ReadDerivedSourceAsync(cancellationToken)
             ?? throw new UserFacingException("The store has no derived data yet. Run derive first.");
@@ -261,7 +272,7 @@ internal sealed class PipelineSteps : IDisposable
 
     /// <summary>The moment from which the store holds every issue: the start date it was last filled from. Null when it names none.</summary>
     private async Task<DateTimeOffset?> CompleteFromAsync(CancellationToken cancellationToken) =>
-        await _store.ReadWatermarkAsync(JiraCollector.WatermarkName, cancellationToken) is { } filled ? JiraCollector.CompleteFrom(filled.Covers) : null;
+        await _store.ReadWatermarkAsync(JiraCollector.WatermarkName, cancellationToken) is { } filled ? JiraCollector.CompleteFrom(filled.Scope) : null;
 
     /// <summary>
     /// Refuses a sprint that started before the start date the store was last filled from. The store holds
