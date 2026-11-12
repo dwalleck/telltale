@@ -13,7 +13,10 @@ namespace Telltale.Collectors.Jira;
 /// <summary>How much <see cref="JiraCollector"/> fetches.</summary>
 public enum CollectionMode
 {
-    /// <summary>Every issue updated since the configured backfill start date, whatever the store already holds.</summary>
+    /// <summary>
+    /// Every issue updated since the configured backfill start date, whatever the store already holds. What is
+    /// fetched replaces the raw tables' rows, so nothing that has left Jira stays (owner decision D4).
+    /// </summary>
     Backfill,
 
     /// <summary>

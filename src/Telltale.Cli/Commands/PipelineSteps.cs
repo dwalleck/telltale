@@ -78,7 +78,7 @@ internal sealed class PipelineSteps : IDisposable
 
     public void Dispose() => _storeLock.Dispose();
 
-    /// <summary>Fetches everything from the configured start date into the raw tables.</summary>
+    /// <summary>Fetches everything from the configured start date and replaces the raw tables' rows with it.</summary>
     public Task BackfillAsync(CancellationToken cancellationToken) => CollectAsync(CollectionMode.Backfill, cancellationToken);
 
     /// <summary>Brings the raw tables up to date with what changed in Jira since the last sync or backfill.</summary>
