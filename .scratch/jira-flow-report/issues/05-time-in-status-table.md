@@ -2,6 +2,8 @@
 
 **What to build:** The report gains the time in status table: for each status, in board order, the issue count and the median business days issues spent in it during the sprint. The collector fetches Sprint field history, derive builds membership intervals and per-issue, per-sprint status durations using the existing Core behaviour, and a metric view provides the medians.
 
+Owner decisions (2026-11-12): board order is the order of statuses in the configuration file (D19). Done-role statuses are left out of the table (D20). An issue counts toward a status only if it spent more than zero business days there (D21). The issue's current sprint IDs are stored (D22). A status nobody was in is omitted (D23).
+
 **Blocked by:** 01
 
 **Status:** ready-for-agent

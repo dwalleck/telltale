@@ -2,6 +2,8 @@
 
 **What to build:** `secrets set` stores the Jira account email, the Jira API token and the hashing salt in Windows Credential Manager, behind the secret-store interface from ticket 01, and can generate the salt. On Windows the tool reads secrets from Credential Manager; elsewhere it uses environment variables. Secret values are never echoed, logged or written to a file. Carried over from the ticket 01 review: until this ticket lands, every platform reads secrets from environment variables, which `CLAUDE.md` does not allow in production on Windows. The Credential Manager implementation cannot be exercised off Windows, so its final check is by hand in ticket 13.
 
+Owner decisions (2026-11-12): replacing a stored hashing salt needs `--replace` (D24). A secret value is typed without echo or piped with `--stdin`, never a command-line argument (D25). A typed control character refuses the value (D32).
+
 **Blocked by:** 01
 
 **Status:** ready-for-agent
