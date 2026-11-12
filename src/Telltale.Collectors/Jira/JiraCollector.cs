@@ -11,7 +11,7 @@ namespace Telltale.Collectors.Jira;
 
 /// <summary>
 /// Brings the store up to date with the configured Jira board: its sprints and statuses, the issues
-/// of the configured projects, and each issue's status and Sprint field history from the bulk changelog endpoint
+/// of the configured projects, and each issue's status, Sprint field and story point history from the bulk changelog endpoint
 /// (ADR-0004). Only selected fields are kept (ADR-0002), and the assignee's account ID is hashed
 /// before anything leaves this class (ADR-0003).
 /// </summary>
@@ -176,6 +176,30 @@ public sealed class JiraCollector
     private static bool IsSprintIdList(string? value) =>
         value is null || value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).All(id => id.All(char.IsAsciiDigit));
 
+    /// <summary>
+    /// One side of a story point change as the store keeps it: the number in round-trip form, or null for no
+    /// estimate. The value is read from <paramref name="id"/> (the item's <c>from</c> or <c>to</c>) and, when
+    /// that is empty, from <paramref name="text"/> (its <c>fromString</c> or <c>toString</c>). Anything that is
+    /// not a number means the configured field is another field, whose history may hold names or free text:
+    /// the run stops before anything is kept, and the message quotes no value.
+    /// </summary>
+    private static string? PointValue(string? id, string? text)
+    {
+        var value = string.IsNullOrWhiteSpace(id) ? text : id;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var points) || !double.IsFinite(points))
+        {
+            throw new UserFacingException(
+                "The history of the field named by jira.storyPointFieldId in the configuration file holds values that are not numbers, so it is not the story point field. Nothing was stored.");
+        }
+
+        return points.ToString("R", CultureInfo.InvariantCulture);
+    }
+
     private async Task<List<RawChange>> FetchChangesAsync(JiraClient jira, List<RawIssue> issues, CancellationToken cancellationToken)
     {
         var changes = new List<RawChange>();
@@ -185,7 +209,7 @@ public sealed class JiraCollector
             var body = new JsonObject
             {
                 ["issueIdsOrKeys"] = new JsonArray([.. chunk.Select(issue => (JsonNode)issue.IssueId)]),
-                ["fieldIds"] = new JsonArray("status", _config.SprintFieldId),
+                ["fieldIds"] = new JsonArray("status", _config.SprintFieldId, _config.StoryPointFieldId),
                 ["maxResults"] = ChangelogPageSize,
             };
 
@@ -217,6 +241,7 @@ public sealed class JiraCollector
                     {
                         "status" => ChangeFields.Status,
                         { } fieldId when fieldId == _config.SprintFieldId => ChangeFields.Sprint,
+                        { } fieldId when fieldId == _config.StoryPointFieldId => ChangeFields.Points,
                         _ => null,
                     };
 
@@ -233,6 +258,15 @@ public sealed class JiraCollector
                     {
                         throw new UserFacingException(
                             "The history of the field named by jira.sprintFieldId in the configuration file holds values that are not sprint IDs, so it is not the Sprint field. Nothing was stored.");
+                    }
+
+                    if (field == ChangeFields.Points)
+                    {
+                        // A number field's history is expected to carry its numbers in fromString and toString and
+                        // leave from and to empty; the documentation does not settle it, so both places are read.
+                        // Only a number is ever kept from them.
+                        from = PointValue(from, Optional(item, "fromString")?.GetString());
+                        to = PointValue(to, Optional(item, "toString")?.GetString());
                     }
 
                     changes.Add(new RawChange(historyId, issueId, at, field, from, to));

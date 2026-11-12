@@ -110,6 +110,20 @@ public sealed class FakeIssue
         return this;
     }
 
+    /// <summary>
+    /// Changes the estimate from what it is now to <paramref name="points"/> (null clears it) and records the
+    /// change the way a number field's history is expected to look: <c>from</c> and <c>to</c> are null and the
+    /// numbers are in <c>fromString</c> and <c>toString</c>. For the other shape, use <see cref="AddHistory"/>.
+    /// </summary>
+    public FakeIssue Reestimated(DateTimeOffset at, double? points)
+    {
+        AddHistory(at, FakeJira.StoryPointFieldId, "Fake Story Points", null, PointText(StoryPoints), null, PointText(points));
+        StoryPoints = points;
+        return this;
+    }
+
+    private static string? PointText(double? points) => points?.ToString("R", CultureInfo.InvariantCulture);
+
     /// <summary>Sets the current resolution, as Jira does when an issue is closed.</summary>
     public FakeIssue Resolved(string resolutionId)
     {

@@ -35,6 +35,10 @@ public static class Derivation
             .Where(change => change.Field == ChangeFields.Status && change.To is not null)
             .ToLookup(change => change.IssueId, change => new StatusChange(change.HistoryId, change.At, change.From, change.To!));
 
+        var pointChanges = raw.Changes
+            .Where(change => change.Field == ChangeFields.Points)
+            .ToLookup(change => change.IssueId, change => PointChange.FromRaw(change.HistoryId, change.At, change.From, change.To));
+
         // Which sprints count is decided here and nowhere else. Only the configured board's: the store can
         // still hold sprints of a board ID that was since corrected. And only sprints that have started:
         // a future sprint has no window yet, even when it carries planned dates.
@@ -57,12 +61,21 @@ public static class Derivation
             var reopens = Cycles.ReopenCount(timeline.Entries, roles);
             cycles.Add(Delivery.Of(issue.StatusId, issue.ResolutionId, timeline.Entries, roles, abandonedResolutionIds) switch
             {
-                Delivered delivered => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At), reopens)
+                Delivered delivered => Cycles.Measure(timeline.Entries, roles, delivered.At, calendar) switch
                 {
-                    Cycle = Cycles.Measure(timeline.Entries, roles, delivered.At, calendar),
+                    { } cycle => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At), reopens)
+                    {
+                        Cycle = cycle,
 
-                    // The point bucket is the issue's current estimate.
-                    PointBucket = issue.StoryPoints,
+                        // Later re-estimates do not move the issue to another bucket (ADR-0006).
+                        PointBucket = PointHistory.EstimateAt(cycle.Start, issue.StoryPoints, pointChanges[issue.IssueId]),
+                    },
+
+                    // No cycle, so no cycle start to read the estimate at: the bucket is the current estimate.
+                    null => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At), reopens)
+                    {
+                        PointBucket = issue.StoryPoints,
+                    },
                 },
 
                 // An abandoned issue reached done, so it has a cycle end, but it is not a delivery: it belongs to
