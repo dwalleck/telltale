@@ -146,6 +146,7 @@ public sealed class FakeJira
     private readonly Lock _gate = new();
     private readonly List<FakeSprint> _sprints = [];
     private readonly List<FakeIssue> _issues = [];
+    private readonly List<IReadOnlyList<string>> _searchAnswers = [];
     private readonly Dictionary<string, string> _statusNames = Workflow.BoardOrder.ToDictionary(status => status.Id, status => status.DefaultName);
     private int _nextIssueId = 900001;
     private int _nextHistoryId = 200001;
@@ -155,7 +156,7 @@ public sealed class FakeJira
         Handler = new StubHttpHandler()
             .On(HttpMethod.Get, $"/rest/agile/1.0/board/{BoardId}/sprint", _ => Respond(Sprints()))
             .On(HttpMethod.Get, "/rest/api/3/status", _ => Respond(Statuses()))
-            .On(HttpMethod.Post, "/rest/api/3/search/jql", _ => Respond(Search()))
+            .On(HttpMethod.Post, "/rest/api/3/search/jql", request => Respond(Search(request)))
             .On(HttpMethod.Post, "/rest/api/3/changelog/bulkfetch", request => Respond(Changelogs(request)));
     }
 
@@ -174,6 +175,21 @@ public sealed class FakeJira
             lock (_gate)
             {
                 return [.. _issues];
+            }
+        }
+    }
+
+    /// <summary>
+    /// The issue keys each search answered with, one entry per search, oldest first: what the tool fetched,
+    /// whatever JQL it used to ask.
+    /// </summary>
+    public IReadOnlyList<IReadOnlyList<string>> SearchAnswers
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return [.. _searchAnswers];
             }
         }
     }
@@ -320,10 +336,17 @@ public sealed class FakeJira
 
     private JsonArray Statuses() => new(Workflow.BoardOrder.Select(status => (JsonNode)StatusDetails(status)).ToArray());
 
-    private JsonObject Search()
+    private JsonObject Search(StubRequest request)
     {
+        var updatedSince = UpdatedSince(request);
+        var found = Issues.Where(issue => issue.Updated >= updatedSince).OrderBy(issue => issue.Updated).ToList();
+        lock (_gate)
+        {
+            _searchAnswers.Add([.. found.Select(issue => issue.Key)]);
+        }
+
         var issues = new JsonArray();
-        foreach (var issue in Issues.OrderBy(issue => issue.Updated))
+        foreach (var issue in found)
         {
             issues.Add(new JsonObject
             {
@@ -350,6 +373,30 @@ public sealed class FakeJira
         var page = new JsonObject { ["issues"] = issues, ["isLast"] = true };
         AddLastPageToken(page);
         return page;
+    }
+
+    /// <summary>
+    /// The lower bound on <c>updated</c> in the search's JQL, in the forms JQL documents (research note 05): a
+    /// quoted date or date and minute, read in the calling user's time zone (the team's, here), or an unquoted
+    /// number, read as milliseconds since the Unix epoch. A search without one fails the test: Jira refuses unbounded JQL.
+    /// </summary>
+    private static DateTimeOffset UpdatedSince(StubRequest request)
+    {
+        using var body = JsonDocument.Parse(request.Body);
+        var jql = body.RootElement.GetProperty("jql").GetString() ?? "";
+        var bound = System.Text.RegularExpressions.Regex.Match(jql, """\bupdated >= (?:"(?<quoted>[^"]+)"|(?<epoch>\d+))(?= |$)""");
+        if (bound.Groups["epoch"].Success)
+        {
+            return DateTimeOffset.FromUnixTimeMilliseconds(long.Parse(bound.Groups["epoch"].Value, CultureInfo.InvariantCulture));
+        }
+
+        if (bound.Groups["quoted"].Success)
+        {
+            var wallClock = DateTime.ParseExact(bound.Groups["quoted"].Value, ["yyyy-MM-dd", "yyyy-MM-dd HH:mm", "yyyy/MM/dd", "yyyy/MM/dd HH:mm"], CultureInfo.InvariantCulture, DateTimeStyles.None);
+            return TeamTime.Local(wallClock.Year, wallClock.Month, wallClock.Day, wallClock.Hour, wallClock.Minute);
+        }
+
+        throw new InvalidOperationException($"FakeJira: the search JQL has no lower bound on updated that the fake understands: {jql}");
     }
 
     private JsonObject Changelogs(StubRequest request)

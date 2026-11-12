@@ -9,8 +9,15 @@ public interface ITelltaleStore
     /// <summary>Creates or upgrades the raw tables. Safe to call on every start.</summary>
     Task InitializeAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Writes a batch of raw rows in one transaction, replacing rows with the same Jira IDs.</summary>
-    Task WriteRawAsync(RawData batch, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Writes a batch of raw rows in one transaction, replacing rows with the same Jira IDs. With
+    /// <paramref name="reached"/>, the collector's watermark moves forward to it in the same transaction, so it
+    /// advances only when the whole batch is written. A watermark never moves backwards.
+    /// </summary>
+    Task WriteRawAsync(RawData batch, Watermark? reached = null, CancellationToken cancellationToken = default);
+
+    /// <summary>How far <paramref name="collector"/> has got, or null when it has never written a batch.</summary>
+    Task<DateTimeOffset?> ReadWatermarkAsync(string collector, CancellationToken cancellationToken = default);
 
     /// <summary>Reads every raw row.</summary>
     Task<RawData> ReadRawAsync(CancellationToken cancellationToken = default);

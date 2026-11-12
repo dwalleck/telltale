@@ -56,9 +56,13 @@ internal sealed class PipelineSteps
         return new PipelineSteps(services, config, roles, timeZone, store);
     }
 
-    /// <summary>Brings the raw tables up to date with Jira.</summary>
+    /// <summary>Fetches everything from the configured start date into the raw tables.</summary>
+    public Task BackfillAsync(CancellationToken cancellationToken) =>
+        new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets).BringUpToDateAsync(_store, CollectionMode.Backfill, cancellationToken);
+
+    /// <summary>Brings the raw tables up to date with what changed in Jira since the last sync or backfill.</summary>
     public Task SyncAsync(CancellationToken cancellationToken) =>
-        new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets).BringUpToDateAsync(_store, cancellationToken);
+        new JiraCollector(_services.HttpHandler, _config.Jira, _services.Secrets).BringUpToDateAsync(_store, CollectionMode.Incremental, cancellationToken);
 
     /// <summary>Rebuilds every derived table and metric view from the raw tables.</summary>
     public async Task DeriveAsync(CancellationToken cancellationToken)

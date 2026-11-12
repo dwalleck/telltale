@@ -18,6 +18,10 @@ public static class CliApp
     public static RootCommand Build(AppServices services) =>
         new("Telltale: delivery metrics for the team's work, never for individuals.")
         {
+            BackfillCommand.Create(services),
+            SyncCommand.Create(services),
+            DeriveCommand.Create(services),
+            ReportCommand.Create(services),
             RunCommand.Create(services),
         };
 

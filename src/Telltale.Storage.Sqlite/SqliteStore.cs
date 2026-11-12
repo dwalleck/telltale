@@ -73,7 +73,7 @@ public sealed class SqliteStore : ITelltaleStore
         }
     }
 
-    public async Task WriteRawAsync(RawData batch, CancellationToken cancellationToken = default)
+    public async Task WriteRawAsync(RawData batch, Watermark? reached = null, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -161,7 +161,28 @@ public sealed class SqliteStore : ITelltaleStore
             batch.Statuses,
             transaction));
 
+        if (reached is not null)
+        {
+            // Stored times sort as text the way they sort as time, so max() picks the later one.
+            await connection.ExecuteAsync(Command(
+                cancellationToken,
+                """
+                INSERT INTO watermark (collector, updated_through)
+                VALUES (@Collector, @UpdatedThrough)
+                ON CONFLICT (collector) DO UPDATE SET updated_through = max(updated_through, excluded.updated_through);
+                """,
+                new { reached.Collector, UpdatedThrough = StoredTime.ToStored(reached.UpdatedThrough) },
+                transaction));
+        }
+
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task<DateTimeOffset?> ReadWatermarkAsync(string collector, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
+        var stored = await connection.QuerySingleOrDefaultAsync<string?>(Command(cancellationToken, "SELECT updated_through FROM watermark WHERE collector = @collector;", new { collector }));
+        return StoredTime.FromStoredOrNull(stored);
     }
 
     public async Task<RawData> ReadRawAsync(CancellationToken cancellationToken = default)

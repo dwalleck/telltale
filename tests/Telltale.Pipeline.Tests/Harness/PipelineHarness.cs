@@ -100,6 +100,22 @@ public sealed class PipelineHarness : IAsyncDisposable
         return await CliApp.RunAsync(args, services, Cancellation.Token);
     }
 
+    /// <summary>
+    /// Runs several command lines in order, for example <c>["sync"], ["derive"], ["report"]</c>, and fails the
+    /// test at the first one that does not exit with 0, quoting what it wrote to standard error.
+    /// </summary>
+    public async Task RunAllAsync(params string[][] commandLines)
+    {
+        foreach (var args in commandLines)
+        {
+            var exit = await RunAsync(args);
+            if (exit != 0)
+            {
+                throw new InvalidOperationException($"'{string.Join(' ', args)}' exited with {exit}: {Error}");
+            }
+        }
+    }
+
     /// <summary>The markdown report written for a sprint, with line endings normalised to <c>\n</c>.</summary>
     public async Task<string> ReadReportAsync(long sprintId)
     {
