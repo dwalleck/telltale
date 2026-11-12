@@ -605,12 +605,26 @@ public sealed class SqliteStore : ITelltaleStore
 
     private static string Quoted(string identifier) => $"\"{identifier.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
 
+    /// <summary>
+    /// Opens a connection. One that can write overwrites what it deletes (<c>secure_delete</c>): without it a
+    /// deleted row stays readable in the file's free pages, and a backfill under a new salt, or the removal
+    /// of an issue, would leave the old person hashes in the file for anyone who holds it. The setting is
+    /// per connection, so it is set on every one.
+    /// </summary>
     private static async Task<SqliteConnection> OpenAsync(string connectionString, CancellationToken cancellationToken)
     {
         var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
+        if (!IsReadOnly(connectionString))
+        {
+            await connection.ExecuteAsync(Command(cancellationToken, "PRAGMA secure_delete = ON;"));
+        }
+
         return connection;
     }
+
+    private static bool IsReadOnly(string connectionString) =>
+        new SqliteConnectionStringBuilder(connectionString).Mode == SqliteOpenMode.ReadOnly;
 
     // Row shapes as stored. Times are text; StoredTime converts them.
     private sealed class IssueRow

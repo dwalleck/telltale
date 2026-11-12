@@ -247,6 +247,22 @@ public sealed class PipelineHarness : IAsyncDisposable
         return Convert.ToHexString(System.Text.Encoding.Latin1.GetBytes(asOfTime.Replace(text, "(as-of time)")));
     }
 
+    /// <summary>
+    /// The bytes of the database file and of any journal file beside it, as text in which every byte is one
+    /// character: what anyone holding the files can read, whatever the tables say. A row SQLite deleted can
+    /// still be in a free page of the file.
+    /// </summary>
+    public async Task<string> ReadDatabaseBytesAsync()
+    {
+        var bytes = new System.Text.StringBuilder();
+        foreach (var path in System.IO.Directory.EnumerateFiles(Directory, "store.db*").Where(path => !path.EndsWith(".lock", StringComparison.Ordinal)))
+        {
+            bytes.Append(System.Text.Encoding.Latin1.GetString(await File.ReadAllBytesAsync(path)));
+        }
+
+        return bytes.ToString();
+    }
+
     /// <summary>Runs a statement against the store with a writable connection, as the owner could from any SQLite client.</summary>
     public async Task ExecuteAsync(string sql)
     {

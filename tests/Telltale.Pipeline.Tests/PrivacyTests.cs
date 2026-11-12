@@ -120,6 +120,28 @@ public class PrivacyTests
     }
 
     [Test]
+    public async Task A_store_that_held_issue_keys_holds_none_in_its_tables_or_its_bytes_after_the_next_command()
+    {
+        // A store as the version before owner decision D52 left it: the issue table has the key column.
+        await using var pipeline = new PipelineHarness();
+        AddScenario(pipeline.Jira);
+        await pipeline.RunAllAsync(["backfill"]);
+        await pipeline.ExecuteAsync(
+            """
+            ALTER TABLE issue ADD COLUMN issue_key TEXT NULL;
+            UPDATE issue SET issue_key = 'FAKE-' || substr(issue_id, -1);
+            DELETE FROM schema_migration WHERE name = '0007_drop_issue_key.sql';
+            """);
+        var bytesBefore = await pipeline.ReadDatabaseBytesAsync();
+
+        await pipeline.RunAllAsync(["derive"]);
+
+        await Assert.That(bytesBefore).Contains("FAKE-1");
+        await Assert.That(await pipeline.QueryAsync<string>("SELECT name FROM pragma_table_info('issue') WHERE name LIKE '%key%';")).IsEmpty();
+        await Assert.That(await pipeline.ReadDatabaseBytesAsync()).DoesNotContain("FAKE-");
+    }
+
+    [Test]
     public async Task No_secret_reaches_any_file_or_the_console()
     {
         await using var pipeline = new PipelineHarness();

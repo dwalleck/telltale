@@ -1,4 +1,5 @@
 using System.Net;
+using Telltale.Core.Identity;
 using Telltale.Core.Secrets;
 using Telltale.Pipeline.Tests.Harness;
 using static Telltale.Pipeline.Tests.Harness.TeamTime;
@@ -203,6 +204,7 @@ public class BackfillRebuildTests
             .Moved(Local(2026, 1, 21, 9), Workflow.Development);
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
         var before = RowsOf(kept, await pipeline.ReadStoreContentAsync());
+        var bytesBefore = await pipeline.ReadDatabaseBytesAsync();
 
         pipeline.Jira.Delete(deleted);
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
@@ -215,6 +217,11 @@ public class BackfillRebuildTests
         await Assert.That(before).Matches($"(?m)^{kept.Id} \\| .* \\| [0-9a-f]{{64}} \\| .*$");
         await Assert.That(RowsOf(kept, store)).IsEqualTo(before);
         await Assert.That(store).DoesNotContain(pipeline.Jira.StoredRowOf("FAKE-2"));
+
+        // Gone from the file too, not only from the tables: a deleted row must not stay readable in a free page.
+        var hashOfTheDeletedIssuesAssignee = IdentityHash.Of(People.Two.AccountId, PipelineHarness.HashingSalt);
+        await Assert.That(bytesBefore).Contains(hashOfTheDeletedIssuesAssignee);
+        await Assert.That(await pipeline.ReadDatabaseBytesAsync()).DoesNotContain(hashOfTheDeletedIssuesAssignee);
 
         static string RowsOf(FakeIssue issue, string store) =>
             string.Join('\n', store.Split('\n').Where(row => row.Contains(issue.Id, StringComparison.Ordinal)));
@@ -276,6 +283,7 @@ public class BackfillRebuildTests
         BuildBoard(resalted.Jira);
         await resalted.RunAllAsync(["backfill"], ["derive"]);
         var underTheOldSalt = await resalted.ReadStoreContentAsync();
+        var bytesUnderTheOldSalt = await resalted.ReadDatabaseBytesAsync();
         resalted.Jira.Delete(resalted.Jira.Issues[1]);
         resalted.Secrets[SecretName.HashingSalt] = NewSalt;
         await resalted.RunAllAsync(["backfill"], ["derive"]);
@@ -296,6 +304,13 @@ public class BackfillRebuildTests
         await Assert.That(underTheOldSalt).Contains(resalted.Jira.StoredRowOf("FAKE-2"));
         await Assert.That(store).IsNotEqualTo(await oldSalt.ReadStoreContentAsync());
         await Assert.That(store).IsEqualTo(await fresh.ReadStoreContentAsync());
+
+        // The file holds no hash under the old salt either, nor the old salt's fingerprint: the rows a
+        // backfill deletes must not stay readable in the file's free pages.
+        string[] underOldSalt = [.. People.Team.Take(2).Select(person => IdentityHash.Of(person.AccountId, PipelineHarness.HashingSalt)), IdentityHash.SaltFingerprint(PipelineHarness.HashingSalt)];
+        var bytes = await resalted.ReadDatabaseBytesAsync();
+        await Assert.That(underOldSalt.Where(hash => !bytesUnderTheOldSalt.Contains(hash, StringComparison.Ordinal))).IsEmpty();
+        await Assert.That(underOldSalt.Where(hash => bytes.Contains(hash, StringComparison.Ordinal))).IsEmpty();
 
         static void BuildBoard(FakeJira jira)
         {
