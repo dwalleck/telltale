@@ -24,6 +24,26 @@ public class RealJiraCollectionTests
     }
 
     [Test]
+    public async Task An_issue_met_again_on_a_later_search_page_is_stored_once_and_its_history_is_asked_for_once()
+    {
+        // The search is ordered by update time, so an issue updated while it is being paged comes round again.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.SearchPageSize = 2;
+        pipeline.Jira.RepeatsIssueOnNextPage = true;
+        AddSprint41(pipeline.Jira);
+        AddDeliveredIssues(pipeline.Jira, count: 3);
+
+        await pipeline.RunAllAsync(["run", "--sprint", "41"]);
+
+        await Assert.That(pipeline.Jira.SearchAnswers[0]).IsEquivalentTo(new[] { "FAKE-1", "FAKE-2", "FAKE-2", "FAKE-3" }, TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        var changelogRequest = pipeline.Jira.Handler.Requests.Single(request => request.Path == "/rest/api/3/changelog/bulkfetch");
+        using var body = System.Text.Json.JsonDocument.Parse(changelogRequest.Body);
+        var askedFor = body.RootElement.GetProperty("issueIdsOrKeys").EnumerateArray().Select(id => id.GetString()!).ToList();
+        await Assert.That(askedFor).IsEquivalentTo(pipeline.Jira.Issues.Select(issue => issue.Id));
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 3\n");
+    }
+
+    [Test]
     public async Task Epics_and_sub_tasks_that_fill_search_pages_do_not_stop_the_run_or_hide_the_issues_after_them()
     {
         // Ticket 02's review, finding 5: out-of-scope issues take room on a page. The first page holds none but them.

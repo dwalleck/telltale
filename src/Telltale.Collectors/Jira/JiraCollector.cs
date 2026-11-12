@@ -215,10 +215,12 @@ public sealed class JiraCollector
             ["fields"] = new JsonArray("issuetype", "status", "resolution", "assignee", "created", "updated", _config.SprintFieldId, _config.StoryPointFieldId),
         };
 
-        var issues = new List<RawIssue>();
-        var outOfScopeIssueIds = new List<string>();
-        await ForEachPageAsync(jira, "rest/api/3/search/jql", body, "issue search", page => ParseIssues(page, salt, issues, outOfScopeIssueIds), cancellationToken);
-        return (issues, outOfScopeIssueIds);
+        // By issue ID, the issue as it was last seen, or null when it was out of scope then. The search is
+        // ordered by update time, so an issue updated while the pages are read is met again on a later page;
+        // the later sighting is the newer one.
+        var seen = new Dictionary<string, RawIssue?>(StringComparer.Ordinal);
+        await ForEachPageAsync(jira, "rest/api/3/search/jql", body, "issue search", page => ParseIssues(page, salt, seen), cancellationToken);
+        return ([.. seen.Values.OfType<RawIssue>()], [.. seen.Where(issue => issue.Value is null).Select(issue => issue.Key)]);
     }
 
     /// <summary>
@@ -227,20 +229,21 @@ public sealed class JiraCollector
     /// appear in no figure, and a field of theirs in an unknown shape cannot stop the run. Only their ID is
     /// read, so the store can delete an issue it holds from the time before it was converted (owner decision D13).
     /// </summary>
-    private void ParseIssues(JsonElement page, string salt, List<RawIssue> issues, List<string> outOfScopeIssueIds)
+    private void ParseIssues(JsonElement page, string salt, Dictionary<string, RawIssue?> seen)
     {
         foreach (var issue in page.GetProperty("issues").EnumerateArray())
         {
             var fields = issue.GetProperty("fields");
             var issueType = fields.GetProperty("issuetype");
+            var issueId = Text(issue, "id");
             if (!IsInScope(issueType))
             {
-                outOfScopeIssueIds.Add(Text(issue, "id"));
+                seen[issueId] = null;
                 continue;
             }
 
-            issues.Add(new RawIssue(
-                Text(issue, "id"),
+            seen[issueId] = new RawIssue(
+                issueId,
                 Text(issue, "key"),
                 Text(issueType, "id"),
                 JiraTime.Parse(fields.GetProperty("created")),
@@ -249,7 +252,7 @@ public sealed class JiraCollector
                 Optional(fields, _config.StoryPointFieldId)?.GetDouble(),
                 Optional(fields, "assignee") is { } assignee ? IdentityHash.Of(Text(assignee, "accountId"), salt) : null,
                 JiraTime.Parse(fields.GetProperty("updated")),
-                Optional(fields, _config.SprintFieldId) is { } sprints ? SprintIds(sprints) : ""));
+                Optional(fields, _config.SprintFieldId) is { } sprints ? SprintIds(sprints) : "");
         }
     }
 

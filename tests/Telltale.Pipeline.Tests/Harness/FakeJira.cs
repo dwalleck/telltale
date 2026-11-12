@@ -275,6 +275,9 @@ public sealed partial class FakeJira
     /// </summary>
     public int SearchPageSize { get; set; } = 1000;
 
+    /// <summary>When set, each search page after the first starts with the last issue of the page before, again.</summary>
+    public bool RepeatsIssueOnNextPage { get; set; }
+
     /// <summary>The most sprints one page of the board's sprint list holds. The rest comes when asked for with <c>startAt</c>.</summary>
     public int SprintPageSize { get; set; } = 50;
 
@@ -494,6 +497,14 @@ public sealed partial class FakeJira
         }
 
         var served = found.Skip(offset).Take(SearchPageSize).ToList();
+        var reached = offset + served.Count;
+
+        // An issue updated while the search is being paged moves towards the end and is met again.
+        if (RepeatsIssueOnNextPage && offset > 0)
+        {
+            served.Insert(0, found[offset - 1]);
+        }
+
         lock (_gate)
         {
             _searchAnswers[answer] = [.. _searchAnswers[answer], .. served.Select(issue => issue.Key)];
@@ -525,7 +536,6 @@ public sealed partial class FakeJira
         }
 
         var page = new JsonObject { ["issues"] = issues };
-        var reached = offset + served.Count;
         if (reached < found.Count)
         {
             var nextToken = NextPageToken("SEARCH");
