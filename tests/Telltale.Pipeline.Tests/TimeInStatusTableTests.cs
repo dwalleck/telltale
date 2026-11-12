@@ -362,6 +362,49 @@ public class TimeInStatusTableTests
     }
 
     [Test]
+    public async Task Sprint_changes_stored_as_jira_wrote_them_are_rewritten_in_the_stored_form_by_the_next_command()
+    {
+        // A store filled before Sprint changes were normalised holds "41, 42". A change is never written twice,
+        // so nothing but a migration would ever correct it.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development)
+            .InSprints(41)
+            .SprintsChanged(Local(2026, 1, 19, 10), 41, 42);
+        await pipeline.RunAllAsync(["backfill"]);
+        await pipeline.ExecuteAsync(
+            """
+            UPDATE change SET from_value = ' 41', to_value = '41, 42' WHERE field = 'sprint';
+            DELETE FROM schema_migration WHERE name = '0005_sprint_change_form.sql';
+            """);
+
+        await pipeline.RunAllAsync(["derive"]);
+
+        var changes = await pipeline.QueryAsync<(string From, string To)>("SELECT from_value, to_value FROM change WHERE field = 'sprint';");
+        await Assert.That(changes).IsEquivalentTo(new[] { ("41", "41,42") });
+    }
+
+    [Test]
+    public async Task The_migration_of_sprint_changes_leaves_status_changes_and_empty_values_as_they_are()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9))
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .SprintsChanged(Local(2026, 1, 7, 9), 41)
+            .SprintsChanged(Local(2026, 1, 8, 9));
+        await pipeline.RunAllAsync(["backfill"]);
+        var before = await pipeline.QueryAsync<(string Field, string From, string To)>("SELECT field, from_value, to_value FROM change ORDER BY history_id;");
+        await pipeline.ExecuteAsync("DELETE FROM schema_migration WHERE name = '0005_sprint_change_form.sql';");
+
+        await pipeline.RunAllAsync(["derive"]);
+
+        var after = await pipeline.QueryAsync<(string Field, string From, string To)>("SELECT field, from_value, to_value FROM change ORDER BY history_id;");
+        await Assert.That(before).IsEquivalentTo(new[] { ("status", Workflow.New.Id, Workflow.Development.Id), ("sprint", "", "41"), ("sprint", "41", "") }, CollectionOrdering.Matching);
+        await Assert.That(after).IsEquivalentTo(before, CollectionOrdering.Matching);
+    }
+
+    [Test]
     public async Task White_space_of_any_kind_in_a_sprint_change_is_not_stored()
     {
         // A no-break space and a tab around the IDs: accepted as before, and gone from what is stored.
