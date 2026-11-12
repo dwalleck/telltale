@@ -28,11 +28,16 @@ public class BackfillRebuildTests
         pipeline.Jira.Delete(deleted);
         await pipeline.RunAllAsync(["sync"], ["derive"], ["report", "--sprint", "42"]);
         var afterSync = await pipeline.ReadReportAsync(42);
+        var storeAfterSync = await pipeline.ReadStoreContentAsync();
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "42"]);
 
         await Assert.That(beforeTheDeletion).Contains("\nDelivered issues: 2\n");
         await Assert.That(afterSync).Contains("\nDelivered issues: 2\n");
         await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+
+        // Not only uncounted: no row of the issue is left, raw or derived.
+        await Assert.That(storeAfterSync).Contains("FAKE-2");
+        await Assert.That(await pipeline.ReadStoreContentAsync()).DoesNotContain("FAKE-2");
     }
 
     [Test]
@@ -204,6 +209,7 @@ public class BackfillRebuildTests
         var store = await pipeline.ReadStoreContentAsync();
         await Assert.That(before).Contains("FAKE-1");
         await Assert.That(before.Split('\n')).Count().IsGreaterThanOrEqualTo(4);
+        await Assert.That(before).Matches("(?m)^.*FAKE-1.* \\| [0-9a-f]{64} \\| .*$");
         await Assert.That(RowsOf(kept, store)).IsEqualTo(before);
         await Assert.That(store).DoesNotContain("FAKE-2");
 
@@ -315,6 +321,7 @@ public class BackfillRebuildTests
             .Moved(Local(2026, 1, 22, 9), Workflow.Done);
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
         var before = await pipeline.ReadReportAsync(41);
+        var storeBefore = await pipeline.ReadStoreContentAsync();
 
         pipeline.Config["jira"]!["backfillStart"] = "2026-01-15";
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"], ["report", "--sprint", "42"]);
@@ -322,6 +329,8 @@ public class BackfillRebuildTests
         await Assert.That(before).Contains("\nDelivered issues: 1\n");
         await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 0\n");
         await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(storeBefore).Contains("FAKE-1");
+        await Assert.That(await pipeline.ReadStoreContentAsync()).DoesNotContain("FAKE-1");
     }
 
     /// <summary>Sprint 41 (5 to 19 January 2026) and sprint 42 (19 January to 2 February), both completed.</summary>
