@@ -6,12 +6,12 @@ filter: '/*/*/ConfigurationAndSecretsTests/*'
 file: src/Telltale.Core/Derive/Derivation.cs
 expectedMatches: 1
 find: |-
-  .SelectMany(issue => statusChanges[issue.IssueId].SelectMany(change => new[] { change.FromStatusId, change.ToStatusId }).Append(issue.StatusId))
+  .SelectMany(issue => timelines[issue.IssueId].Entries.Select(entry => entry.StatusId).Append(issue.StatusId))
 replace: |-
-  .SelectMany(issue => statusChanges[issue.IssueId].SelectMany(change => new[] { change.ToStatusId }).Append(issue.StatusId))
+  .SelectMany(issue => timelines[issue.IssueId].Intervals.Select(interval => interval.StatusId).Append(issue.StatusId))
 ---
-# xt-m1: the role check reads only the status a change moves to
+# xt-m1: the role check reads the status intervals, not the timeline's entries
 
-Claim (cross-ticket finding 1): a status with no role that a change names only as the status moved from still stops the run.
-The test `A_status_with_no_role_that_a_change_only_names_as_the_status_moved_from_stops_the_run_and_is_named` was written after the fix, so it could not run red first.
-- Verified 2026-11-12 at da6ced9: red, 1 failed of 47 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
+Claim (cross-ticket finding 1, review finding 3): the role check covers every entry of each issue's timeline, so a status with no role that was entered and left at the same instant (mid-history, or at creation) stops the run and is named.
+Expected red: `A_status_with_no_role_that_an_issue_entered_and_left_at_the_same_instant_stops_the_run_and_is_named` and `A_status_with_no_role_that_an_issue_was_created_in_and_left_at_that_instant_stops_the_run_and_is_named`. The first ran red before the fix; the second was written after it.
+The other direction (a later change's "from" the timeline was not in does not stop the run) ran red first: `A_status_with_no_role_that_a_later_change_only_names_as_the_status_moved_from_does_not_stop_the_run`.

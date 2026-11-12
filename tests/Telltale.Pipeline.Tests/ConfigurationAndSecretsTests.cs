@@ -314,15 +314,35 @@ public class ConfigurationAndSecretsTests
     }
 
     [Test]
-    public async Task A_status_with_no_role_that_a_change_only_names_as_the_status_moved_from_stops_the_run_and_is_named()
+    public async Task A_status_with_no_role_that_a_later_change_only_names_as_the_status_moved_from_does_not_stop_the_run()
     {
         // The changelog says the issue left Review, though no change ever put it there (history Jira lost).
+        // The timeline follows where each change went, so no rule reads Review: it is an anomaly, not a status the issue was in.
         await using var pipeline = new PipelineHarness();
         AddOneSprint(pipeline.Jira);
         pipeline.Config["statusRoles"]!.AsObject().Remove(Workflow.Review.Id);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .NowIn(Workflow.Review)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
+    }
+
+    [Test]
+    public async Task A_status_with_no_role_that_an_issue_was_created_in_and_left_at_that_instant_stops_the_run_and_is_named()
+    {
+        // Only the first change's "from" says which status the issue was created in. It spent no time there,
+        // but it is the timeline's first entry, which the reopen rule reads.
+        await using var pipeline = new PipelineHarness();
+        AddOneSprint(pipeline.Jira);
+        pipeline.Config["statusRoles"]!.AsObject().Remove(Workflow.Review.Id);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9), createdIn: Workflow.Review)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 9), Workflow.Done);
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");

@@ -10,7 +10,7 @@ namespace Telltale.Core.Derive;
 /// configured board, status roles, abandoned resolutions and business calendar, and the as-of time, so changing a definition means rerunning it (ADR-0002).
 /// </summary>
 /// <remarks>
-/// Throws <see cref="UserFacingException"/> when an issue is in, or moved from or to, a status that has no configured role, when
+/// Throws <see cref="UserFacingException"/> when an issue is in, or its timeline entered, a status that has no configured role, when
 /// a closed sprint of the board has neither a completion time nor a planned end, or when an issue was stored
 /// before its Sprint field was fetched.
 /// </remarks>
@@ -45,11 +45,16 @@ public static class Derivation
 
         // Every status has exactly one role. Guessing one for a status the configuration does not mention
         // (a new status, a mistyped ID) would quietly move issues in or out of the delivered count. Checked
-        // before anything reads a role, over every status an issue is in or moved from or to: a status entered
-        // and left at the same instant has no interval, and is still a move the delivery and reopen rules read.
+        // before anything reads a role, over exactly what the rules read: the status each issue is in now and
+        // every entry of its timeline. The entries, not the intervals: a status entered and left at the same
+        // instant has no interval, and is still a move the delivery and reopen rules read. A later change's
+        // "from" that the timeline was not in is an anomaly, and no rule reads it.
+        var timelines = raw.Issues.ToDictionary(
+            issue => issue.IssueId,
+            issue => StatusTimeline.Build(issue.Created, issue.StatusId, statusChanges[issue.IssueId]),
+            StringComparer.Ordinal);
         var withoutRole = raw.Issues
-            .SelectMany(issue => statusChanges[issue.IssueId].SelectMany(change => new[] { change.FromStatusId, change.ToStatusId }).Append(issue.StatusId))
-            .OfType<string>()
+            .SelectMany(issue => timelines[issue.IssueId].Entries.Select(entry => entry.StatusId).Append(issue.StatusId))
             .Distinct(StringComparer.Ordinal)
             .Where(statusId => roles.RoleOf(statusId) is null)
             .Order(StringComparer.Ordinal)
@@ -69,7 +74,7 @@ public static class Derivation
 
         foreach (var issue in raw.Issues)
         {
-            var timeline = StatusTimeline.Build(issue.Created, issue.StatusId, statusChanges[issue.IssueId]);
+            var timeline = timelines[issue.IssueId];
             intervals.AddRange(timeline.Intervals.Select(interval => new IssueStatusInterval(issue.IssueId, interval.StatusId, interval.Start, interval.End)));
 
             var reopens = Cycles.ReopenCount(timeline.Entries, roles);
