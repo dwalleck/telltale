@@ -23,7 +23,7 @@ WITH ranked AS (
            COUNT(*)     OVER (PARTITION BY c.delivery_sprint_id, c.point_bucket)                          AS n
     FROM issue_cycle c
     LEFT JOIN issue i ON i.issue_id = c.issue_id
-    WHERE c.delivered = 1 AND c.delivery_sprint_id IS NOT NULL AND c.business_days IS NOT NULL
+    WHERE c.delivered = 1 AND c.business_days IS NOT NULL
 ),
 bucket AS (
     SELECT sprint_id,
@@ -46,4 +46,5 @@ SELECT b.sprint_id,
        CASE WHEN t.suppressed = 0 AND b.assignees >= 3 THEN b.p85_calendar_days END    AS p85_calendar_days,
        CASE WHEN t.suppressed = 0 AND b.assignees >= 3 THEN 0 ELSE 1 END               AS suppressed
 FROM bucket b
+-- An inner join: an issue delivered between sprints has no sprint, so it is in no row.
 JOIN sprint_team t ON t.sprint_id = b.sprint_id;

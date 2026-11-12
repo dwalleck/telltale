@@ -261,10 +261,16 @@ public class RealDeliveriesTests
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
         var story = FinishedInSprint(pipeline.Jira, "FAKE-1");
+
+        // Five people with an issue each in the sprint, so its delivered count is shown (SuppressionTests).
+        var team = string.Join(",\n", People.Team.Select((person, index) => $$"""
+              {"id":"90090{{index}}","key":"FAKE-90{{index}}","fields":{"issuetype":{"id":"800001","subtask":false,"hierarchyLevel":0},"created":"2026-01-02T15:00:00.000+0000","updated":"2026-01-02T15:00:00.000+0000","status":{"id":"{{Workflow.New.Id}}"},"assignee":{"accountId":"{{person.AccountId}}"},"{{FakeJira.SprintFieldId}}":[{"id":41}] } }
+            """));
         pipeline.Jira.Handler.Override(HttpMethod.Post, "/rest/api/3/search/jql", _ => true, StubHttpHandler.Json($$"""
             {"issues":[
               {"id":"{{story.Id}}","key":"FAKE-1","fields":{"issuetype":{"id":"800001","subtask":false,"hierarchyLevel":0},"created":"2026-01-06T15:00:00.000+0000","updated":"2026-01-09T21:00:00.000+0000","status":{"id":"{{Workflow.Done.Id}}"} } },
-              {"id":"900099","key":null,"fields":{"issuetype":{"id":"800003","subtask":false,"hierarchyLevel":1},"created":"synthetic text that is not a time","status":null,"assignee":{} } }
+              {"id":"900099","key":null,"fields":{"issuetype":{"id":"800003","subtask":false,"hierarchyLevel":1},"created":"synthetic text that is not a time","status":null,"assignee":{} } },
+            {{team}}
             ]}
             """));
 
@@ -272,11 +278,7 @@ public class RealDeliveriesTests
 
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
-
-        // The answer above holds one story and nobody's name, so the sprint's figures are withheld. The story
-        // is still counted: a withheld row keeps its issue count.
-        var counted = await pipeline.QueryAsync<long>("SELECT issue_count FROM cycle_time_per_sprint_and_bucket WHERE sprint_id = '41';");
-        await Assert.That(counted).IsEquivalentTo(new[] { 1L });
+        await Assert.That(await DeliveredPerSprintAsync(pipeline)).IsEquivalentTo(new[] { ("41", 1L) }, CollectionOrdering.Matching);
     }
 
     [Test]

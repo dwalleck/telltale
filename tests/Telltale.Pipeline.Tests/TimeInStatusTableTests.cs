@@ -121,71 +121,93 @@ public class TimeInStatusTableTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // Board order is the order the configuration lists the statuses in. Here Blocked sits before Development,
         // which is neither the order of the status IDs nor the order Jira lists the statuses in.
         FakeStatus[] boardOrder = [Workflow.New, Workflow.Approved, Workflow.Committed, Workflow.Blocked, Workflow.Development, Workflow.Review, Workflow.QE, Workflow.Done, Workflow.Shipped];
         pipeline.Config["statusRoles"] = new JsonObject(boardOrder.Select(status => KeyValuePair.Create(status.Id, (JsonNode?)status.Role)));
 
+        // Five issues, one per person, so each row's median is over exactly the values listed here.
         // Committed 1 day; Development 1 day, Blocked 1 day, Development 1 more day.
-        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Committed).InSprints(41)
+        InCommitted(People.One)
             .Moved(Local(2026, 1, 6, 9), Workflow.Development)
             .Moved(Local(2026, 1, 7, 9), Workflow.Blocked)
             .Moved(Local(2026, 1, 8, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 9), Workflow.Done);
 
         // Committed 2 days; Development 1 day.
-        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 2, 9), createdIn: Workflow.Committed).InSprints(41)
+        InCommitted(People.Two)
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 8, 9), Workflow.Done);
 
         // Left Committed the moment the sprint started, so no time in it; Development 4 days.
-        pipeline.Jira.AddIssue("FAKE-3", Local(2026, 1, 2, 9), createdIn: Workflow.Committed).InSprints(41)
+        InCommitted(People.Three)
             .Moved(Local(2026, 1, 5, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 9), Workflow.Done);
 
+        // Committed 3 days; Blocked 1 day; Development Friday 09:00 to Monday 09:00, 1 business day.
+        InCommitted(People.Four)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Blocked)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 12, 9), Workflow.Done);
+
+        // Committed 4 days; Blocked Friday 09:00 to Tuesday 09:00, 2 business days; Development 3 days.
+        InCommitted(People.Five)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Blocked)
+            .Moved(Local(2026, 1, 13, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 16, 9), Workflow.Done);
+
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        // Committed: 1 and 2, median 1.5. Blocked: 1. Development: 2, 1 and 4, median 2. Nobody was in New, Approved, Review or QE.
+        // Committed: 1, 2, 3 and 4, median 2.5. Blocked: 1, 1 and 2, median 1. Development: 2, 1, 4, 1 and 3, median 2.
+        // Nobody was in New, Approved, Review or QE.
         await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(
-            new[] { "| Fake Committed | 10 | 1.5 |", "| Fake Blocked | 5 | 1.0 |", "| Fake Development | 15 | 2.0 |" }, CollectionOrdering.Matching);
+            new[] { "| Fake Committed | 4 | 2.5 |", "| Fake Blocked | 3 | 1.0 |", "| Fake Development | 5 | 2.0 |" }, CollectionOrdering.Matching);
 
         // The same figures from the metric view with ad hoc SQL.
         var rows = await pipeline.QueryAsync<(string StatusId, long IssueCount, double MedianBusinessDays)>(
             "SELECT status_id, issue_count, ROUND(median_business_days, 6) FROM time_in_status_per_sprint WHERE sprint_id = '41' ORDER BY board_position;");
         await Assert.That(rows).IsEquivalentTo(
-            new[] { (Workflow.Committed.Id, 10L, 1.5), (Workflow.Blocked.Id, 5L, 1.0), (Workflow.Development.Id, 15L, 2.0) }, CollectionOrdering.Matching);
+            new[] { (Workflow.Committed.Id, 4L, 2.5), (Workflow.Blocked.Id, 3L, 1.0), (Workflow.Development.Id, 5L, 2.0) }, CollectionOrdering.Matching);
+
+        FakeIssue InCommitted(FakePerson person) =>
+            pipeline.Jira.AddIssue($"FAKE-{person.AccountId[^1]}", Local(2026, 1, 2, 9), createdIn: Workflow.Committed).InSprints(41).AssignedTo(person);
     }
 
     [Test]
     public async Task An_issue_that_spent_no_business_time_in_a_status_does_not_count_toward_it()
     {
-        // Owner decision D21. Without it the weekend-only issue would make the Review row "2 issues, median 0.5".
+        // Owner decision D21. Without it the weekend-only issue would make the Review row "4 issues".
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
         // In Review only from Saturday 09:00 to Sunday 09:00: a calendar day, and no business time.
         // Development before that: 15 hours of Monday and Tuesday to Friday, 4.625 business days.
-        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41)
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41).AssignedTo(People.One)
             .Moved(Local(2026, 1, 10, 9), Workflow.Review)
             .Moved(Local(2026, 1, 11, 9), Workflow.Done);
 
-        // Development from the sprint's start to Tuesday 09:00 (1 day), Review to Wednesday 09:00 (1 day).
-        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41)
-            .Moved(Local(2026, 1, 6, 9), Workflow.Review)
+        // Three people's issues: Development from the sprint's start to Tuesday 09:00 (1 day), Review to Wednesday 09:00 (1 day).
+        foreach (var (key, person) in new[] { ("FAKE-2", People.Two), ("FAKE-3", People.Three), ("FAKE-4", People.Four) })
+        {
+            pipeline.Jira.AddIssue(key, Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41).AssignedTo(person)
+                .Moved(Local(2026, 1, 6, 9), Workflow.Review)
+                .Moved(Local(2026, 1, 7, 9), Workflow.Done);
+        }
+
+        // The fifth person: Development to Wednesday 09:00 (2 days), never in Review.
+        pipeline.Jira.AddIssue("FAKE-5", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41).AssignedTo(People.Five)
             .Moved(Local(2026, 1, 7, 9), Workflow.Done);
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        // Development: 4.625 and 1, median 2.8125. Review: FAKE-2 alone.
+        // Development: 4.625, 1, 1, 1 and 2, median 1. Review: the three issues that were there on a business day.
         await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(
-            new[] { "| Fake Development | 10 | 2.8 |", "| Fake Review | 5 | 1.0 |" }, CollectionOrdering.Matching);
+            new[] { "| Fake Development | 5 | 1.0 |", "| Fake Review | 3 | 1.0 |" }, CollectionOrdering.Matching);
         var rows = await pipeline.QueryAsync<(string StatusId, long IssueCount, double MedianBusinessDays)>(
             "SELECT status_id, issue_count, ROUND(median_business_days, 6) FROM time_in_status_per_sprint WHERE sprint_id = '41' ORDER BY board_position;");
         await Assert.That(rows).IsEquivalentTo(
-            new[] { (Workflow.Development.Id, 10L, 2.8125), (Workflow.Review.Id, 5L, 1.0) }, CollectionOrdering.Matching);
+            new[] { (Workflow.Development.Id, 5L, 1.0), (Workflow.Review.Id, 3L, 1.0) }, CollectionOrdering.Matching);
     }
 
     [Test]

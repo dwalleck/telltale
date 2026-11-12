@@ -226,10 +226,11 @@ public class CycleTimeTests
 
     // Median: the middle value, or the mean of the two middle values. P85: nearest rank, the smallest value
     // with at least 85% of the values at or below it. Expected figures are worked by hand from those rules.
+    // Every issue has its own assignee, so each case ranks exactly the values listed. A bucket of one or two
+    // values is never shown (three assignees are needed), so three values is the smallest case.
     [Test]
-    [Arguments(new[] { 3.0 }, 3.0, 3.0)]
-    [Arguments(new[] { 3.0, 1.0 }, 2.0, 3.0)]
     [Arguments(new[] { 4.0, 2.0, 2.0 }, 2.0, 4.0)]
+    [Arguments(new[] { 3.0, 1.0, 2.0 }, 2.0, 3.0)]
     [Arguments(new[] { 3.0, 2.0, 1.0, 2.0 }, 2.0, 3.0)]
     [Arguments(new[] { 4.0, 1.0, 3.0, 2.5 }, 2.75, 4.0)]
     [Arguments(new[] { 1.0, 4.0, 1.0, 1.0, 1.0, 1.0, 1.0 }, 1.0, 1.0)]
@@ -238,14 +239,14 @@ public class CycleTimeTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.ServeEachIssueOncePer(People.Team);
+        pipeline.Jira.AddIdleTeam(41);
 
         // Every cycle ends on Friday 16 January at noon and starts at most four days earlier, so none
         // touches a weekend and its business days equal its calendar days.
         var done = Local(2026, 1, 16, 12);
-        foreach (var (days, number) in cycleDays.Select((days, index) => (days, index + 1)))
+        foreach (var (days, index) in cycleDays.Select((days, index) => (days, index)))
         {
-            pipeline.Jira.AddIssue($"FAKE-{number}", Local(2026, 1, 6, 9)).Estimated(5)
+            pipeline.Jira.AddIssue($"FAKE-{index + 1}", Local(2026, 1, 6, 9)).Estimated(5).AssignedTo(People.All[index])
                 .Moved(done.AddDays(-days), Workflow.Development)
                 .Moved(done, Workflow.Done);
         }
@@ -254,7 +255,7 @@ public class CycleTimeTests
 
         var rows = await CycleTimeRowsAsync(pipeline, 41);
         await Assert.That(rows.Count).IsEqualTo(1);
-        await Assert.That(rows[0].IssueCount).IsEqualTo(cycleDays.Length * People.Team.Count);
+        await Assert.That(rows[0].IssueCount).IsEqualTo(cycleDays.Length);
         await Assert.That(rows[0].MedianBusinessDays!.Value).IsEqualTo(median).Within(0.000001);
         await Assert.That(rows[0].P85BusinessDays!.Value).IsEqualTo(p85).Within(0.000001);
         await Assert.That(rows[0].MedianCalendarDays!.Value).IsEqualTo(median).Within(0.000001);
@@ -266,60 +267,69 @@ public class CycleTimeTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.ServeEachIssueOncePer(People.Team);
 
-        // Bucket 13: one issue, Tuesday to Thursday.
-        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).Estimated(13)
-            .Moved(Local(2026, 1, 13, 9), Workflow.Development)
-            .Moved(Local(2026, 1, 15, 9), Workflow.Done);
+        // Bucket 13: three issues, each Tuesday to Thursday.
+        foreach (var (key, person) in new[] { ("FAKE-1", People.Four), ("FAKE-2", People.Five), ("FAKE-3", People.One) })
+        {
+            pipeline.Jira.AddIssue(key, Local(2026, 1, 6, 9)).Estimated(13).AssignedTo(person)
+                .Moved(Local(2026, 1, 13, 9), Workflow.Development)
+                .Moved(Local(2026, 1, 15, 9), Workflow.Done);
+        }
 
-        // Bucket 3: two issues. Friday noon to Monday noon is 1 business day and 3 calendar days;
-        // Monday to Wednesday is 2 and 2. So the longer cycle in business days is the shorter in calendar days.
-        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 6, 9)).Estimated(3)
+        // Bucket 3: three issues. Friday noon to Monday noon is 1 business day and 3 calendar days; Monday to
+        // Wednesday is 2 and 2; Tuesday to Friday is 3 and 3. So the shortest cycle in business days is not
+        // the shortest in calendar days: business days are 1, 2, 3 and calendar days are 2, 3, 3.
+        pipeline.Jira.AddIssue("FAKE-4", Local(2026, 1, 6, 9)).Estimated(3).AssignedTo(People.One)
             .Moved(Local(2026, 1, 9, 12), Workflow.Development)
             .Moved(Local(2026, 1, 12, 12), Workflow.Done);
-        pipeline.Jira.AddIssue("FAKE-3", Local(2026, 1, 6, 9)).Estimated(3)
+        pipeline.Jira.AddIssue("FAKE-5", Local(2026, 1, 6, 9)).Estimated(3).AssignedTo(People.Two)
             .Moved(Local(2026, 1, 12, 9), Workflow.Development)
             .Moved(Local(2026, 1, 14, 9), Workflow.Done);
+        pipeline.Jira.AddIssue("FAKE-6", Local(2026, 1, 6, 9)).Estimated(3).AssignedTo(People.Three)
+            .Moved(Local(2026, 1, 13, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 16, 9), Workflow.Done);
 
-        // No estimate: two issues, 1 day and 3 days.
-        pipeline.Jira.AddIssue("FAKE-4", Local(2026, 1, 6, 9))
-            .Moved(Local(2026, 1, 6, 10), Workflow.Development)
-            .Moved(Local(2026, 1, 7, 10), Workflow.Done);
-        pipeline.Jira.AddIssue("FAKE-5", Local(2026, 1, 6, 9))
-            .Moved(Local(2026, 1, 6, 10), Workflow.Development)
-            .Moved(Local(2026, 1, 9, 10), Workflow.Done);
+        // No estimate: three issues, 1 day, 2 days and 3 days.
+        foreach (var (key, person, day) in new[] { ("FAKE-7", People.Two, 7), ("FAKE-8", People.Three, 8), ("FAKE-9", People.Four, 9) })
+        {
+            pipeline.Jira.AddIssue(key, Local(2026, 1, 6, 9)).AssignedTo(person)
+                .Moved(Local(2026, 1, 6, 10), Workflow.Development)
+                .Moved(Local(2026, 1, day, 10), Workflow.Done);
+        }
 
-        // Bucket 0.5: one issue, half a day.
-        pipeline.Jira.AddIssue("FAKE-6", Local(2026, 1, 6, 9)).Estimated(0.5)
-            .Moved(Local(2026, 1, 8, 9), Workflow.Development)
-            .Moved(Local(2026, 1, 8, 21), Workflow.Done);
+        // Bucket 0.5: three issues, half a day each.
+        foreach (var (key, person) in new[] { ("FAKE-10", People.One), ("FAKE-11", People.Two), ("FAKE-12", People.Three) })
+        {
+            pipeline.Jira.AddIssue(key, Local(2026, 1, 6, 9)).Estimated(0.5).AssignedTo(person)
+                .Moved(Local(2026, 1, 8, 9), Workflow.Development)
+                .Moved(Local(2026, 1, 8, 21), Workflow.Done);
+        }
 
         // In no row of this sprint: delivered without a cycle, delivered in the next sprint, and not delivered.
-        pipeline.Jira.AddIssue("FAKE-7", Local(2026, 1, 6, 9)).Estimated(13)
+        pipeline.Jira.AddIssue("FAKE-13", Local(2026, 1, 6, 9)).Estimated(13)
             .Moved(Local(2026, 1, 8, 9), Workflow.Done);
-        pipeline.Jira.AddIssue("FAKE-8", Local(2026, 1, 6, 9)).Estimated(13)
+        pipeline.Jira.AddIssue("FAKE-14", Local(2026, 1, 6, 9)).Estimated(13)
             .Moved(Local(2026, 1, 14, 9), Workflow.Development)
             .Moved(Local(2026, 1, 21, 9), Workflow.Done);
-        pipeline.Jira.AddIssue("FAKE-9", Local(2026, 1, 6, 9)).Estimated(13)
+        pipeline.Jira.AddIssue("FAKE-15", Local(2026, 1, 6, 9)).Estimated(13)
             .Moved(Local(2026, 1, 7, 9), Workflow.Development);
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
         var report = await pipeline.ReadReportAsync(41);
-        await Assert.That(report).Contains("\nDelivered issues: 35\n");
+        await Assert.That(report).Contains("\nDelivered issues: 13\n");
         await Assert.That(report).Contains(
             TableHeader
-            + "| 0.5 | 5 | 0.5 | 0.5 | 0.5 | 0.5 |\n"
-            + "| 3 | 10 | 1.5 | 2.0 | 2.5 | 3.0 |\n"
-            + "| 13 | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n"
-            + "| unestimated | 10 | 2.0 | 3.0 | 2.0 | 3.0 |\n"
+            + "| 0.5 | 3 | 0.5 | 0.5 | 0.5 | 0.5 |\n"
+            + "| 3 | 3 | 2.0 | 3.0 | 3.0 | 3.0 |\n"
+            + "| 13 | 3 | 2.0 | 2.0 | 2.0 | 2.0 |\n"
+            + "| unestimated | 3 | 2.0 | 3.0 | 2.0 | 3.0 |\n"
             + NextSection);
 
         // The same rows by ad hoc SQL: an unestimated bucket is a null point_bucket.
         var rows = await CycleTimeRowsAsync(pipeline, 41);
         await Assert.That(rows.Select(row => (row.PointBucket, row.IssueCount)))
-            .IsEquivalentTo(new (double?, long)[] { (0.5, 5), (3, 10), (13, 5), (null, 10) }, CollectionOrdering.Matching);
+            .IsEquivalentTo(new (double?, long)[] { (0.5, 3), (3, 3), (13, 3), (null, 3) }, CollectionOrdering.Matching);
     }
 
     [Test]

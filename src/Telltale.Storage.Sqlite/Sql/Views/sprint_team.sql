@@ -12,7 +12,7 @@ WITH sprint_issue AS (
     UNION
     SELECT c.delivery_sprint_id, c.issue_id
     FROM issue_cycle c
-    WHERE c.delivered = 1 AND c.delivery_sprint_id IS NOT NULL
+    WHERE c.delivered = 1
 )
 SELECT w.sprint_id,
        CASE WHEN COUNT(DISTINCT i.assignee_hash) >= 5 THEN 0 ELSE 1 END AS suppressed
