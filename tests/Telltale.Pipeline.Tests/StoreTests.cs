@@ -244,22 +244,25 @@ public class StoreTests
         await store.InitializeAsync();
         var at = Local(2026, 1, 6, 9);
         var reached = new Watermark("synthetic-collector", new CollectionScope("https://example.invalid/", FakeJira.BoardId, FakeJira.ProjectKey, new DateOnly(2025, 1, 1), "status"), UpdatedThrough: at);
-        RawData Batch(string issueId, string salt) => new(
-            Issues: [new RawIssue(issueId, FakeJira.IssueTypeStoryId, at, Workflow.New.Id, ResolutionId: null, StoryPoints: null, AssigneeHash: IdentityHash.Of("fake-account-0001", salt), Updated: at, SprintIds: "")],
-            Changes: [],
-            Sprints: [],
-            Statuses: [])
-        { SaltFingerprint = IdentityHash.SaltFingerprint(salt) };
-        await store.WriteRawAsync(Batch("1", "synthetic-salt-one"), reached);
+        RawBatch Batch(string issueId, string salt, bool replacesEverything = false) => new(
+            new RawData(
+                Issues: [new RawIssue(issueId, FakeJira.IssueTypeStoryId, at, Workflow.New.Id, ResolutionId: null, StoryPoints: null, AssigneeHash: IdentityHash.Of("fake-account-0001", salt), Updated: at, SprintIds: "")],
+                Changes: [],
+                Sprints: [],
+                Statuses: []),
+            reached,
+            IdentityHash.SaltFingerprint(salt))
+        { ReplacesEverything = replacesEverything };
+        await store.WriteRawAsync(Batch("1", "synthetic-salt-one"));
 
-        await Assert.That(async () => await store.WriteRawAsync(Batch("2", "synthetic-salt-two"), reached)).Throws<UserFacingException>().WithMessage(
+        await Assert.That(async () => await store.WriteRawAsync(Batch("2", "synthetic-salt-two"))).Throws<UserFacingException>().WithMessage(
             "The hashing salt in the secret store is not the one the people in the database were hashed with, so one person would count as two. "
             + "Restore the original salt, or run backfill to hash everyone again with this one.");
         await Assert.That(await pipeline.QueryAsync<string>("SELECT issue_id FROM issue;")).IsEquivalentTo(new[] { "1" });
 
         // The same salt is added, and a batch that replaces everything may come under another.
-        await store.WriteRawAsync(Batch("3", "synthetic-salt-one"), reached);
-        await store.ReplaceRawAsync(Batch("4", "synthetic-salt-two"), reached);
+        await store.WriteRawAsync(Batch("3", "synthetic-salt-one"));
+        await store.WriteRawAsync(Batch("4", "synthetic-salt-two", replacesEverything: true));
         await Assert.That(await pipeline.QueryAsync<string>("SELECT issue_id FROM issue;")).IsEquivalentTo(new[] { "4" });
         await Assert.That(await store.ReadSaltFingerprintAsync()).IsEqualTo(IdentityHash.SaltFingerprint("synthetic-salt-two"));
     }

@@ -20,8 +20,8 @@ namespace Telltale.Storage.Sqlite;
 /// <list type="bullet">
 /// <item><c>Sql/Migrations</c>: raw tables. Each script runs once per database, recorded by file name. Never edit one
 /// that has been merged; add a new file. Raw data is costly to refetch, so these tables are never dropped.
-/// Their rows are added and updated by Jira's own IDs (<see cref="WriteRawAsync(RawData, Watermark, CancellationToken)"/>),
-/// except in <see cref="ReplaceRawAsync"/>: a backfill removes every issue, change and sprint and writes what it
+/// Their rows are added and updated by Jira's own IDs (<see cref="WriteRawAsync"/>),
+/// except for a batch with <see cref="RawBatch.ReplacesEverything"/>: a backfill removes every issue, change and sprint and writes what it
 /// fetched in their place, so a row for something that has left Jira does not stay. Statuses are only ever added and updated.</item>
 /// <item><c>Sql/Derived</c>: derived tables. Every rebuild drops what the last one created and runs every script, so a
 /// changed definition needs no migration (ADR-0002). A script only creates; it never drops.</item>
@@ -83,12 +83,6 @@ public sealed class SqliteStore : ITelltaleStore
         }
     }
 
-    public Task WriteRawAsync(RawData batch, Watermark reached, CancellationToken cancellationToken = default) =>
-        WriteRawAsync(batch, reached, replaceAll: false, cancellationToken);
-
-    public Task ReplaceRawAsync(RawData everything, Watermark reached, CancellationToken cancellationToken = default) =>
-        WriteRawAsync(everything, reached, replaceAll: true, cancellationToken);
-
     public async Task<RawCounts> CountRawAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
@@ -97,8 +91,9 @@ public sealed class SqliteStore : ITelltaleStore
             "SELECT (SELECT COUNT(*) FROM issue) AS Issues, (SELECT COUNT(*) FROM sprint) AS Sprints, (SELECT COUNT(*) FROM change) AS Changes;"));
     }
 
-    private async Task WriteRawAsync(RawData batch, Watermark reached, bool replaceAll, CancellationToken cancellationToken)
+    public async Task WriteRawAsync(RawBatch batch, CancellationToken cancellationToken = default)
     {
+        var (rows, reached, replaceAll) = (batch.Rows, batch.Reached, batch.ReplacesEverything);
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
@@ -106,8 +101,8 @@ public sealed class SqliteStore : ITelltaleStore
 
         // A batch added to the stored rows must be hashed with their salt, whoever the caller is: the rows it
         // does not touch keep their hashes, and two salts make one person two. A batch that replaces every
-        // row brings its own salt. A batch that says nothing of a salt brings nobody under another one.
-        if (!replaceAll && batch.SaltFingerprint is not null)
+        // row brings its own salt.
+        if (!replaceAll)
         {
             IdentityHash.RequireSameSalt(hashedWithBefore, batch.SaltFingerprint);
         }
@@ -146,7 +141,7 @@ public sealed class SqliteStore : ITelltaleStore
                 sprint_ids = excluded.sprint_ids;
             """,
             ["@issueId", "@issueTypeId", "@created", "@statusId", "@resolutionId", "@storyPoints", "@assigneeHash", "@updated", "@sprintIds"],
-            batch.Issues.Select(issue => new object?[]
+            rows.Issues.Select(issue => new object?[]
             {
                 issue.IssueId, issue.IssueTypeId, StoredTime.ToStored(issue.Created), issue.StatusId, issue.ResolutionId,
                 issue.StoryPoints, issue.AssigneeHash, StoredTime.ToStored(issue.Updated), issue.SprintIds,
@@ -163,7 +158,7 @@ public sealed class SqliteStore : ITelltaleStore
             ON CONFLICT (history_id, field) DO NOTHING;
             """,
             ["@historyId", "@field", "@issueId", "@at", "@from", "@to"],
-            batch.Changes.Select(change => new object?[] { change.HistoryId, change.Field, change.IssueId, StoredTime.ToStored(change.At), change.From, change.To }),
+            rows.Changes.Select(change => new object?[] { change.HistoryId, change.Field, change.IssueId, StoredTime.ToStored(change.At), change.From, change.To }),
             cancellationToken);
 
         await ExecuteForEachRowAsync(
@@ -181,7 +176,7 @@ public sealed class SqliteStore : ITelltaleStore
                 completed = excluded.completed;
             """,
             ["@sprintId", "@boardId", "@name", "@state", "@started", "@plannedEnd", "@completed"],
-            batch.Sprints.Select(sprint => new object?[]
+            rows.Sprints.Select(sprint => new object?[]
             {
                 sprint.SprintId, sprint.BoardId, sprint.Name, sprint.State,
                 StoredTime.ToStored(sprint.Start), StoredTime.ToStored(sprint.PlannedEnd), StoredTime.ToStored(sprint.Completed),
@@ -197,7 +192,7 @@ public sealed class SqliteStore : ITelltaleStore
             ON CONFLICT (status_id) DO UPDATE SET name = excluded.name, category = excluded.category;
             """,
             ["@statusId", "@name", "@category"],
-            batch.Statuses.Select(status => new object?[] { status.StatusId, status.Name, status.Category }),
+            rows.Statuses.Select(status => new object?[] { status.StatusId, status.Name, status.Category }),
             cancellationToken);
 
         // Set, not raised: a batch that reaches less far (a backfill starting over) leaves a watermark that
@@ -227,7 +222,7 @@ public sealed class SqliteStore : ITelltaleStore
             },
             transaction));
 
-        await RecordSaltAsync(connection, transaction, batch, hashedWithBefore, cancellationToken);
+        await RecordSaltAsync(connection, transaction, batch.SaltFingerprint, hashedWithBefore, cancellationToken);
 
         // What the raw tables hold now, identified. Written with the batch, so the digest is never of anything
         // but the stored rows, and whoever asks whether the raw data changed reads one row.
@@ -252,12 +247,12 @@ public sealed class SqliteStore : ITelltaleStore
     /// <summary>
     /// Records the salt a batch was hashed with, after the batch's rows are written. A batch under another
     /// salt than the store's people were hashed with comes only from a backfill, which replaces every issue
-    /// (<see cref="ReplaceRawAsync"/>), so no row is left with a hash of the old salt. A batch that is added
+    /// (<see cref="RawBatch.ReplacesEverything"/>), so no row is left with a hash of the old salt. A batch that is added
     /// under another salt was refused before anything was written.
     /// </summary>
-    private static async Task RecordSaltAsync(DbConnection connection, DbTransaction transaction, RawData batch, string? hashedWithBefore, CancellationToken cancellationToken)
+    private static async Task RecordSaltAsync(DbConnection connection, DbTransaction transaction, string fingerprint, string? hashedWithBefore, CancellationToken cancellationToken)
     {
-        if (batch.SaltFingerprint is not { } fingerprint || fingerprint == hashedWithBefore)
+        if (fingerprint == hashedWithBefore)
         {
             return;
         }

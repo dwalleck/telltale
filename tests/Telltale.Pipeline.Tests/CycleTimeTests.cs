@@ -422,12 +422,14 @@ public class CycleTimeTests
         // Five people, so the figures are shown. Each has one delivered issue (two days) and one that is not
         // delivered but carries everything else a delivery has (six and four days).
         var people = Enumerable.Range(1, 5).ToList();
-        await store.WriteRawAsync(new RawData(
-            Issues: [.. Enumerable.Range(1, 10).Select(id => new RawIssue($"{id}", FakeJira.IssueTypeStoryId, start, Workflow.Done.Id, ResolutionId: null, StoryPoints: 3, AssigneeHash: $"synthetic-hash-{((id - 1) % 5) + 1}", Updated: end, SprintIds: ""))],
-            Changes: [],
-            Sprints: [],
-            Statuses: []),
-            new Watermark("synthetic-collector", new CollectionScope("https://example.invalid/", FakeJira.BoardId, FakeJira.ProjectKey, new DateOnly(2025, 1, 1), "status"), UpdatedThrough: end));
+        await store.WriteRawAsync(new RawBatch(
+            new RawData(
+                Issues: [.. Enumerable.Range(1, 10).Select(id => new RawIssue($"{id}", FakeJira.IssueTypeStoryId, start, Workflow.Done.Id, ResolutionId: null, StoryPoints: 3, AssigneeHash: $"synthetic-hash-{((id - 1) % 5) + 1}", Updated: end, SprintIds: ""))],
+                Changes: [],
+                Sprints: [],
+                Statuses: []),
+            new Watermark("synthetic-collector", new CollectionScope("https://example.invalid/", FakeJira.BoardId, FakeJira.ProjectKey, new DateOnly(2025, 1, 1), "status"), UpdatedThrough: end),
+            SaltFingerprint: "synthetic-fingerprint"));
 
         await store.ReplaceDerivedAsync(new DerivedData(
             SprintWindows: [new DerivedSprintWindow("41", Local(2026, 1, 5, 9), Local(2026, 1, 19, 9))],

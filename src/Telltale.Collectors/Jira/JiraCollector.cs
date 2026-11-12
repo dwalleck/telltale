@@ -126,8 +126,12 @@ public sealed class JiraCollector
         // does not move it: the overlap brings that issue back, and deleting it again changes nothing.
         var reached = new Watermark(WatermarkName, scope, issues.Count > 0 ? issues.Max(issue => issue.Updated) : since);
         // A backfill asked for everything, so its batch replaces what the store holds; a sync's is added to it.
-        var batch = new RawData(issues, changes, sprints, statuses) { OutOfScopeIssueIds = outOfScopeIssueIds, SaltFingerprint = IdentityHash.SaltFingerprint(salt) };
-        await (mode == CollectionMode.Backfill ? store.ReplaceRawAsync(batch, reached, cancellationToken) : store.WriteRawAsync(batch, reached, cancellationToken));
+        var batch = new RawBatch(new RawData(issues, changes, sprints, statuses), reached, IdentityHash.SaltFingerprint(salt))
+        {
+            OutOfScopeIssueIds = outOfScopeIssueIds,
+            ReplacesEverything = mode == CollectionMode.Backfill,
+        };
+        await store.WriteRawAsync(batch, cancellationToken);
     }
 
     /// <summary>
