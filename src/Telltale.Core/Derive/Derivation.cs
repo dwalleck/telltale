@@ -35,6 +35,10 @@ public static class Derivation
             .Where(change => change.Field == ChangeFields.Status && change.To is not null)
             .ToLookup(change => change.IssueId, change => new StatusChange(change.HistoryId, change.At, change.From, change.To!));
 
+        var pointChanges = raw.Changes
+            .Where(change => change.Field == ChangeFields.Points)
+            .ToLookup(change => change.IssueId, change => PointChange.FromRaw(change.HistoryId, change.At, change.From, change.To));
+
         // Which sprints count is decided here and nowhere else. Only the configured board's: the store can
         // still hold sprints of a board ID that was since corrected. And only sprints that have started:
         // a future sprint has no window yet, even when it carries planned dates.
@@ -83,10 +87,8 @@ public static class Derivation
                 Delivered delivered => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At), reopens)
                 {
                     Cycle = Cycles.Measure(timeline.Entries, roles, delivered.At, calendar),
-
-                    // The point bucket is the issue's current estimate.
                     PointBucket = issue.StoryPoints,
-                },
+                }.WithBucketFromHistory(delivered, pointChanges[issue.IssueId]),
 
                 // An abandoned issue reached done, so it has a cycle end, but it is not a delivery: it belongs to
                 // no delivery sprint and has no cycle time.
@@ -116,6 +118,20 @@ public static class Derivation
             sprintStatusTimes,
             [.. roles.StatusIds.Select((statusId, index) => new BoardStatus(statusId, index + 1, roles.IsDone(statusId)))]);
     }
+
+    /// <summary>
+    /// Puts a delivered issue in the bucket of its estimate at the start of its cycle, so a later re-estimate
+    /// does not move it (ADR-0006). An issue that never entered a work status has no cycle start; its bucket
+    /// is its estimate at the delivery moment (owner decision D35). <paramref name="cycle"/> comes with the
+    /// current estimate as its bucket.
+    /// </summary>
+    private static IssueCycle WithBucketFromHistory(this IssueCycle cycle, Delivered delivered, IEnumerable<PointChange> pointChanges) =>
+        cycle with
+        {
+            PointBucket = cycle.Cycle is { } measured
+                ? PointHistory.EstimateAt(measured.Start, measured.StartHistoryId, cycle.PointBucket, pointChanges)
+                : PointHistory.EstimateAt(delivered.At, delivered.HistoryId, cycle.PointBucket, pointChanges),
+        };
 
     /// <summary>
     /// When a sprint's window ends: at its completion; for a closed sprint Jira gives no completion time,

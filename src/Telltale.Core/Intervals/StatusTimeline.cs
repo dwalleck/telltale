@@ -11,7 +11,11 @@ public sealed record StatusInterval(string StatusId, DateTimeOffset Start, DateT
 }
 
 /// <summary>The moment an issue entered a status: at its creation, or by a transition.</summary>
-public sealed record StatusEntry(string StatusId, DateTimeOffset At);
+public sealed record StatusEntry(string StatusId, DateTimeOffset At)
+{
+    /// <summary>The changelog entry of the transition; null for the status the issue was created in.</summary>
+    public string? HistoryId { get; init; }
+}
 
 /// <summary>
 /// An issue's full status history as back-to-back intervals, from creation to now.
@@ -58,7 +62,7 @@ public sealed record StatusTimeline(IReadOnlyList<StatusInterval> Intervals, IRe
                 intervals.Add(new StatusInterval(current, start, at));
             }
 
-            entries.Add(new StatusEntry(change.ToStatusId, at));
+            entries.Add(new StatusEntry(change.ToStatusId, at) { HistoryId = change.HistoryId });
             current = change.ToStatusId;
             start = at;
         }

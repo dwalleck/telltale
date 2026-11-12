@@ -3,6 +3,7 @@ using System.Net;
 using System.Text.Json;
 using Telltale.Core;
 using Telltale.Core.Secrets;
+using static Telltale.Collectors.Jira.JiraJson;
 
 namespace Telltale.Collectors.Jira;
 
@@ -54,9 +55,15 @@ public sealed class JiraDiscovery
     private readonly Uri _siteUrl;
     private readonly long _boardId;
     private readonly ISecretStore _secrets;
+    private readonly TimeProvider _clock;
+    private readonly TextWriter _notices;
 
-    public JiraDiscovery(HttpMessageHandler handler, Uri siteUrl, long boardId, ISecretStore secrets)
+    /// <param name="clock">Times the waits Jira asks for when it limits the rate of requests.</param>
+    /// <param name="notices">Where each such wait is announced: standard error.</param>
+    public JiraDiscovery(HttpMessageHandler handler, Uri siteUrl, long boardId, ISecretStore secrets, TimeProvider clock, TextWriter notices)
     {
+        _clock = clock;
+        _notices = notices;
         _handler = handler;
         _siteUrl = siteUrl;
         _boardId = boardId;
@@ -69,7 +76,7 @@ public sealed class JiraDiscovery
     /// </summary>
     public async Task<JiraSiteFacts> ReadAsync(CancellationToken cancellationToken = default)
     {
-        using var jira = new JiraClient(_handler, _siteUrl, _secrets.Require(SecretName.JiraEmail), _secrets.Require(SecretName.JiraApiToken));
+        using var jira = new JiraClient(_handler, _siteUrl, _secrets.Require(SecretName.JiraEmail), _secrets.Require(SecretName.JiraApiToken), _clock, _notices);
 
         var statuses = await ReadStatusesAsync(jira, cancellationToken);
         var boardStatusIds = await ReadBoardStatusIdsAsync(jira, cancellationToken);
@@ -172,38 +179,10 @@ public sealed class JiraDiscovery
         ReadAllPagesAsync(jira, $"rest/agile/1.0/board/{_boardId.ToString(CultureInfo.InvariantCulture)}/project", "list of the board's projects",
             project => Text(project, "key"), key => key, cancellationToken);
 
-    /// <summary>
-    /// Reads every page of a list paged by offset. The list ends where Jira says so (<c>isLast</c>, or the
-    /// offset reaching <c>total</c>), and in any case at the first page that brings nothing new: an empty
-    /// page, or the same page again from a server that ignores the offset. So the loop always ends.
-    /// </summary>
-    private static async Task<List<T>> ReadAllPagesAsync<T>(
-        JiraClient jira, string path, string what, Func<JsonElement, T> parse, Func<T, string> keyOf, CancellationToken cancellationToken)
-    {
-        var all = new List<T>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var received = 0;
-        while (true)
-        {
-            using var document = await jira.GetAsync($"{path}?startAt={received.ToString(CultureInfo.InvariantCulture)}&maxResults={PageSize.ToString(CultureInfo.InvariantCulture)}", cancellationToken);
-            var (values, isLast, total) = Read(what, () =>
-            {
-                var page = document.RootElement;
-                return (
-                    page.GetProperty("values").EnumerateArray().Select(parse).ToList(),
-                    Optional(page, "isLast")?.ValueKind == JsonValueKind.True,
-                    Optional(page, "total")?.GetInt64());
-            });
-
-            received += values.Count;
-            var fresh = values.Where(value => seen.Add(keyOf(value))).ToList();
-            all.AddRange(fresh);
-            if (isLast || fresh.Count == 0 || received >= total)
-            {
-                return all;
-            }
-        }
-    }
+    /// <summary>Reads every page of a list paged by offset, ending at the first page that brings nothing new (see <see cref="OffsetPages"/>).</summary>
+    private static Task<List<T>> ReadAllPagesAsync<T>(
+        JiraClient jira, string path, string what, Func<JsonElement, T> parse, Func<T, string> keyOf, CancellationToken cancellationToken) =>
+        OffsetPages.ReadAllAsync(jira, path, PageSize, OffsetPaging.EndsWhenNothingNew, what, "Nothing was written.", page => Read(what, page), parse, keyOf, cancellationToken);
 
     /// <summary>
     /// Reads Jira's answer. An answer in a shape the tool does not know stops the command with a plain
@@ -220,12 +199,4 @@ public sealed class JiraDiscovery
             throw new UserFacingException($"Jira's {what} answered in a shape this tool does not understand ({exception.GetType().Name}). Nothing was written.", exception);
         }
     }
-
-    /// <summary>A text value Jira must give. Absent, null or not text is an answer in an unknown shape.</summary>
-    private static string Text(JsonElement parent, string name) =>
-        parent.GetProperty(name).GetString() ?? throw new FormatException($"{name} is null.");
-
-    /// <summary>A property's value, or null when it is absent or JSON null.</summary>
-    private static JsonElement? Optional(JsonElement parent, string name) =>
-        parent.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null ? value : null;
 }

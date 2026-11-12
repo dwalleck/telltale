@@ -3,6 +3,7 @@ using Telltale.Core;
 using Telltale.Pipeline.Tests.Harness;
 using Telltale.Reporting;
 using Telltale.Storage.Sqlite;
+using TUnit.Assertions.Enums;
 using static Telltale.Pipeline.Tests.Harness.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
@@ -83,6 +84,30 @@ public class StoreTests
         var store = new SqliteStore(pipeline.DatabasePath);
 
         await Assert.That(async () => await SprintReport.RenderAsync(store, "41", TimeZoneInfo.Utc)).Throws<SqliteException>().WithMessageContaining("not a database");
+    }
+
+    [Test]
+    public async Task A_migration_numbered_below_one_already_applied_is_still_applied_and_a_gap_in_the_numbers_is_accepted()
+    {
+        // Two branches each add a migration, and the higher number can reach a store first. The store is put in
+        // that state by hand: 0005 is recorded, and 0003 (the watermark table) is neither recorded nor there.
+        // The scripts in the tree are 0001 to 0003 and 0005, so the gap at 0004 is part of every run here.
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        await pipeline.RunAllAsync(["backfill"]);
+        await pipeline.ExecuteAsync(
+            """
+            DROP TABLE watermark;
+            DELETE FROM schema_migration WHERE name = '0003_watermark.sql';
+            """);
+        var recordedBefore = await pipeline.QueryAsync<string>("SELECT name FROM schema_migration ORDER BY name;");
+
+        await pipeline.RunAllAsync(["derive"]);
+
+        await Assert.That(recordedBefore).IsEquivalentTo(new[] { "0001_raw_tables.sql", "0002_issue_sprint_ids.sql", "0005_sprint_change_form.sql" }, CollectionOrdering.Matching);
+        await Assert.That(await pipeline.QueryAsync<string>("SELECT name FROM schema_migration ORDER BY name;"))
+            .IsEquivalentTo(new[] { "0001_raw_tables.sql", "0002_issue_sprint_ids.sql", "0003_watermark.sql", "0005_sprint_change_form.sql" }, CollectionOrdering.Matching);
+        await Assert.That(await pipeline.QueryAsync<string>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'watermark';")).IsEquivalentTo(new[] { "watermark" });
     }
 
     private static void AddSprintAndIssue(FakeJira jira)

@@ -20,7 +20,8 @@ public sealed record RawIssue(
 
 /// <summary>
 /// One field change from an issue's changelog. <see cref="Field"/> is one of <see cref="ChangeFields"/>.
-/// Status values are status IDs; sprint values are sprint IDs with a comma between them (<c>41,42</c>), as in <see cref="RawIssue.SprintIds"/>.
+/// Status values are status IDs; sprint values are sprint IDs with a comma between them (<c>41,42</c>), as in
+/// <see cref="RawIssue.SprintIds"/>; point values are numbers in invariant round-trip form, and null for no estimate.
 /// </summary>
 public sealed record RawChange(string HistoryId, string IssueId, DateTimeOffset At, string Field, string? From, string? To);
 
@@ -29,6 +30,7 @@ public static class ChangeFields
 {
     public const string Status = "status";
     public const string Sprint = "sprint";
+    public const string Points = "points";
 }
 
 /// <summary>
