@@ -4,7 +4,8 @@
 -- during a baseline sprint; done-role statuses are left out, as in time_in_status_per_sprint. No row when no
 -- baseline is configured. Order by board_position for board order.
 --
--- Minimum group size (GLOSSARY, ADR-0003; owner decisions D44, D47), as in baseline_cycle_time_per_bucket: the
+-- Minimum group size (GLOSSARY, ADR-0003; owner decisions D44, D50), as in baseline_cycle_time_per_bucket: no
+-- row at all while a baseline sprint has fewer than five distinct assignees (baseline_sprint.suppressed); the
 -- median is null and suppressed is 1 when time_in_status_per_sprint has the status suppressed for any
 -- baseline sprint. The rule is in that view and is read here. A baseline sprint with no issue in the status
 -- does not suppress it. There is no issue count.
@@ -15,14 +16,14 @@ WITH pooled AS (
            ROW_NUMBER() OVER (PARTITION BY t.status_id ORDER BY t.business_days) AS rn,
            COUNT(*)     OVER (PARTITION BY t.status_id)                          AS n
     FROM sprint_status_time t
-    JOIN json_each((SELECT baseline_sprint_ids FROM run)) b ON b.value = t.sprint_id
+    JOIN baseline_sprint b ON b.sprint_id = t.sprint_id
     WHERE t.business_days > 0
 ),
 -- One row per status: 1 when any baseline sprint's own view withholds the status.
 withheld AS (
     SELECT v.status_id, MAX(v.suppressed) AS suppressed
     FROM time_in_status_per_sprint v
-    JOIN json_each((SELECT baseline_sprint_ids FROM run)) b ON b.value = v.sprint_id
+    JOIN baseline_sprint b ON b.sprint_id = v.sprint_id
     GROUP BY v.status_id
 ),
 status_time AS (
@@ -40,4 +41,5 @@ FROM status_time st
 LEFT JOIN withheld w ON w.status_id = st.status_id
 JOIN board_status b ON b.status_id = st.status_id
 LEFT JOIN status s ON s.status_id = st.status_id
-WHERE b.is_done = 0;
+WHERE b.is_done = 0
+  AND NOT EXISTS (SELECT 1 FROM baseline_sprint WHERE suppressed <> 0);

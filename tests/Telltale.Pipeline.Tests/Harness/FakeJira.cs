@@ -416,6 +416,10 @@ public sealed partial class FakeJira
     public FakeSprint AddClosedSprintWithoutCompletion(long id, string name, DateTimeOffset start, DateTimeOffset? plannedEnd = null) =>
         Add(new FakeSprint(id, name, "closed", start, plannedEnd, Completed: null, BoardId));
 
+    /// <summary>Adds a closed sprint for which Jira gives no start date.</summary>
+    public FakeSprint AddClosedSprintWithoutStart(long id, string name, DateTimeOffset? completed = null) =>
+        Add(new FakeSprint(id, name, "closed", Start: null, PlannedEnd: null, completed, BoardId));
+
     /// <summary>Adds a sprint that has not started. Jira lets a future sprint carry planned dates, or none.</summary>
     public FakeSprint AddFutureSprint(long id, string name, DateTimeOffset? plannedStart = null, DateTimeOffset? plannedEnd = null) =>
         Add(new FakeSprint(id, name, "future", plannedStart, plannedEnd, Completed: null, BoardId));

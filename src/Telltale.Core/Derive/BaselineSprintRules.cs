@@ -5,7 +5,7 @@ namespace Telltale.Core.Derive;
 
 /// <summary>
 /// What is refused of the baseline sprint list (the <c>baselineSprintIds</c> setting), by <c>derive</c> and by
-/// <c>report</c>. Every message names the setting and the sprints. The IDs are digits (the configuration's
+/// <c>report</c>, and what is only said about it. Every message names the setting and the sprints. The IDs are digits (the configuration's
 /// checks), so a message can quote them.
 /// </summary>
 public static class BaselineSprintRules
@@ -56,12 +56,35 @@ public static class BaselineSprintRules
     }
 
     /// <summary>
-    /// The refusal of a list that holds sprints with fewer than five distinct assignees (owner decision D47).
-    /// Such a sprint's own report withholds everything (GLOSSARY: Minimum group size), and a baseline pooled
-    /// from it would give some of that back, so it cannot be a baseline sprint. The message names the setting
-    /// and the sprints and says nothing else about them.
+    /// Stops when a baseline sprint has no sprint window (GLOSSARY: Sprint window): Jira gives it no start
+    /// date. Such a sprint is in no figure, so a baseline could not be pooled from it.
     /// </summary>
-    public static UserFacingException ShortOfFiveAssignees(IReadOnlyList<string> sprintIds) =>
-        new($"baselineSprintIds in the configuration file lists {string.Join(", ", sprintIds)}, which {(sprintIds.Count == 1 ? "has" : "each have")} fewer than five assignees. "
-            + $"A sprint with fewer than five assignees cannot be a baseline sprint: take {(sprintIds.Count == 1 ? "it" : "them")} out of the list and run again.");
+    public static void RequireWindow(IReadOnlyList<RawSprint> sprints, IReadOnlySet<string> baselineSprintIds)
+    {
+        var withoutWindow = sprints
+            .Where(sprint => baselineSprintIds.Contains(sprint.SprintId) && sprint.Start is null)
+            .Select(sprint => sprint.SprintId)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        if (withoutWindow.Count > 0)
+        {
+            var one = withoutWindow.Count == 1;
+            throw new UserFacingException(
+                $"baselineSprintIds in the configuration file lists {string.Join(", ", withoutWindow)}, which {(one ? "has" : "each have")} no sprint window: "
+                + $"Jira gives {(one ? "it" : "them")} no start date, or no completion time and no planned end, so nothing says when {(one ? "it" : "they")} ran. "
+                + $"A sprint without a window has no figures and cannot be a baseline sprint: take {(one ? "it" : "them")} out of the list and run again.");
+        }
+    }
+
+    /// <summary>
+    /// What the console says when baseline sprints have fewer than five distinct assignees (owner decision
+    /// D50). Nothing stops: the views withhold every baseline figure, and this names the sprints and says so.
+    /// </summary>
+    public static string ShortOfFiveAssignees(IReadOnlyList<string> sprintIds) =>
+        $"{SprintsNamed(sprintIds)} {(sprintIds.Count == 1 ? "has" : "each have")} fewer than five assignees, so every baseline figure is withheld (baselineSprintIds in the configuration file).";
+
+    /// <summary>"Baseline sprint 41", or "Baseline sprints 41, 42 and 43".</summary>
+    public static string SprintsNamed(IReadOnlyList<string> sprintIds) => sprintIds.Count == 1
+        ? $"Baseline sprint {sprintIds[0]}"
+        : $"Baseline sprints {string.Join(", ", sprintIds.Take(sprintIds.Count - 1))} and {sprintIds[^1]}";
 }
