@@ -24,9 +24,55 @@ public class SprintStateTests
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
         var report = await pipeline.ReadReportAsync(42);
-        // Not completed yet, so the title shows the planned end.
-        await Assert.That(report).StartsWith("# Fake Sprint 42 (2026-01-19 to 2026-02-02)\n");
+        // Not completed yet: the title says so and gives the planned end as that, not as the end of the figures.
+        await Assert.That(report).StartsWith("# Fake Sprint 42 (from 2026-01-19, still running; planned end 2026-02-02)\n");
         await Assert.That(report).Contains("\nDelivered issues: 1\n");
+    }
+
+    [Test]
+    public async Task A_sprint_ends_at_its_completion_not_at_its_planned_end()
+    {
+        // Sprint 41 was planned to end at 9:00 on 19 January and was completed at 10:00.
+        await using var pipeline = new PipelineHarness(Now);
+        AddClosedAndActiveSprints(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 19, 9, 30), Workflow.Done);
+
+        await pipeline.RunAllAsync(["run", "--sprint", "41"]);
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
+    }
+
+    [Test]
+    public async Task An_active_sprint_past_its_planned_end_still_takes_deliveries_and_its_title_says_it_is_still_running()
+    {
+        // Sprint 42 was planned to end on 2 February and is still running on the 5th.
+        await using var pipeline = new PipelineHarness(Local(2026, 2, 5, 12));
+        AddClosedAndActiveSprints(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
+            .Moved(Local(2026, 1, 21, 9), Workflow.Development)
+            .Moved(Local(2026, 2, 4, 9), Workflow.Done);
+
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+
+        var report = await pipeline.ReadReportAsync(42);
+        await Assert.That(report).StartsWith("# Fake Sprint 42 (from 2026-01-19, still running; planned end 2026-02-02)\n");
+        await Assert.That(report).Contains("\nDelivered issues: 1\n");
+    }
+
+    [Test]
+    public async Task An_active_sprint_with_no_planned_end_has_a_title_that_names_none()
+    {
+        await using var pipeline = new PipelineHarness(Now);
+        pipeline.Jira.Handler.Override(HttpMethod.Get, $"/rest/agile/1.0/board/{FakeJira.BoardId}/sprint", _ => true, StubHttpHandler.Json(
+            """{"isLast":true,"values":[{"id":42,"state":"active","name":"Fake Sprint 42","startDate":"2026-01-19T16:30:00.000Z","originBoardId":400001}]}"""));
+
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+
+        await Assert.That(await pipeline.ReadReportAsync(42)).StartsWith("# Fake Sprint 42 (from 2026-01-19, still running)\n");
     }
 
     [Test]
@@ -183,8 +229,12 @@ public class SprintStateTests
 
         // A sync is refused once the board ID has changed (the watermark was for the other board), so the owner backfills.
         pipeline.Config["jira"]!["boardId"] = FakeJira.BoardId;
-        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+        await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
+        var reportOfTheOtherBoardsSprint = await pipeline.RunAsync("report", "--sprint", "77");
 
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(reportOfTheOtherBoardsSprint).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("Sprint 77 is not in the store, or has not started.");
         var rows = await pipeline.QueryAsync<(string SprintId, long DeliveredCount)>(
             "SELECT sprint_id, delivered_count FROM delivered_per_sprint ORDER BY sprint_id;");
         await Assert.That(rows).IsEquivalentTo(new[] { ("41", 1L), ("42", 0L) }, CollectionOrdering.Matching);

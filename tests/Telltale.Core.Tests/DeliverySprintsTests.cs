@@ -10,8 +10,8 @@ public class DeliverySprintsTests
 
     private static readonly DeliverySprints Sprints = new(
     [
-        new SprintWindow("42", Local(2026, 11, 16, 11), PlannedEnd: Local(2026, 11, 30, 9), Completed: null),
-        new SprintWindow("41", Local(2026, 11, 2, 9), PlannedEnd: Local(2026, 11, 16, 9), Completed: Local(2026, 11, 16, 10)),
+        new SprintWindow("42", Local(2026, 11, 16, 11), Completed: null),
+        new SprintWindow("41", Local(2026, 11, 2, 9), Completed: Local(2026, 11, 16, 10)),
     ], AsOf);
 
     [Test]
@@ -39,16 +39,9 @@ public class DeliverySprintsTests
     }
 
     [Test]
-    public async Task A_sprint_ends_at_its_completion_not_at_its_planned_end()
-    {
-        // Sprint 41 was planned to end at 9:00 and was completed at 10:00.
-        await Assert.That(Sprints.For(Local(2026, 11, 16, 9, 30))).IsEqualTo("41");
-    }
-
-    [Test]
     public async Task A_sprint_that_is_not_completed_runs_to_the_as_of_time()
     {
-        // After sprint 42's planned end, but it has not been completed.
+        // Sprint 42 has not been completed.
         await Assert.That(Sprints.For(Local(2026, 11, 30, 15))).IsEqualTo("42");
     }
 }

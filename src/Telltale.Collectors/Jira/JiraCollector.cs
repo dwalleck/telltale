@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using Telltale.Core;
 using Telltale.Core.Configuration;
 using Telltale.Core.Identity;
+using Telltale.Core.Intervals;
 using Telltale.Core.Secrets;
 using Telltale.Core.Storage;
 using static Telltale.Collectors.Jira.JiraJson;
@@ -254,20 +255,13 @@ public sealed class JiraCollector
         && issueType.GetProperty("hierarchyLevel").GetInt32() == 0;
 
     /// <summary>
-    /// The Sprint field's value as the comma-separated IDs a Sprint change carries. The field is an array with
+    /// The Sprint field's value in the stored form of sprint IDs (<see cref="SprintMembership.StoredSprintIds"/>),
+    /// which a stored Sprint change has too. The field is an array with
     /// one object per sprint; only the IDs are kept. An issue in no sprint (no value, or an empty array) gives
     /// an empty text, never null: null is kept for issues stored before the field was fetched.
     /// </summary>
     private static string SprintIds(JsonElement sprints) =>
-        string.Join(",", sprints.EnumerateArray().Select(sprint => sprint.GetProperty("id").GetInt64().ToString(CultureInfo.InvariantCulture)));
-
-    /// <summary>
-    /// True when a Sprint change's value is what the Sprint field's history holds: nothing, or sprint IDs
-    /// (digits) separated by commas. Anything else means the configured field is another field, whose
-    /// history may hold account IDs or free text.
-    /// </summary>
-    private static bool IsSprintIdList(string? value) =>
-        value is null || value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).All(id => id.All(char.IsAsciiDigit));
+        SprintMembership.StoredSprintIds(sprints.EnumerateArray().Select(sprint => sprint.GetProperty("id").GetInt64().ToString(CultureInfo.InvariantCulture)));
 
     /// <summary>True when a status change's value is what the status field's history holds: nothing, or a status ID (digits).</summary>
     private static bool IsStatusId(string? value) => string.IsNullOrEmpty(value) || value.All(char.IsAsciiDigit);
@@ -386,7 +380,11 @@ public sealed class JiraCollector
                         throw new FormatException("A status change holds a value that is not a status ID.");
                     }
 
-                    if (field == ChangeFields.Sprint && !(IsSprintIdList(from) && IsSprintIdList(to)))
+                    // A Sprint change's value is what the Sprint field's history holds: nothing, or sprint IDs
+                    // (digits) separated by commas, which Jira writes as "41, 42" and the store keeps as "41,42".
+                    // Anything else means the configured field is another field, whose history may hold account
+                    // IDs or free text.
+                    if (field == ChangeFields.Sprint && !(SprintMembership.TryNormalizeSprintIds(from, out from) && SprintMembership.TryNormalizeSprintIds(to, out to)))
                     {
                         throw new UserFacingException(
                             "The history of the field named by jira.sprintFieldId in the configuration file holds values that are not sprint IDs, so it is not the Sprint field. Nothing was stored.");

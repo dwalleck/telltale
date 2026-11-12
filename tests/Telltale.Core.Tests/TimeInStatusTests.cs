@@ -1,5 +1,5 @@
-using TUnit.Assertions.Enums;
 using Telltale.Core.Intervals;
+using TUnit.Assertions.Enums;
 using static Telltale.Core.Tests.TestTime;
 
 namespace Telltale.Core.Tests;
@@ -11,7 +11,7 @@ public class TimeInStatusTests
     private const string Done = "10001";
 
     // Sprint 41: Monday Nov 2, 09:00 to Friday Nov 13, completed at 17:00.
-    private static readonly SprintWindow Sprint41 = new("41", Local(2026, 11, 2, 9), Local(2026, 11, 13, 17), Local(2026, 11, 13, 17));
+    private static readonly SprintWindow Sprint41 = new("41", Local(2026, 11, 2, 9), Completed: Local(2026, 11, 13, 17));
 
     private static readonly DateTimeOffset AsOf = Local(2026, 11, 20, 12);
 

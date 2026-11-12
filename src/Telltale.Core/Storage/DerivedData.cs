@@ -6,8 +6,9 @@ namespace Telltale.Core.Storage;
 public sealed record IssueStatusInterval(string IssueId, string StatusId, DateTimeOffset Start, DateTimeOffset? End);
 
 /// <summary>
-/// What derive concluded about one issue. <see cref="CycleEnd"/> is its last move into a done status, null when it
-/// is not done now. <see cref="Delivered"/> says whether that was a delivery: an abandoned issue has a
+/// What derive concluded about one issue. <see cref="CycleEnd"/> is its last move into a done status. It is null when
+/// the issue is not done now, and also when it is in a done status but its changelog ends in a status that is not done
+/// (owner decision D8) or holds no move into done at all (D9): such an issue is not delivered. <see cref="Delivered"/> says whether that was a delivery: an abandoned issue has a
 /// <see cref="CycleEnd"/> but is not delivered. Read <see cref="Delivered"/>, never "has a cycle end", to find deliveries.
 /// <see cref="DeliverySprintId"/> is the sprint whose window contains a delivery (null when it fell between
 /// sprints, and for every issue that is not delivered).
@@ -18,7 +19,10 @@ public sealed record IssueCycle(string IssueId, DateTimeOffset? CycleEnd, bool D
     /// <summary>The issue's cycle time. Null when it has none: it is not delivered, or it never entered a work-role status.</summary>
     public Cycle? Cycle { get; init; }
 
-    /// <summary>The story point estimate the issue is grouped by. Null means unestimated.</summary>
+    /// <summary>
+    /// The story point estimate the issue is grouped by. Set for delivered issues only: null for one that is
+    /// unestimated, and for every issue that is not delivered, whatever its estimate.
+    /// </summary>
     public double? PointBucket { get; init; }
 }
 

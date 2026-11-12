@@ -22,13 +22,13 @@ public static class SprintReport
     public static string FileName(string sprintId) => $"sprint-{sprintId}.md";
 
     /// <summary>
-    /// The ID of the sprint that completed last, or null when none has. A closed sprint Jira gives no
-    /// completion time ended at its planned end (owner decision D7).
+    /// The ID of the sprint that completed last, or null when none has. When a sprint ended is its
+    /// sprint window's end, which derive decides.
     /// </summary>
     public static async Task<string?> MostRecentlyCompletedSprintAsync(ITelltaleStore store, CancellationToken cancellationToken = default)
     {
         var sprints = await store.QueryViewsAsync<string>(
-            "SELECT sprint_id FROM delivered_per_sprint WHERE state = @closed ORDER BY COALESCE(completed, planned_end) DESC, started DESC, sprint_id DESC LIMIT 1;",
+            "SELECT sprint_id FROM delivered_per_sprint WHERE state = @closed ORDER BY ended DESC, started DESC, sprint_id DESC LIMIT 1;",
             new { closed = SprintStates.Closed },
             cancellationToken);
 
@@ -39,7 +39,7 @@ public static class SprintReport
     public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, CancellationToken cancellationToken = default)
     {
         var rows = await store.QueryViewsAsync<DeliveredRow>(
-            "SELECT sprint_name, started, planned_end, completed, delivered_count, suppressed FROM delivered_per_sprint WHERE sprint_id = @sprintId;",
+            "SELECT sprint_name, started, ended, planned_end, delivered_count, suppressed FROM delivered_per_sprint WHERE sprint_id = @sprintId;",
             new { sprintId },
             cancellationToken);
 
@@ -65,8 +65,6 @@ public static class SprintReport
         return report.ToString();
     }
 
-    // Derived data an earlier version of the tool built, without this view, never gets here: the report
-    // command refuses derived data that does not say which raw data it was built from (PipelineSteps.ReportAsync).
     private static Task<IReadOnlyList<TimeInStatusRow>> ReadTimeInStatusAsync(ITelltaleStore store, string sprintId, CancellationToken cancellationToken) =>
         store.QueryViewsAsync<TimeInStatusRow>(
             "SELECT status_name, issue_count, median_business_days, suppressed FROM time_in_status_per_sprint WHERE sprint_id = @sprintId ORDER BY board_position;",
@@ -86,11 +84,13 @@ public static class SprintReport
 
     private static void AppendTitle(StringBuilder report, DeliveredRow sprint, TimeZoneInfo teamTimeZone)
     {
-        // A sprint ends when it was completed; one still running shows its planned end.
-        var end = sprint.Completed ?? sprint.PlannedEnd;
-        var dates = end is null
-            ? $"from {LocalDate(sprint.Started, teamTimeZone)}"
-            : $"{LocalDate(sprint.Started, teamTimeZone)} to {LocalDate(end, teamTimeZone)}";
+        // The dates are the sprint window's, which the figures were counted in. A sprint that is not
+        // completed has no end yet: its window runs to the as-of time. Its planned end is shown as a plan,
+        // in words that stay true once that day has passed.
+        var start = LocalDate(sprint.Started, teamTimeZone);
+        var dates = sprint.Ended is not null ? $"{start} to {LocalDate(sprint.Ended, teamTimeZone)}"
+            : sprint.PlannedEnd is null ? $"from {start}, still running"
+            : $"from {start}, still running; planned end {LocalDate(sprint.PlannedEnd, teamTimeZone)}";
 
         report.Append("# ").Append(sprint.SprintName).Append(" (").Append(dates).Append(")\n\n");
     }
@@ -108,18 +108,10 @@ public static class SprintReport
             return;
         }
 
-        report.Append("| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |\n");
-        report.Append("|---|---|---|---|---|---|\n");
-
+        AppendTableHead(report, "Point bucket", "Issues with a cycle time", "Median (business days)", "P85 (business days)", "Median (calendar days)", "P85 (calendar days)");
         foreach (var bucket in buckets)
         {
-            report.Append("| ").Append(BucketLabel(bucket.PointBucket))
-                .Append(" | ").Append(bucket.IssueCount?.ToString(CultureInfo.InvariantCulture) ?? Suppressed)
-                .Append(" | ").Append(Days(bucket.Suppressed, bucket.MedianBusinessDays))
-                .Append(" | ").Append(Days(bucket.Suppressed, bucket.P85BusinessDays))
-                .Append(" | ").Append(Days(bucket.Suppressed, bucket.MedianCalendarDays))
-                .Append(" | ").Append(Days(bucket.Suppressed, bucket.P85CalendarDays))
-                .Append(" |\n");
+            AppendTableRow(report, BucketLabel(bucket.PointBucket), Count(bucket.IssueCount), Days(bucket.Suppressed, bucket.MedianBusinessDays), Days(bucket.Suppressed, bucket.P85BusinessDays), Days(bucket.Suppressed, bucket.MedianCalendarDays), Days(bucket.Suppressed, bucket.P85CalendarDays));
         }
     }
 
@@ -133,16 +125,42 @@ public static class SprintReport
             return;
         }
 
-        report.Append("| Status | Issues | Median business days |\n| --- | ---: | ---: |\n");
+        AppendTableHead(report, "Status", "Issues", "Median (business days)");
         foreach (var row in rows)
         {
-            // A status name is Jira's text: a "|" in it would otherwise end the cell.
-            report.Append("| ").Append(row.StatusName.Replace("|", "\\|", StringComparison.Ordinal))
-                .Append(" | ").Append(row.IssueCount?.ToString(CultureInfo.InvariantCulture) ?? Suppressed)
-                .Append(" | ").Append(Days(row.Suppressed, row.MedianBusinessDays))
-                .Append(" |\n");
+            AppendTableRow(report, row.StatusName, Count(row.IssueCount), Days(row.Suppressed, row.MedianBusinessDays));
         }
     }
+
+    /// <summary>
+    /// The head of a table. Every table of the report has this layout: what a row is about in the first
+    /// column, and figures in the others, aligned right.
+    /// </summary>
+    private static void AppendTableHead(StringBuilder report, params ReadOnlySpan<string> columns)
+    {
+        AppendTableRow(report, columns);
+        report.Append("| ---");
+        for (var column = 1; column < columns.Length; column++)
+        {
+            report.Append(" | ---:");
+        }
+
+        report.Append(" |\n");
+    }
+
+    private static void AppendTableRow(StringBuilder report, params ReadOnlySpan<string> cells)
+    {
+        foreach (var cell in cells)
+        {
+            // A cell can hold Jira's text (a status name): a "|" in it would otherwise end the cell.
+            report.Append("| ").Append(cell.Replace("|", "\\|", StringComparison.Ordinal)).Append(' ');
+        }
+
+        report.Append("|\n");
+    }
+
+    /// <summary>A number of issues, or <see cref="Suppressed"/> when the view withholds it.</summary>
+    private static string Count(long? issues) => issues?.ToString(CultureInfo.InvariantCulture) ?? Suppressed;
 
     /// <summary>
     /// A point bucket's label: the estimate in full (3, 0.5, 2.001), so two buckets the view keeps apart
@@ -151,7 +169,7 @@ public static class SprintReport
     private static string BucketLabel(double? pointBucket) =>
         pointBucket?.ToString("R", CultureInfo.InvariantCulture) ?? "unestimated";
 
-    /// <summary>A duration in days to one decimal place, e.g. 2.5, or <see cref="Suppressed"/> (see <see cref="Figure"/>).</summary>
+    /// <summary>A duration in days to one decimal place, e.g. 2.5, or <see cref="Suppressed"/> (see <see cref="Figure"/>). Every figure in days is written by this.</summary>
     private static string Days(long suppressed, double? days) => Figure(suppressed, days?.ToString("F1", CultureInfo.InvariantCulture));
 
     /// <summary>
@@ -181,8 +199,8 @@ public static class SprintReport
     {
         public string SprintName { get; init; } = "";
         public string Started { get; init; } = "";
+        public string? Ended { get; init; }
         public string? PlannedEnd { get; init; }
-        public string? Completed { get; init; }
         public long? DeliveredCount { get; init; }
         public long Suppressed { get; init; } = 1;
     }

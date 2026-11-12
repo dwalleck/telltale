@@ -111,10 +111,10 @@ public class DeliveryTests
     }
 
     [Test]
-    public async Task A_role_name_outside_the_four_roles_is_refused()
+    public async Task A_role_name_outside_the_four_roles_is_refused_and_the_status_is_named_not_the_role()
     {
         await Assert.That(() => StatusRoles.Parse(new Dictionary<string, string> { [New] = "finished" }))
-            .Throws<FormatException>();
+            .Throws<FormatException>().WithMessage($"the role of status {New} is not one of: not started, work, blocked, done.");
     }
 
     [Test]
