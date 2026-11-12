@@ -139,6 +139,10 @@ internal sealed class PipelineSteps : IDisposable
             return;
         }
 
+        // The totals and the per-issue lines are written whatever the report's footer does with its count:
+        // the footer withholds it for a small store or fewer than three assignees, and this log goes to the
+        // operator, who holds the store and its per-issue derived tables anyway.
+
         var unseen = derived.Anomalies.Where(anomaly => !previous.Contains((anomaly.IssueId, anomaly.Message))).ToList();
         var issues = derived.Anomalies.Select(anomaly => anomaly.IssueId).Distinct(StringComparer.Ordinal).Count();
         await _services.Error.WriteLineAsync(

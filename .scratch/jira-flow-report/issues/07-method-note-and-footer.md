@@ -9,7 +9,7 @@ Owner decision (2026-11-12): every report prints the as-of time and derive store
 **Status:** resolved
 
 - [x] The report contains the method note and the as-of time used for open intervals
-- [x] An issue with inconsistent status history still gets a timeline, is logged by the sync, and is counted in the footer
+- [x] An issue with inconsistent status history still gets a timeline, is logged by `derive` (owner decision D37 moved the log from the sync), and is counted in the footer
 - [x] An issue delivered between two sprints is in neither sprint's delivered count and is counted in the footer
 - [x] The report contains no issue keys and no names
 
