@@ -42,9 +42,25 @@ tests/                     Core tests carry most of the weight; collectors use r
 config/                    appsettings.json (no secrets), holidays.json
 ```
 
-CLI commands: `backfill`, `sync`, `derive`, `report`, `publish`, and `run` (sync → derive → report).
+CLI commands: `discover`, `secrets set`, `backfill`, `sync`, `derive`, `report`, `publish`, and `run` (sync → derive → report). `discover` is run once on the work laptop and writes `appsettings.json` from the live systems: Jira site, board, status IDs and categories, resolution IDs, Sprint and story point field IDs.
 
-Candidate libraries: `HttpClient` (no Jira SDK, ADR-0004), `Microsoft.Data.Sqlite` + Dapper, plain `git` commands, ScottPlot for PNG charts, System.CommandLine or Spectre.Console.Cli.
+Libraries: `HttpClient` (no Jira SDK, ADR-0004), `Microsoft.Data.Sqlite` + Dapper behind the repository layer, System.CommandLine for the CLI, plain `git` commands, ScottPlot for PNG charts.
+
+Secrets sit behind one secret-store interface: Windows Credential Manager on the work laptop (a DPAPI file if policy blocks it), environment variables for development.
+
+Development happens off the work laptop against synthetic fixtures only. Real Jira, GitHub and Confluence are reached only from the work laptop.
+
+## Where metrics are computed
+
+C# computes per-issue cycle times and per-sprint time in status into derived tables on every run, so business days have one implementation. The SQL metric views do only the medians, P85s (ranked with window functions; SQLite has no percentile function) and the group-size guards.
+
+An issue counts toward its assignee at the time of the sync, hashed; assignee history is not collected. Unassigned issues count toward nobody.
+
+Changelog anomalies are logged by the sync, and each report's footer states how many issues had any.
+
+## First report
+
+One markdown file per sprint, whole-team: delivered issue count; median and P85 cycle time by point bucket in business and calendar days; median time in each status. A baseline column is added once the baseline sprint list is pinned in config.
 
 ## Already built: Telltale.Core
 
@@ -97,9 +113,11 @@ From a local clone: reverts (PR titles / commit messages starting "Revert"), and
 
 ## Session exporter and importer
 
-Pilot participants run a small exporter that reads local Kiro session logs and writes versioned JSON summaries (`schemaVersion`) to a shared folder (OneDrive/Teams); the laptop imports them. Contents: session ID, start/end, branch, model, skills invoked, tokens where the plan reports them. No identity, prompts or code (ADR-0005). The shared folder is the permanent copy.
+The owner already has a session export script that participants will run; its output becomes the session summary format if it meets ADR-0005 and records the branch at session time and explicitly invoked skill names. The first ticket of the sessions spec brings its field list and one sanitized sample into the repo, and runs one throwaway Kiro session on the work laptop to check what is stored. Kiro (CLI 3.1.0) keeps sessions in `data.sqlite3` or under `~/.kiro/sessions` depending on the agent engine, does not store the git branch, has no confirmed stored record of skill invocations or per-session credits, and auto-deletes old sessions.
 
-**Unknown, and it blocks the exporter design:** where Kiro stores session logs locally and what they contain, including whether skill invocations are detectable. Find a sample session file first.
+As originally sketched: pilot participants run a small exporter that reads local Kiro session logs and writes versioned JSON summaries (`schemaVersion`) to a shared folder (OneDrive/Teams); the laptop imports them. Contents: session ID, start/end, branch, model, skills invoked, tokens where the plan reports them. No identity, prompts or code (ADR-0005). The shared folder is the permanent copy.
+
+**Still unverified:** the stored session JSON, Windows paths, and whether model and credits can be read per session. All need a real session on the work laptop.
 
 ## Reporting
 

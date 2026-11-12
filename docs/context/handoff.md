@@ -17,7 +17,9 @@ The project owner (a senior .NET engineer) needs to justify AI plan upgrades to 
 
 ## What is open
 
-These are the decisions and facts not yet settled. Work this frontier; don't re-ask what the files above already decide.
+**Update, Nov 11, 2026:** a grilling session settled the Scope, Definitions and Implementation items below; the answers are in `GLOSSARY.md`, ADR-0002, ADR-0003 and `system-design.md`. The first spec is the Jira path end to end. What remains open: the company facts (found by `discover` on the work laptop), the Kiro session details (first ticket of the sessions spec), the table schema (for the spec), and three owner tasks: the volunteers' consent to cohort reporting, the baseline sprint list, and the date the success criteria go to leadership.
+
+The original list, kept for the record:
 
 **Scope**
 - What does the first spec cover? Recommendation: the Jira path end to end as a tracer bullet (collector → raw tables → derived intervals → time in status and cycle time per sprint → a plain report), then later specs for GitHub review metrics, sessions, quality guardrails, Confluence publishing, and the replay benchmark.
