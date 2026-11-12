@@ -78,11 +78,17 @@ public sealed class SqliteStore : ITelltaleStore
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
+        // An issue that is out of scope now may have been stored while it was in scope (owner decision D13).
+        // Its rows go in the same transaction as the batch, so the store never holds half of the change.
+        var outOfScope = batch.OutOfScopeIssueIds.Select(issueId => new { issueId });
+        await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM change WHERE issue_id = @issueId;", outOfScope, transaction));
+        await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM issue WHERE issue_id = @issueId;", outOfScope, transaction));
+
         await connection.ExecuteAsync(Command(
             cancellationToken,
             """
-            INSERT INTO issue (issue_id, issue_key, issue_type_id, created, status_id, resolution_id, story_points, assignee_hash, updated)
-            VALUES (@IssueId, @Key, @IssueTypeId, @Created, @StatusId, @ResolutionId, @StoryPoints, @AssigneeHash, @Updated)
+            INSERT INTO issue (issue_id, issue_key, issue_type_id, created, status_id, resolution_id, story_points, assignee_hash, updated, sprint_ids)
+            VALUES (@IssueId, @Key, @IssueTypeId, @Created, @StatusId, @ResolutionId, @StoryPoints, @AssigneeHash, @Updated, @SprintIds)
             ON CONFLICT (issue_id) DO UPDATE SET
                 issue_key = excluded.issue_key,
                 issue_type_id = excluded.issue_type_id,
@@ -91,7 +97,8 @@ public sealed class SqliteStore : ITelltaleStore
                 resolution_id = excluded.resolution_id,
                 story_points = excluded.story_points,
                 assignee_hash = excluded.assignee_hash,
-                updated = excluded.updated;
+                updated = excluded.updated,
+                sprint_ids = excluded.sprint_ids;
             """,
             batch.Issues.Select(issue => new
             {
@@ -104,6 +111,7 @@ public sealed class SqliteStore : ITelltaleStore
                 issue.StoryPoints,
                 issue.AssigneeHash,
                 Updated = StoredTime.ToStored(issue.Updated),
+                issue.SprintIds,
             }),
             transaction));
 
@@ -174,7 +182,7 @@ public sealed class SqliteStore : ITelltaleStore
         var statuses = await connection.QueryAsync<StatusRow>(Command(cancellationToken, "SELECT * FROM status ORDER BY status_id;"));
 
         return new RawData(
-            [.. issues.Select(row => new RawIssue(row.IssueId, row.IssueKey, row.IssueTypeId, StoredTime.FromStored(row.Created), row.StatusId, row.ResolutionId, row.StoryPoints, row.AssigneeHash, StoredTime.FromStored(row.Updated)))],
+            [.. issues.Select(row => new RawIssue(row.IssueId, row.IssueKey, row.IssueTypeId, StoredTime.FromStored(row.Created), row.StatusId, row.ResolutionId, row.StoryPoints, row.AssigneeHash, StoredTime.FromStored(row.Updated), row.SprintIds))],
             [.. changes.Select(row => new RawChange(row.HistoryId, row.IssueId, StoredTime.FromStored(row.At), row.Field, row.FromValue, row.ToValue))],
             [.. sprints.Select(row => new RawSprint(row.SprintId, row.BoardId, row.Name, row.State, StoredTime.FromStoredOrNull(row.Started), StoredTime.FromStoredOrNull(row.PlannedEnd), StoredTime.FromStoredOrNull(row.Completed)))],
             [.. statuses.Select(row => new RawStatus(row.StatusId, row.Name, row.Category))]);
@@ -233,6 +241,30 @@ public sealed class SqliteStore : ITelltaleStore
             }),
             cancellationToken);
 
+        await InsertRowsAsync(
+            connection,
+            transaction,
+            "INSERT INTO membership_interval (issue_id, sprint_id, started, ended) VALUES (@issueId, @sprintId, @started, @ended);",
+            ["@issueId", "@sprintId", "@started", "@ended"],
+            derived.MembershipIntervals.Select(interval => new object?[] { interval.IssueId, interval.SprintId, StoredTime.ToStored(interval.Start), StoredTime.ToStored(interval.End) }),
+            cancellationToken);
+
+        await InsertRowsAsync(
+            connection,
+            transaction,
+            "INSERT INTO sprint_status_time (issue_id, sprint_id, status_id, calendar_seconds, business_seconds, business_days) VALUES (@issueId, @sprintId, @statusId, @calendarSeconds, @businessSeconds, @businessDays);",
+            ["@issueId", "@sprintId", "@statusId", "@calendarSeconds", "@businessSeconds", "@businessDays"],
+            derived.SprintStatusTimes.Select(time => new object?[] { time.IssueId, time.SprintId, time.StatusId, time.CalendarTime.TotalSeconds, time.BusinessTime.TotalSeconds, time.BusinessDays }),
+            cancellationToken);
+
+        await InsertRowsAsync(
+            connection,
+            transaction,
+            "INSERT INTO board_status (status_id, position, is_done) VALUES (@statusId, @position, @isDone);",
+            ["@statusId", "@position", "@isDone"],
+            derived.BoardStatuses.Select(status => new object?[] { status.StatusId, (long)status.Position, status.IsDone ? 1L : 0L }),
+            cancellationToken);
+
         foreach (var (_, sql) in Scripts.InFolder("Views"))
         {
             await connection.ExecuteAsync(Command(cancellationToken, sql, transaction: transaction));
@@ -252,6 +284,25 @@ public sealed class SqliteStore : ITelltaleStore
     {
         await using var connection = await OpenAsync(_readOnlyConnectionString, cancellationToken);
         return (await connection.QueryAsync<T>(new CommandDefinition(sql, parameters, cancellationToken: cancellationToken))).AsList();
+    }
+
+    /// <summary>
+    /// Whether the database at this path holds at least one hashed person. A hash is only worth something with
+    /// the salt that made it, so this is what a missing or new salt would break. The file is opened read-only
+    /// and never created: no file, or one from before the raw tables existed, holds nobody.
+    /// </summary>
+    public static async Task<bool> HoldsHashedPeopleAsync(string databasePath, CancellationToken cancellationToken = default)
+    {
+        if (!File.Exists(databasePath))
+        {
+            return false;
+        }
+
+        var readOnly = new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false, Mode = SqliteOpenMode.ReadOnly }.ToString();
+        await using var connection = await OpenAsync(readOnly, cancellationToken);
+        var hasIssues = await connection.ExecuteScalarAsync<long>(Command(cancellationToken, "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'issue';"));
+        return hasIssues > 0
+            && await connection.ExecuteScalarAsync<long>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM issue WHERE assignee_hash IS NOT NULL);")) > 0;
     }
 
     private static CommandDefinition Command(CancellationToken cancellationToken, string sql, object? parameters = null, DbTransaction? transaction = null) =>
@@ -314,6 +365,7 @@ public sealed class SqliteStore : ITelltaleStore
         public double? StoryPoints { get; init; }
         public string? AssigneeHash { get; init; }
         public string Updated { get; init; } = "";
+        public string? SprintIds { get; init; }
     }
 
     private sealed class ChangeRow

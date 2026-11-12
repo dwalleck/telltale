@@ -322,10 +322,10 @@ public class ConfigurationAndSecretsTests
     }
 
     [Test]
-    [Arguments(SecretName.HashingSalt, "'hashing salt'")]
-    [Arguments(SecretName.JiraEmail, "'Jira email'")]
-    [Arguments(SecretName.JiraApiToken, "'Jira API token'")]
-    public async Task A_missing_secret_stops_the_run_before_any_call_to_jira_and_is_named(SecretName missing, string expectedName)
+    [Arguments(SecretName.HashingSalt, "'hashing salt'", "hashing-salt'. Add --generate to have a new random salt made.")]
+    [Arguments(SecretName.JiraEmail, "'Jira email'", "jira-email'.")]
+    [Arguments(SecretName.JiraApiToken, "'Jira API token'", "jira-api-token'.")]
+    public async Task A_missing_secret_stops_the_run_before_any_call_to_jira_and_is_named(SecretName missing, string expectedName, string howToSet)
     {
         await using var pipeline = new PipelineHarness();
         AddOneSprint(pipeline.Jira);
@@ -334,7 +334,7 @@ public class ConfigurationAndSecretsTests
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo($"The secret {expectedName} is not set in the secret store.\n");
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo($"The secret {expectedName} is not set in the secret store. Run 'telltale secrets set {howToSet}\n");
         await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
     }
 

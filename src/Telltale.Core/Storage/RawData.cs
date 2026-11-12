@@ -2,7 +2,9 @@ namespace Telltale.Core.Storage;
 
 /// <summary>
 /// The fields kept from a Jira issue (ADR-0002): no summary, description or comment, and the
-/// assignee only as a salted hash (ADR-0003).
+/// assignee only as a salted hash (ADR-0003). <see cref="SprintIds"/> is what the Sprint field lists now:
+/// comma-separated sprint IDs, the form a Sprint change has, and empty when the issue is in no sprint. It is
+/// null only for an issue stored before the field was fetched, whose sprints are therefore unknown.
 /// </summary>
 public sealed record RawIssue(
     string IssueId,
@@ -13,11 +15,12 @@ public sealed record RawIssue(
     string? ResolutionId,
     double? StoryPoints,
     string? AssigneeHash,
-    DateTimeOffset Updated);
+    DateTimeOffset Updated,
+    string? SprintIds);
 
 /// <summary>
 /// One field change from an issue's changelog. <see cref="Field"/> is one of <see cref="ChangeFields"/>.
-/// Status values are status IDs.
+/// Status values are status IDs; sprint values are comma-separated sprint IDs.
 /// </summary>
 public sealed record RawChange(string HistoryId, string IssueId, DateTimeOffset At, string Field, string? From, string? To);
 
@@ -25,6 +28,7 @@ public sealed record RawChange(string HistoryId, string IssueId, DateTimeOffset 
 public static class ChangeFields
 {
     public const string Status = "status";
+    public const string Sprint = "sprint";
 }
 
 /// <summary>
@@ -49,4 +53,12 @@ public sealed record RawData(
     IReadOnlyList<RawIssue> Issues,
     IReadOnlyList<RawChange> Changes,
     IReadOnlyList<RawSprint> Sprints,
-    IReadOnlyList<RawStatus> Statuses);
+    IReadOnlyList<RawStatus> Statuses)
+{
+    /// <summary>
+    /// In a batch: the IDs of issues the collector saw and found out of scope (epics, sub-tasks, types above
+    /// epic level). Writing the batch deletes whatever the store holds of them, since an issue stored while it
+    /// was in scope can be converted later (owner decision D13). Always empty in what the store reads back.
+    /// </summary>
+    public IReadOnlyList<string> OutOfScopeIssueIds { get; init; } = [];
+}

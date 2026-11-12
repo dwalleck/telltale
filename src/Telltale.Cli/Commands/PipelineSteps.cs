@@ -21,11 +21,13 @@ internal sealed class PipelineSteps
     private readonly AppServices _services;
     private readonly TelltaleConfig _config;
     private readonly StatusRoles _roles;
+    private readonly IReadOnlySet<string> _abandonedResolutionIds;
     private readonly TimeZoneInfo _timeZone;
     private readonly ITelltaleStore _store;
 
-    private PipelineSteps(AppServices services, TelltaleConfig config, StatusRoles roles, TimeZoneInfo timeZone, ITelltaleStore store)
+    private PipelineSteps(AppServices services, TelltaleConfig config, StatusRoles roles, IReadOnlySet<string> abandonedResolutionIds, TimeZoneInfo timeZone, ITelltaleStore store)
     {
+        _abandonedResolutionIds = abandonedResolutionIds;
         _services = services;
         _config = config;
         _roles = roles;
@@ -41,20 +43,18 @@ internal sealed class PipelineSteps
     {
         var config = await ConfigFile.LoadAsync(services.ConfigPath, cancellationToken);
         var roles = ReadStatusRoles(config, services.ConfigPath);
+        var abandonedResolutionIds = ReadAbandonedResolutionIds(config, services.ConfigPath);
         var timeZone = ReadTimeZone(config, services.ConfigPath);
 
         if (needsJira)
         {
-            foreach (var secret in Enum.GetValues<SecretName>())
-            {
-                services.Secrets.Require(secret);
-            }
+            await RequireSecretsAsync(services, cancellationToken);
         }
 
         var store = new SqliteStore(services.DatabasePath);
         await store.InitializeAsync(cancellationToken);
 
-        return new PipelineSteps(services, config, roles, timeZone, store);
+        return new PipelineSteps(services, config, roles, abandonedResolutionIds, timeZone, store);
     }
 
     /// <summary>Brings the raw tables up to date with Jira.</summary>
@@ -65,7 +65,7 @@ internal sealed class PipelineSteps
     public async Task DeriveAsync(CancellationToken cancellationToken)
     {
         var raw = await _store.ReadRawAsync(cancellationToken);
-        await _store.ReplaceDerivedAsync(Derivation.Derive(raw, _config.Jira.BoardId, _roles, new BusinessCalendar(_timeZone, _config.Holidays), AsOf(raw)), cancellationToken);
+        await _store.ReplaceDerivedAsync(Derivation.Derive(raw, _config.Jira.BoardId, _roles, _abandonedResolutionIds, new BusinessCalendar(_timeZone, _config.Holidays), AsOf(raw)), cancellationToken);
     }
 
     /// <summary>
@@ -94,6 +94,35 @@ internal sealed class PipelineSteps
         await _services.Out.WriteLineAsync($"Wrote {path}");
     }
 
+    /// <summary>
+    /// Stops with a message naming the first secret that is not set and how to set it. A missing hashing salt
+    /// is two different situations: on a database that holds nobody yet, any salt will do and one can be
+    /// generated; once people are stored under a salt, only that salt keeps each of them one person.
+    /// </summary>
+    private static async Task RequireSecretsAsync(AppServices services, CancellationToken cancellationToken)
+    {
+        foreach (var secret in SecretInfo.All)
+        {
+            if (secret.Name != SecretName.HashingSalt || !string.IsNullOrWhiteSpace(services.Secrets.Get(secret.Name)))
+            {
+                services.Secrets.Require(secret.Name);
+                continue;
+            }
+
+            var howToSet = services.Secrets.HowToSet(secret.Name);
+            if (await SqliteStore.HoldsHashedPeopleAsync(services.DatabasePath, cancellationToken))
+            {
+                throw new UserFacingException(
+                    $"The secret {secret.Label} is not set in the secret store, and the database already holds people hashed with the salt that was there before. "
+                    + $"A new salt would give every person a second hash, so each would count as two. Restore the original salt. {howToSet}");
+            }
+
+            // Only a store 'secrets set' can write to can be given a generated salt.
+            var generate = services.Secrets is IWritableSecretStore ? " Add --generate to have a new random salt made." : string.Empty;
+            throw new UserFacingException($"The secret {secret.Label} is not set in the secret store. {howToSet}{generate}");
+        }
+    }
+
     private static StatusRoles ReadStatusRoles(TelltaleConfig config, string path)
     {
         try
@@ -110,6 +139,24 @@ internal sealed class PipelineSteps
         {
             throw new UserFacingException($"The configuration file {path} is not valid: statusRoles: {exception.Message}", exception);
         }
+    }
+
+    /// <summary>
+    /// The abandoned resolution IDs, trimmed. Jira's resolution IDs are digits, so anything else (a resolution's
+    /// name, a stray character, an empty entry) is refused: it could match no issue, and the abandoned work it
+    /// was meant to exclude would count as delivered.
+    /// </summary>
+    private static HashSet<string> ReadAbandonedResolutionIds(TelltaleConfig config, string path)
+    {
+        // The element type says "not null", but JSON can still carry a null entry.
+        var ids = config.AbandonedResolutionIds.Select(id => id?.Trim() ?? "").ToHashSet(StringComparer.Ordinal);
+        if (ids.Any(id => id.Length == 0 || !id.All(char.IsAsciiDigit)))
+        {
+            throw new UserFacingException(
+                $"The configuration file {path} is not valid: abandonedResolutionIds: every entry must be a Jira resolution ID (digits only), and one is not.");
+        }
+
+        return ids;
     }
 
     private static TimeZoneInfo ReadTimeZone(TelltaleConfig config, string path)

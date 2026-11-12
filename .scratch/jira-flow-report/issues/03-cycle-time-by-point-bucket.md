@@ -2,6 +2,8 @@
 
 **What to build:** The report gains the cycle time table: for each point bucket, the issue count, and median and P85 cycle time in business days and in calendar days. Cycle time runs from the first entry into a work-role status to the last entry into a done-role status, for delivered issues. The point bucket is the issue's current estimate in this slice (ticket 04 changes it to the estimate at cycle start). The team time zone and holiday list come from configuration. Per-issue durations are computed in C# during derive; the views compute median and P85. See the spec's Metric rules.
 
+Owner decisions (2026-11-12): a row's count is the number of cycle times behind it, and the column is headed "Issues with a cycle time" (D16). Calendar days are elapsed hours divided by 24 (D17). Days print to one decimal (D18).
+
 **Blocked by:** 01
 
 **Status:** ready-for-agent

@@ -16,6 +16,9 @@ public class CycleTimeTests
         + "| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |\n"
         + "|---|---|---|---|---|---|\n";
 
+    /// <summary>What follows the cycle time section. Asserting it after the last expected row shows the table has no further row.</summary>
+    private const string NextSection = "\n## Time in status\n";
+
     [Test]
     public async Task The_report_shows_cycle_time_from_the_first_work_status_to_done_for_the_issues_bucket()
     {
@@ -63,7 +66,7 @@ public class CycleTimeTests
 
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).Contains("\nDelivered issues: 1\n");
-        await Assert.That(report).EndsWith("\n## Cycle time by point bucket\n\nNo issue delivered in this sprint has a cycle time.\n");
+        await Assert.That(report).Contains("\n## Cycle time by point bucket\n\nNo issue delivered in this sprint has a cycle time.\n" + NextSection);
         await Assert.That(await CycleTimeRowsAsync(pipeline, 41)).IsEmpty();
     }
 
@@ -288,12 +291,13 @@ public class CycleTimeTests
 
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).Contains("\nDelivered issues: 7\n");
-        await Assert.That(report).EndsWith(
+        await Assert.That(report).Contains(
             TableHeader
             + "| 0.5 | 1 | 0.5 | 0.5 | 0.5 | 0.5 |\n"
             + "| 3 | 2 | 1.5 | 2.0 | 2.5 | 3.0 |\n"
             + "| 13 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n"
-            + "| unestimated | 2 | 2.0 | 3.0 | 2.0 | 3.0 |\n");
+            + "| unestimated | 2 | 2.0 | 3.0 | 2.0 | 3.0 |\n"
+            + NextSection);
 
         // The same rows by ad hoc SQL: an unestimated bucket is a null point_bucket.
         var rows = await CycleTimeRowsAsync(pipeline, 41);
@@ -341,10 +345,11 @@ public class CycleTimeTests
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith(
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(
             TableHeader
             + "| 2.001 | 1 | 1.0 | 1.0 | 1.0 | 1.0 |\n"
-            + "| 2.004 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n");
+            + "| 2.004 | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n"
+            + NextSection);
     }
 
     [Test]

@@ -26,6 +26,8 @@ public class CyclesTests
         [Shipped] = "done",
     });
 
+    private static readonly IReadOnlySet<string> NoAbandonedResolutions = new HashSet<string>();
+
     private static readonly DateTimeOffset Created = Local(2026, 11, 2, 9);
 
     [Test]
@@ -205,7 +207,7 @@ public class CyclesTests
     private static Cycle? CycleOf(string currentStatusId, params StatusChange[] changes)
     {
         var timeline = StatusTimeline.Build(Created, currentStatusId, changes);
-        var delivered = (Delivered)Delivery.Of(currentStatusId, timeline.Intervals, Roles).Value!;
+        var delivered = (Delivered)Delivery.Of(currentStatusId, currentResolutionId: null, timeline.Intervals, Roles, NoAbandonedResolutions).Value!;
         return Cycles.Measure(timeline.Entries, Roles, delivered.At, TeamCalendar());
     }
 
