@@ -30,6 +30,9 @@ public sealed class SkippingClock(DateTimeOffset start) : FakeTimeProvider(start
         }
     }
 
+    /// <summary>Runs when the code under test starts a wait, before the clock moves: what happens "during" the wait, for example the user's Ctrl+C.</summary>
+    public Action? DuringWait { get; set; }
+
     public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
     {
         var timer = base.CreateTimer(callback, state, dueTime, period);
@@ -40,6 +43,7 @@ public sealed class SkippingClock(DateTimeOffset start) : FakeTimeProvider(start
                 _waits.Add(dueTime);
             }
 
+            DuringWait?.Invoke();
             Advance(dueTime);
         }
 
