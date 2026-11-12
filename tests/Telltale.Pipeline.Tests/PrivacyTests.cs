@@ -1,6 +1,6 @@
 using Telltale.Core.Secrets;
 using Telltale.Pipeline.Tests.Harness;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -62,10 +62,10 @@ public class PrivacyTests
         await Assert.That(exit).IsEqualTo(0);
         var files = await pipeline.ReadAllFilesAsync();
 
-        // The scan is only worth something if it reads the files the data is in: the issue key is
+        // The scan is only worth something if it reads the files the data is in: the issue ID is
         // stored and the sprint name is reported, so both must be found.
         await Assert.That(files.Keys).Contains("store.db");
-        await Assert.That(files["store.db"]).Contains("FAKE-1");
+        await Assert.That(files["store.db"]).Contains(pipeline.Jira.IdOf("FAKE-1"));
         await Assert.That(files.Keys).Contains(Path.Combine("reports", "sprint-41.md"));
         await Assert.That(files[Path.Combine("reports", "sprint-41.md")]).Contains("Fake Sprint 41");
 
@@ -92,6 +92,64 @@ public class PrivacyTests
                      where place.Text.Contains(text, StringComparison.OrdinalIgnoreCase)
                      select $"'{text}' in {place.Where}").ToList();
         await Assert.That(leaks).IsEmpty();
+    }
+
+    [Test]
+    public async Task No_issue_key_reaches_the_database_the_report_or_the_console()
+    {
+        // Owner decision D52: nothing reads the key, and beside a person hash it is the easiest way back to a
+        // person, since anyone can look up an issue's assignee. The Jira issue ID identifies the issue.
+        await using var pipeline = new PipelineHarness();
+        AddScenario(pipeline.Jira);
+
+        // An anomaly, so the log has a line about an issue.
+        pipeline.Jira.AddIssue("FAKE-4", Local(2026, 1, 8, 9), createdIn: Workflow.Done);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(0);
+        var files = await pipeline.ReadAllFilesAsync();
+        await Assert.That(files["store.db"]).Contains(pipeline.Jira.IdOf("FAKE-1"));
+        await Assert.That(pipeline.Error.ToString()).Contains($"issue {pipeline.Jira.IdOf("FAKE-4")}");
+        var written = files.Select(file => (Where: file.Key, Text: file.Value))
+            .Append((Where: "standard output", Text: pipeline.Out.ToString().Replace(pipeline.Directory, "", StringComparison.Ordinal)))
+            .Append((Where: "standard error", Text: pipeline.Error.ToString()));
+        var leaks = written.Where(place => place.Text.Contains(FakeJira.ProjectKey + "-", StringComparison.OrdinalIgnoreCase)).Select(place => place.Where).ToList();
+        await Assert.That(leaks).IsEmpty();
+        await Assert.That(await pipeline.QueryAsync<string>("SELECT name FROM pragma_table_info('issue') WHERE name LIKE '%key%';")).IsEmpty();
+    }
+
+    [Test]
+    public async Task A_store_that_held_issue_keys_holds_none_in_its_tables_or_its_bytes_after_the_next_command_nor_what_was_deleted_before()
+    {
+        // A store as the version before owner decision D52 left it: the issue table has the key column.
+        await using var pipeline = new PipelineHarness();
+        AddScenario(pipeline.Jira);
+        await pipeline.RunAllAsync(["backfill"]);
+        await pipeline.ExecuteAsync(
+            """
+            ALTER TABLE issue ADD COLUMN issue_key TEXT NULL;
+            UPDATE issue SET issue_key = 'FAKE-' || substr(issue_id, -1);
+            DELETE FROM schema_migration WHERE name = '0007_drop_issue_key.sql';
+            """);
+
+        // And a row that version deleted without overwriting it, as it deleted the rows of a converted issue
+        // or of people hashed under an old salt: still in the file, in no table.
+        await pipeline.ExecuteAsync(
+            """
+            PRAGMA secure_delete = OFF;
+            INSERT INTO status (status_id, name, category) VALUES ('999999', 'Synthetic text of a row deleted before the migration ran', 'new');
+            DELETE FROM status WHERE status_id = '999999';
+            """);
+        var bytesBefore = await pipeline.ReadDatabaseBytesAsync();
+
+        await pipeline.RunAllAsync(["derive"]);
+
+        await Assert.That(bytesBefore).Contains("FAKE-1");
+        await Assert.That(bytesBefore).Contains("of a row deleted before the migration ran");
+        await Assert.That(await pipeline.ReadDatabaseBytesAsync()).DoesNotContain("of a row deleted before the migration ran");
+        await Assert.That(await pipeline.QueryAsync<string>("SELECT name FROM pragma_table_info('issue') WHERE name LIKE '%key%';")).IsEmpty();
+        await Assert.That(await pipeline.ReadDatabaseBytesAsync()).DoesNotContain("FAKE-");
     }
 
     [Test]
@@ -123,7 +181,7 @@ public class PrivacyTests
     /// </summary>
     private static void AddScenario(FakeJira jira)
     {
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
+        jira.AddSprint41();
         jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).AssignedTo(People.One)
             .Moved(Local(2026, 1, 7, 9), Workflow.Development, by: People.Three)
             .Moved(Local(2026, 1, 9, 15), Workflow.Done, by: People.Three)

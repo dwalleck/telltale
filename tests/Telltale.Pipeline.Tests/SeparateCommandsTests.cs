@@ -1,5 +1,5 @@
 using Telltale.Pipeline.Tests.Harness;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -74,7 +74,7 @@ public class SeparateCommandsTests
         // Owner decision D7: such a sprint ended at its planned end, here later than sprint 41's completion.
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.AddClosedSprintWithoutCompletion(45, "Fake Sprint 45", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9));
-        pipeline.Jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
+        pipeline.Jira.AddSprint41();
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
 
         var exit = await pipeline.RunAsync("report");
@@ -108,7 +108,7 @@ public class SeparateCommandsTests
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
         await Assert.That(ReportFiles(pipeline)).IsEquivalentTo(new[] { "sprint-42.md" });
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -120,7 +120,7 @@ public class SeparateCommandsTests
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 2, 2, 11))
             .Moved(Local(2026, 2, 2, 12), Workflow.Development)
             .Moved(Local(2026, 2, 3, 9), Workflow.Done);
-        pipeline.Jira.AddIdleTeam(43);
+        pipeline.Jira.AddTeam(43);
 
         var exit = await pipeline.RunAsync("run");
 
@@ -131,7 +131,7 @@ public class SeparateCommandsTests
 
         // The store was synced and derived: the running sprint's report can be written from it as it is.
         await pipeline.RunAllAsync(["report", "--sprint", "43"]);
-        await Assert.That(await pipeline.ReadReportAsync(43)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(43)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -166,7 +166,7 @@ public class SeparateCommandsTests
         await Assert.That(stale).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo("The raw data changed since the derived data was built. Run derive first.\n");
         await Assert.That(staleReport).IsEqualTo(reportBefore);
-        await Assert.That(await pipeline.ReadReportAsync(43)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(43)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -183,7 +183,49 @@ public class SeparateCommandsTests
 
         await Assert.That(stale).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo("The raw data changed since the derived data was built. Run derive first.\n");
-        await Assert.That(await pipeline.ReadStoreContentAsync()).DoesNotContain("FAKE-3");
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM issue WHERE issue_id = @id;", new { id = pipeline.Jira.IdOf("FAKE-3") })).IsEquivalentTo(new[] { 0L });
+    }
+
+    [Test]
+    public async Task Report_reads_one_row_about_the_raw_data_and_never_the_raw_rows()
+    {
+        // Final review C18: every report used to read and serialise every raw row to see whether the raw data
+        // had changed. The changelog table is the largest, and no metric view reads it, so without it a
+        // report can only succeed if it does not read the raw rows.
+        await using var pipeline = new PipelineHarness();
+        AddBoard(pipeline.Jira);
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+        await pipeline.ExecuteAsync("DROP TABLE change;");
+
+        var exit = await pipeline.RunAsync("report", "--sprint", "42");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
+    }
+
+    [Test]
+    public async Task What_identifies_the_raw_data_is_written_with_it_and_is_the_same_however_the_same_rows_got_there()
+    {
+        await using var once = new PipelineHarness();
+        AddBoard(once.Jira);
+        await once.RunAllAsync(["backfill"]);
+
+        // The same rows, written by a backfill of less and a sync of the rest.
+        await using var inTwoSteps = new PipelineHarness();
+        AddBoard(inTwoSteps.Jira);
+        var later = inTwoSteps.Jira.Issues[2];
+        inTwoSteps.Jira.Delete(later);
+        await inTwoSteps.RunAllAsync(["backfill"]);
+        var afterTheFirstStep = await inTwoSteps.QueryAsync<string>("SELECT digest FROM raw_state;");
+        inTwoSteps.Jira.Restore(later);
+        await inTwoSteps.RunAllAsync(["sync"]);
+
+        var digest = await once.QueryAsync<string>("SELECT digest FROM raw_state;");
+        await Assert.That(digest.Count).IsEqualTo(1);
+        await Assert.That(digest[0]).Matches("^[0-9A-F]{64}$");
+        await Assert.That(afterTheFirstStep).IsNotEquivalentTo(digest);
+        await Assert.That(await inTwoSteps.QueryAsync<string>("SELECT digest FROM raw_state;")).IsEquivalentTo(digest);
     }
 
     [Test]
@@ -198,7 +240,7 @@ public class SeparateCommandsTests
 
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -233,7 +275,7 @@ public class SeparateCommandsTests
 
         // The store is free again once the first command has ended.
         await pipeline.RunAllAsync(["derive"], ["report", "--sprint", "42"]);
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -249,7 +291,7 @@ public class SeparateCommandsTests
 
         await Assert.That(requestsDuringBackfill).IsGreaterThan(0);
         await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(requestsDuringBackfill);
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
     }
 
     private static string[] ReportFiles(PipelineHarness pipeline) =>
@@ -264,8 +306,8 @@ public class SeparateCommandsTests
     private static void AddBoard(FakeJira jira)
     {
         jira.AddSprint(43, "Fake Sprint 43", Local(2026, 2, 2, 10), plannedEnd: Local(2026, 2, 16, 9));
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
-        jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9), completed: Local(2026, 2, 2, 9, 30));
+        jira.AddSprint41();
+        jira.AddSprint42();
         jira.AddFutureSprint(44, "Fake Sprint 44", Local(2026, 2, 16, 10), Local(2026, 3, 2, 9));
         jira.AddSprint(40, "Fake Sprint 40", Local(2025, 12, 22, 9), plannedEnd: Local(2026, 1, 5, 8), completed: Local(2026, 1, 5, 8, 30));
 
@@ -278,6 +320,6 @@ public class SeparateCommandsTests
         jira.AddIssue("FAKE-3", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 2, 2, 11), Workflow.Development);
         // A team of five in each sprint, so its delivered count is shown (SuppressionTests).
-        jira.AddIdleTeam(41, 42, 43);
+        jira.AddTeam(41, 42, 43);
     }
 }

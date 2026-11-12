@@ -18,3 +18,5 @@ The test `A_migration_numbered_below_one_already_applied_is_still_applied_and_a_
 - Verified 2026-11-12 at 1e8622b: red, 1 failed of 22 (Pipeline, filter /*/*/StoreTests/*); restored.
 - Verified 2026-11-12 at 4af92da: red, 1 failed of 22 (Pipeline, filter /*/*/StoreTests/*); restored.
 - Verified 2026-11-12 at 2fa24b9: red, 1 failed of 22 (Pipeline, filter /*/*/StoreTests/*); restored.
+- Verified 2026-11-12 at 5c4f1d9: red, 1 failed of 25 (Pipeline, filter /*/*/StoreTests/*); restored.
+- Verified 2026-11-12 at 741dd98: red, 1 failed of 25 (Pipeline, filter /*/*/StoreTests/*); restored.

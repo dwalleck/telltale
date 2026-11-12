@@ -14,16 +14,52 @@ public sealed record IssueStatusInterval(string IssueId, string StatusId, DateTi
 /// sprints, and for every issue that is not delivered).
 /// <see cref="ReopenCount"/> is how many times the issue moved out of a done-role status, delivered or not.
 /// </summary>
-public sealed record IssueCycle(string IssueId, DateTimeOffset? CycleEnd, bool Delivered, string? DeliverySprintId, int ReopenCount)
+/// <remarks>
+/// Built only by <see cref="OfDelivered"/>, <see cref="OfAbandoned"/> and <see cref="OfNotDelivered"/>, one for each
+/// outcome, so the members cannot contradict each other: only a delivered issue has a delivery sprint, a cycle
+/// time or a point bucket, and only an issue that reached done has a cycle end.
+/// </remarks>
+public sealed record IssueCycle
 {
+    private IssueCycle(string issueId, int reopenCount)
+    {
+        IssueId = issueId;
+        ReopenCount = reopenCount;
+    }
+
+    public string IssueId { get; }
+
+    public DateTimeOffset? CycleEnd { get; private init; }
+
+    public bool Delivered { get; private init; }
+
+    public string? DeliverySprintId { get; private init; }
+
+    public int ReopenCount { get; }
+
     /// <summary>The issue's cycle time. Null when it has none: it is not delivered, or it never entered a work-role status.</summary>
-    public Cycle? Cycle { get; init; }
+    public Cycle? Cycle { get; private init; }
 
     /// <summary>
     /// The story point estimate the issue is grouped by. Set for delivered issues only: null for one that is
     /// unestimated, and for every issue that is not delivered, whatever its estimate.
     /// </summary>
-    public double? PointBucket { get; init; }
+    public double? PointBucket { get; private init; }
+
+    /// <summary>
+    /// A delivered issue. <paramref name="deliverySprintId"/> is null when the delivery fell between sprints,
+    /// <paramref name="cycle"/> when the issue never entered a work-role status, and
+    /// <paramref name="pointBucket"/> when it is unestimated.
+    /// </summary>
+    public static IssueCycle OfDelivered(string issueId, DateTimeOffset deliveredAt, string? deliverySprintId, Cycle? cycle, double? pointBucket, int reopenCount) =>
+        new(issueId, reopenCount) { CycleEnd = deliveredAt, Delivered = true, DeliverySprintId = deliverySprintId, Cycle = cycle, PointBucket = pointBucket };
+
+    /// <summary>An abandoned issue: it reached done at <paramref name="closedAt"/>, which is its cycle end, and that is not a delivery.</summary>
+    public static IssueCycle OfAbandoned(string issueId, DateTimeOffset closedAt, int reopenCount) =>
+        new(issueId, reopenCount) { CycleEnd = closedAt };
+
+    /// <summary>An issue that is not done, or whose history gives no delivery moment.</summary>
+    public static IssueCycle OfNotDelivered(string issueId, int reopenCount) => new(issueId, reopenCount);
 }
 
 /// <summary>
@@ -82,12 +118,17 @@ public sealed record IssueAnomaly(string IssueId, ChangelogAnomalyKind Kind)
 
 /// <summary>
 /// What a rebuild of the derived data was built from, besides its as-of time: a digest that identifies the raw
-/// data it read, and the settings its business days were counted with. <see cref="Holidays"/> is the holiday
-/// list as ISO dates in order, separated by commas. <see cref="BaselineSprintIds"/> is the baseline sprint list
-/// the baseline views pool over, as a JSON array of the IDs in order, e.g. <c>["41","42"]</c>; <c>[]</c> when
-/// there is no baseline. When any of the four no longer matches, the derived data is stale.
+/// data it read, and every setting a derived value depends on. When any of them no longer matches, the derived
+/// data is stale. The settings that decide what was fetched are not here: the store records them with the raw
+/// data (<see cref="CollectionScope"/>).
 /// </summary>
-public sealed record DerivedSource(string RawDigest, string TimeZone, string Holidays, string BaselineSprintIds)
+/// <param name="RawDigest">Identifies the raw data the rebuild read.</param>
+/// <param name="TimeZone">The time zone business days were counted in.</param>
+/// <param name="Holidays">The holiday list as ISO dates in order, separated by commas.</param>
+/// <param name="BaselineSprintIds">The baseline sprint list the baseline views pool over, as a JSON array of the IDs in order, e.g. <c>["41","42"]</c>; <c>[]</c> when there is no baseline.</param>
+/// <param name="StatusRoles">Each status and its role in board order, e.g. <c>10001=work,10002=done</c>.</param>
+/// <param name="AbandonedResolutionIds">The abandoned resolution IDs in order, separated by commas.</param>
+public sealed record DerivedSource(string RawDigest, string TimeZone, string Holidays, string BaselineSprintIds, string StatusRoles, string AbandonedResolutionIds)
 {
     /// <summary><see cref="BaselineSprintIds"/> for a list of sprint IDs: the form the store keeps and the views read.</summary>
     public static string BaselineSprintIdsOf(IEnumerable<string> sprintIds) =>
@@ -108,4 +149,10 @@ public sealed record DerivedData(
 
     /// <summary>The changelog anomalies found, at most one per issue and kind.</summary>
     public required IReadOnlyList<IssueAnomaly> Anomalies { get; init; }
+
+    /// <summary>
+    /// The IDs of the closed sprints that have no sprint window because Jira gives them neither a completion
+    /// time nor a planned end (owner decision D51). They are in no derived table; the run names them.
+    /// </summary>
+    public IReadOnlyList<string> ClosedSprintsWithoutAnEnd { get; init; } = [];
 }

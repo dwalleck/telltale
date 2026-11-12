@@ -11,6 +11,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Fixtures both test projects use have one home: tests/Shared. -->
+    <Compile Include="..\Shared\**\*.cs" LinkBase="Shared" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Telltale.Core\Telltale.Core.csproj" />
   </ItemGroup>
 

@@ -1,7 +1,7 @@
 using Telltale.Cli;
 using Telltale.Core.Secrets;
 using Telltale.Pipeline.Tests.Harness;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -193,14 +193,15 @@ public class SecretsSetTests
 
     private const string LostSaltOnRun =
         "The secret 'hashing salt' is not set in the secret store, and the database already holds people hashed with the salt that was there before. "
-        + "A new salt would give every person a second hash, so each would count as two. Restore the original salt. Run 'telltale secrets set hashing-salt'.\n";
+        + "Restore the original salt, or set a new one and run backfill, which hashes everyone again with it; until that backfill every other command stops, because a second salt would make each person count as two. "
+        + "Run 'telltale secrets set hashing-salt'.\n";
 
     private const string LostSaltOnGenerate =
         "The database already holds people hashed with an earlier salt. A new salt would give every person a second hash, so each would count as two. "
         + "Restore the original salt by running 'telltale secrets set hashing-salt' without --generate, or add --replace to start again with a new salt.\n";
 
     [Test]
-    public async Task A_run_with_the_salt_gone_and_hashed_people_in_the_database_says_to_restore_the_original()
+    public async Task A_run_with_the_salt_gone_and_hashed_people_in_the_database_says_to_restore_the_original_or_backfill_under_a_new_one()
     {
         await using var pipeline = new PipelineHarness();
         await RunOnceWithAnAssigneeAsync(pipeline);
@@ -220,7 +221,7 @@ public class SecretsSetTests
     {
         // Issues without an assignee leave no hash behind, so no stored hash can stop matching.
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).Moved(Local(2026, 1, 7, 9), Workflow.Development).Moved(Local(2026, 1, 9, 9), Workflow.Done);
         await pipeline.RunAsync("run", "--sprint", "41");
         pipeline.Secrets.Remove(SecretName.HashingSalt);
@@ -275,7 +276,7 @@ public class SecretsSetTests
 
     private static async Task RunOnceWithAnAssigneeAsync(PipelineHarness pipeline)
     {
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).AssignedTo(People.One)
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 9), Workflow.Done);
@@ -283,15 +284,13 @@ public class SecretsSetTests
         await Assert.That(exit).IsEqualTo(0);
     }
 
-    private static void AddOneSprint(FakeJira jira) =>
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
 
     [Test]
     public async Task No_secret_value_reaches_the_console_the_configuration_file_the_database_or_the_report()
     {
         await using var pipeline = new PipelineHarness();
         pipeline.Secrets.Clear();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 9), Workflow.Done);
@@ -309,7 +308,7 @@ public class SecretsSetTests
         // The scan is only worth something if it reads what the commands wrote and the secrets were used.
         await Assert.That(files.Keys).Contains("telltale.json");
         await Assert.That(files.Keys).Contains(Path.Combine("reports", "sprint-41.md"));
-        await Assert.That(files["store.db"]).Contains("FAKE-1");
+        await Assert.That(files["store.db"]).Contains(pipeline.Jira.IdOf("FAKE-1"));
         await Assert.That(pipeline.Out.ToString()).Contains("Stored the secret 'hashing salt'.");
         await Assert.That(pipeline.Secrets.Count).IsEqualTo(3);
 

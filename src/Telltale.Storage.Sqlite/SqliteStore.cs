@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -6,7 +7,7 @@ using Dapper;
 using Microsoft.Data.Sqlite;
 using SQLitePCL;
 using Telltale.Core;
-using Telltale.Core.Derive;
+using Telltale.Core.Identity;
 using Telltale.Core.Storage;
 
 namespace Telltale.Storage.Sqlite;
@@ -19,14 +20,16 @@ namespace Telltale.Storage.Sqlite;
 /// <list type="bullet">
 /// <item><c>Sql/Migrations</c>: raw tables. Each script runs once per database, recorded by file name. Never edit one
 /// that has been merged; add a new file. Raw data is costly to refetch, so these tables are never dropped.
-/// Their rows are added and updated by Jira's own IDs (<see cref="WriteRawAsync(RawData, Watermark, CancellationToken)"/>),
-/// except in <see cref="ReplaceRawAsync"/>: a backfill removes every issue, change and sprint and writes what it
+/// Their rows are added and updated by Jira's own IDs (<see cref="WriteRawAsync"/>),
+/// except for a batch with <see cref="RawBatch.ReplacesEverything"/>: a backfill removes every issue, change and sprint and writes what it
 /// fetched in their place, so a row for something that has left Jira does not stay. Statuses are only ever added and updated.</item>
-/// <item><c>Sql/Derived</c>: derived tables. Every rebuild drops what the last one created and runs every script, so a
+/// <item><c>Sql/Derived</c>: derived tables, and internal views over them that no query may read (they apply no
+/// minimum group size). Every rebuild drops what the last one created and runs every script, so a
 /// changed definition needs no migration (ADR-0002). A script only creates; it never drops.</item>
 /// <item><c>Sql/Views</c>: metric views, the only thing Reporting and ad hoc SQL read. Rebuilt the same way, after the
 /// derived tables. A group-size guard belongs inside its view (ADR-0003).</item>
-/// <item>Tables and views the scripts create are recorded in <c>derived_object</c>. Anything else in the database
+/// <item>Tables and views the scripts create are recorded in <c>derived_object</c>, with their kind: <c>table</c>,
+/// <c>internal view</c> or <c>view</c> (a metric view). Anything else in the database
 /// (a view the owner saved by hand) is left alone.</item>
 /// </list>
 /// Times are stored as UTC text (<see cref="StoredTime"/>).
@@ -62,6 +65,14 @@ public sealed class SqliteStore : ITelltaleStore
         _readOnlyConnectionString = ReadOnlyConnectionString(databasePath);
     }
 
+    /// <summary>
+    /// The migrations after which the file is rebuilt (VACUUM). <c>secure_delete</c> overwrites what a
+    /// connection of this version deletes; it does nothing for what an earlier version deleted or dropped and
+    /// left in the file's free pages: person hashes under an old salt, the rows of issues that left scope,
+    /// issue keys. The migration that drops the issue key is where a store from such a version arrives.
+    /// </summary>
+    private static readonly HashSet<string> RebuildFileAfter = ["0007_drop_issue_key.sql"];
+
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
@@ -73,20 +84,23 @@ public sealed class SqliteStore : ITelltaleStore
             """));
         var applied = (await connection.QueryAsync<string>(Command(cancellationToken, "SELECT name FROM schema_migration;"))).ToHashSet(StringComparer.Ordinal);
 
+        var rebuildFile = false;
         foreach (var (name, sql) in Scripts.InFolder("Migrations").Where(script => !applied.Contains(script.Name)))
         {
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
             await connection.ExecuteAsync(Command(cancellationToken, sql, transaction: transaction));
             await connection.ExecuteAsync(Command(cancellationToken, "INSERT INTO schema_migration (name) VALUES (@name);", new { name }, transaction));
             await transaction.CommitAsync(cancellationToken);
+            rebuildFile |= RebuildFileAfter.Contains(name);
+        }
+
+        // Once, after such a migration: VACUUM writes the file anew from its live rows, so nothing that was
+        // deleted before this version set secure_delete stays in a free page. It cannot run in a transaction.
+        if (rebuildFile)
+        {
+            await connection.ExecuteAsync(Command(cancellationToken, "VACUUM;"));
         }
     }
-
-    public Task WriteRawAsync(RawData batch, Watermark reached, CancellationToken cancellationToken = default) =>
-        WriteRawAsync(batch, reached, replaceAll: false, cancellationToken);
-
-    public Task ReplaceRawAsync(RawData everything, Watermark reached, CancellationToken cancellationToken = default) =>
-        WriteRawAsync(everything, reached, replaceAll: true, cancellationToken);
 
     public async Task<RawCounts> CountRawAsync(CancellationToken cancellationToken = default)
     {
@@ -96,12 +110,21 @@ public sealed class SqliteStore : ITelltaleStore
             "SELECT (SELECT COUNT(*) FROM issue) AS Issues, (SELECT COUNT(*) FROM sprint) AS Sprints, (SELECT COUNT(*) FROM change) AS Changes;"));
     }
 
-    private async Task WriteRawAsync(RawData batch, Watermark reached, bool replaceAll, CancellationToken cancellationToken)
+    public async Task WriteRawAsync(RawBatch batch, CancellationToken cancellationToken = default)
     {
+        var (rows, reached, replaceAll) = (batch.Rows, batch.Reached, batch.ReplacesEverything);
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
         var hashedWithBefore = await ReadSaltFingerprintAsync(connection, transaction, cancellationToken);
+
+        // A batch added to the stored rows must be hashed with their salt, whoever the caller is: the rows it
+        // does not touch keep their hashes, and two salts make one person two. A batch that replaces every
+        // row brings its own salt.
+        if (!replaceAll)
+        {
+            IdentityHash.RequireSameSalt(hashedWithBefore, batch.SaltFingerprint);
+        }
 
         // A backfill's batch is everything Jira holds now, so whatever else the raw tables hold has left Jira,
         // or was fetched under settings or a salt that no longer apply (owner decision D4). Inside the
@@ -124,10 +147,9 @@ public sealed class SqliteStore : ITelltaleStore
             connection,
             transaction,
             """
-            INSERT INTO issue (issue_id, issue_key, issue_type_id, created, status_id, resolution_id, story_points, assignee_hash, updated, sprint_ids)
-            VALUES (@issueId, @key, @issueTypeId, @created, @statusId, @resolutionId, @storyPoints, @assigneeHash, @updated, @sprintIds)
+            INSERT INTO issue (issue_id, issue_type_id, created, status_id, resolution_id, story_points, assignee_hash, updated, sprint_ids)
+            VALUES (@issueId, @issueTypeId, @created, @statusId, @resolutionId, @storyPoints, @assigneeHash, @updated, @sprintIds)
             ON CONFLICT (issue_id) DO UPDATE SET
-                issue_key = excluded.issue_key,
                 issue_type_id = excluded.issue_type_id,
                 created = excluded.created,
                 status_id = excluded.status_id,
@@ -137,10 +159,10 @@ public sealed class SqliteStore : ITelltaleStore
                 updated = excluded.updated,
                 sprint_ids = excluded.sprint_ids;
             """,
-            ["@issueId", "@key", "@issueTypeId", "@created", "@statusId", "@resolutionId", "@storyPoints", "@assigneeHash", "@updated", "@sprintIds"],
-            batch.Issues.Select(issue => new object?[]
+            ["@issueId", "@issueTypeId", "@created", "@statusId", "@resolutionId", "@storyPoints", "@assigneeHash", "@updated", "@sprintIds"],
+            rows.Issues.Select(issue => new object?[]
             {
-                issue.IssueId, issue.Key, issue.IssueTypeId, StoredTime.ToStored(issue.Created), issue.StatusId, issue.ResolutionId,
+                issue.IssueId, issue.IssueTypeId, StoredTime.ToStored(issue.Created), issue.StatusId, issue.ResolutionId,
                 issue.StoryPoints, issue.AssigneeHash, StoredTime.ToStored(issue.Updated), issue.SprintIds,
             }),
             cancellationToken);
@@ -155,7 +177,7 @@ public sealed class SqliteStore : ITelltaleStore
             ON CONFLICT (history_id, field) DO NOTHING;
             """,
             ["@historyId", "@field", "@issueId", "@at", "@from", "@to"],
-            batch.Changes.Select(change => new object?[] { change.HistoryId, change.Field, change.IssueId, StoredTime.ToStored(change.At), change.From, change.To }),
+            rows.Changes.Select(change => new object?[] { change.HistoryId, change.Field, change.IssueId, StoredTime.ToStored(change.At), change.From, change.To }),
             cancellationToken);
 
         await ExecuteForEachRowAsync(
@@ -173,7 +195,7 @@ public sealed class SqliteStore : ITelltaleStore
                 completed = excluded.completed;
             """,
             ["@sprintId", "@boardId", "@name", "@state", "@started", "@plannedEnd", "@completed"],
-            batch.Sprints.Select(sprint => new object?[]
+            rows.Sprints.Select(sprint => new object?[]
             {
                 sprint.SprintId, sprint.BoardId, sprint.Name, sprint.State,
                 StoredTime.ToStored(sprint.Start), StoredTime.ToStored(sprint.PlannedEnd), StoredTime.ToStored(sprint.Completed),
@@ -189,7 +211,7 @@ public sealed class SqliteStore : ITelltaleStore
             ON CONFLICT (status_id) DO UPDATE SET name = excluded.name, category = excluded.category;
             """,
             ["@statusId", "@name", "@category"],
-            batch.Statuses.Select(status => new object?[] { status.StatusId, status.Name, status.Category }),
+            rows.Statuses.Select(status => new object?[] { status.StatusId, status.Name, status.Category }),
             cancellationToken);
 
         // Set, not raised: a batch that reaches less far (a backfill starting over) leaves a watermark that
@@ -197,14 +219,37 @@ public sealed class SqliteStore : ITelltaleStore
         await connection.ExecuteAsync(Command(
             cancellationToken,
             """
-            INSERT INTO watermark (collector, covers, updated_through)
-            VALUES (@Collector, @Covers, @UpdatedThrough)
-            ON CONFLICT (collector) DO UPDATE SET covers = excluded.covers, updated_through = excluded.updated_through;
+            INSERT INTO watermark (collector, site_url, board_id, project_keys, start_date, history_fields, updated_through)
+            VALUES (@Collector, @SiteUrl, @BoardId, @ProjectKeys, @StartDate, @HistoryFields, @UpdatedThrough)
+            ON CONFLICT (collector) DO UPDATE SET
+                site_url = excluded.site_url,
+                board_id = excluded.board_id,
+                project_keys = excluded.project_keys,
+                start_date = excluded.start_date,
+                history_fields = excluded.history_fields,
+                updated_through = excluded.updated_through;
             """,
-            new { reached.Collector, reached.Covers, UpdatedThrough = StoredTime.ToStored(reached.UpdatedThrough) },
+            new
+            {
+                reached.Collector,
+                reached.Scope.SiteUrl,
+                reached.Scope.BoardId,
+                reached.Scope.ProjectKeys,
+                StartDate = reached.Scope.StoredStartDate,
+                reached.Scope.HistoryFields,
+                UpdatedThrough = StoredTime.ToStored(reached.UpdatedThrough),
+            },
             transaction));
 
-        await RecordSaltAsync(connection, transaction, batch, hashedWithBefore, cancellationToken);
+        await RecordSaltAsync(connection, transaction, batch.SaltFingerprint, hashedWithBefore, cancellationToken);
+
+        // What the raw tables hold now, identified. Written with the batch, so the digest is never of anything
+        // but the stored rows, and whoever asks whether the raw data changed reads one row.
+        // Every write reads all raw rows back for this, so its cost grows with the store and not with the
+        // batch. That is accepted: the store is one team's board (thousands of rows), a fetch is one batch,
+        // and a digest of the whole raw set is what makes "the raw data changed" reliable.
+        var digest = DigestOf(await ReadRawAsync(connection, transaction, cancellationToken));
+        await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM raw_state; INSERT INTO raw_state (digest) VALUES (@digest);", new { digest }, transaction));
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -224,12 +269,12 @@ public sealed class SqliteStore : ITelltaleStore
     /// <summary>
     /// Records the salt a batch was hashed with, after the batch's rows are written. A batch under another
     /// salt than the store's people were hashed with comes only from a backfill, which replaces every issue
-    /// (<see cref="ReplaceRawAsync"/>), so no row is left with a hash of the old salt. A sync never brings one:
-    /// the collector refuses to fetch under another salt than the store's.
+    /// (<see cref="RawBatch.ReplacesEverything"/>), so no row is left with a hash of the old salt. A batch that is added
+    /// under another salt was refused before anything was written.
     /// </summary>
-    private static async Task RecordSaltAsync(DbConnection connection, DbTransaction transaction, RawData batch, string? hashedWithBefore, CancellationToken cancellationToken)
+    private static async Task RecordSaltAsync(DbConnection connection, DbTransaction transaction, string fingerprint, string? hashedWithBefore, CancellationToken cancellationToken)
     {
-        if (batch.SaltFingerprint is not { } fingerprint || fingerprint == hashedWithBefore)
+        if (fingerprint == hashedWithBefore)
         {
             return;
         }
@@ -241,21 +286,63 @@ public sealed class SqliteStore : ITelltaleStore
     public async Task<Watermark?> ReadWatermarkAsync(string collector, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
-        var row = await connection.QuerySingleOrDefaultAsync<WatermarkRow>(Command(cancellationToken, "SELECT covers, updated_through FROM watermark WHERE collector = @collector;", new { collector }));
-        return row is null ? null : new Watermark(collector, row.Covers, StoredTime.FromStoredOrNull(row.UpdatedThrough));
+        var row = await connection.QuerySingleOrDefaultAsync<WatermarkRow>(Command(
+            cancellationToken,
+            "SELECT site_url, board_id, project_keys, start_date, history_fields, updated_through FROM watermark WHERE collector = @collector;",
+            new { collector }));
+        return row is null
+            ? null
+            : new Watermark(
+                collector,
+                new CollectionScope(
+                    row.SiteUrl,
+                    row.BoardId,
+                    row.ProjectKeys,
+                    row.StartDate is null ? null : DateOnly.ParseExact(row.StartDate, "yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    row.HistoryFields),
+                StoredTime.FromStoredOrNull(row.UpdatedThrough));
     }
+
+    public async Task<string?> ReadRawDigestAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
+        return await connection.QuerySingleOrDefaultAsync<string?>(Command(cancellationToken, "SELECT digest FROM raw_state;"));
+    }
+
+    /// <summary>
+    /// Identifies raw data by its content: equal raw data gives an equal digest, whenever and however often
+    /// it was written. It covers every field of every raw row, so a field added to the raw records is covered
+    /// without a change here. The rows must be in the store's fixed reading order.
+    /// </summary>
+    private static string DigestOf(RawData raw) =>
+        Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(raw)));
 
     public async Task<RawData> ReadRawAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
+        return await ReadRawAsync(connection, transaction: null, cancellationToken);
+    }
 
-        var issues = await connection.QueryAsync<IssueRow>(Command(cancellationToken, "SELECT * FROM issue ORDER BY issue_id;"));
-        var changes = await connection.QueryAsync<ChangeRow>(Command(cancellationToken, "SELECT * FROM change ORDER BY issue_id, at, history_id;"));
-        var sprints = await connection.QueryAsync<SprintRow>(Command(cancellationToken, "SELECT * FROM sprint ORDER BY sprint_id;"));
-        var statuses = await connection.QueryAsync<StatusRow>(Command(cancellationToken, "SELECT * FROM status ORDER BY status_id;"));
+    private static async Task<RawData> ReadRawAsync(DbConnection connection, DbTransaction? transaction, CancellationToken cancellationToken)
+    {
+        var issues = await connection.QueryAsync<IssueRow>(Command(cancellationToken, "SELECT * FROM issue ORDER BY issue_id;", transaction: transaction));
+        var changes = await connection.QueryAsync<ChangeRow>(Command(cancellationToken, "SELECT * FROM change ORDER BY issue_id, at, history_id;", transaction: transaction));
+        var sprints = await connection.QueryAsync<SprintRow>(Command(cancellationToken, "SELECT * FROM sprint ORDER BY sprint_id;", transaction: transaction));
+        var statuses = await connection.QueryAsync<StatusRow>(Command(cancellationToken, "SELECT * FROM status ORDER BY status_id;", transaction: transaction));
 
         return new RawData(
-            [.. issues.Select(row => new RawIssue(row.IssueId, row.IssueKey, row.IssueTypeId, StoredTime.FromStored(row.Created), row.StatusId, row.ResolutionId, row.StoryPoints, row.AssigneeHash, StoredTime.FromStored(row.Updated), row.SprintIds))],
+            [.. issues.Select(row => new RawIssue
+            {
+                IssueId = row.IssueId,
+                IssueTypeId = row.IssueTypeId,
+                Created = StoredTime.FromStored(row.Created),
+                StatusId = row.StatusId,
+                ResolutionId = row.ResolutionId,
+                StoryPoints = row.StoryPoints,
+                AssigneeHash = row.AssigneeHash,
+                Updated = StoredTime.FromStored(row.Updated),
+                SprintIds = row.SprintIds,
+            })],
             [.. changes.Select(row => new RawChange(row.HistoryId, row.IssueId, StoredTime.FromStored(row.At), row.Field, row.FromValue, row.ToValue))],
             [.. sprints.Select(row => new RawSprint(row.SprintId, row.BoardId, row.Name, row.State, StoredTime.FromStoredOrNull(row.Started), StoredTime.FromStoredOrNull(row.PlannedEnd), StoredTime.FromStoredOrNull(row.Completed)))],
             [.. statuses.Select(row => new RawStatus(row.StatusId, row.Name, row.Category))]);
@@ -269,10 +356,10 @@ public sealed class SqliteStore : ITelltaleStore
         // Drop what the previous rebuild created, and only that: a table or view the owner made by hand is
         // not the tool's to drop, and one whose script has since been removed must not linger.
         // Views go first, because they read the derived tables.
-        var previous = await connection.QueryAsync<(string Name, string Kind)>(Command(cancellationToken, "SELECT name, kind FROM derived_object ORDER BY kind = 'view' DESC, name;", transaction: transaction));
+        var previous = await connection.QueryAsync<(string Name, string Kind)>(Command(cancellationToken, "SELECT name, kind FROM derived_object ORDER BY kind = 'view' DESC, kind = 'internal view' DESC, name;", transaction: transaction));
         foreach (var (name, kind) in previous)
         {
-            await connection.ExecuteAsync(Command(cancellationToken, $"DROP {(kind == "view" ? "VIEW" : "TABLE")} IF EXISTS {Quoted(name)};", transaction: transaction));
+            await connection.ExecuteAsync(Command(cancellationToken, $"DROP {(kind == "table" ? "TABLE" : "VIEW")} IF EXISTS {Quoted(name)};", transaction: transaction));
         }
 
         await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM derived_object;", transaction: transaction));
@@ -341,9 +428,12 @@ public sealed class SqliteStore : ITelltaleStore
         await ExecuteForEachRowAsync(
             connection,
             transaction,
-            "INSERT INTO run (as_of, raw_digest, time_zone, holidays, baseline_sprint_ids, objects_version) VALUES (@asOf, @rawDigest, @timeZone, @holidays, @baselineSprintIds, @objectsVersion);",
-            ["@asOf", "@rawDigest", "@timeZone", "@holidays", "@baselineSprintIds", "@objectsVersion"],
-            [[StoredTime.ToStored(derived.AsOf), source.RawDigest, source.TimeZone, source.Holidays, source.BaselineSprintIds, DerivedObjectsVersion]],
+            """
+            INSERT INTO run (as_of, raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, objects_version)
+            VALUES (@asOf, @rawDigest, @timeZone, @holidays, @baselineSprintIds, @statusRoles, @abandonedResolutionIds, @objectsVersion);
+            """,
+            ["@asOf", "@rawDigest", "@timeZone", "@holidays", "@baselineSprintIds", "@statusRoles", "@abandonedResolutionIds", "@objectsVersion"],
+            [[StoredTime.ToStored(derived.AsOf), source.RawDigest, source.TimeZone, source.Holidays, source.BaselineSprintIds, source.StatusRoles, source.AbandonedResolutionIds, DerivedObjectsVersion]],
             cancellationToken);
 
         await ExecuteForEachRowAsync(
@@ -354,27 +444,19 @@ public sealed class SqliteStore : ITelltaleStore
             derived.Anomalies.Select(anomaly => new object?[] { anomaly.IssueId, anomaly.Message }),
             cancellationToken);
 
+        // A view a Derived script creates is internal: the metric views read it, and nothing else may, because
+        // it applies no minimum group size. Only what the Views scripts create is a metric view.
+        var internalViews = (await connection.QueryAsync<string>(Command(cancellationToken, "SELECT name FROM sqlite_master WHERE type = 'view' AND name NOT IN @before;", new { before }, transaction))).AsList();
         foreach (var (_, sql) in Scripts.InFolder("Views"))
         {
             await connection.ExecuteAsync(Command(cancellationToken, sql, transaction: transaction));
         }
 
-        // The team check is the views' (sprint_team), so it can only be asked now. Nothing has been committed:
-        // a refused list leaves the previous derived data as it was.
-        var shortOfFive = (await connection.QueryAsync<string>(Command(
-            cancellationToken,
-            "SELECT b.value FROM json_each((SELECT baseline_sprint_ids FROM run)) b LEFT JOIN sprint_team t ON t.sprint_id = b.value WHERE COALESCE(t.suppressed, 1) <> 0 ORDER BY b.value;",
-            transaction: transaction))).AsList();
-        if (shortOfFive.Count > 0)
-        {
-            throw BaselineSprintRules.ShortOfFiveAssignees(shortOfFive);
-        }
-
         // Whatever the scripts created is the tool's, and is what the next rebuild drops.
         await connection.ExecuteAsync(Command(
             cancellationToken,
-            "INSERT INTO derived_object (name, kind) SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT IN @before;",
-            new { before },
+            "INSERT INTO derived_object (name, kind) SELECT name, CASE WHEN name IN @internalViews THEN 'internal view' ELSE type END FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT IN @before;",
+            new { before, internalViews },
             transaction));
 
         await transaction.CommitAsync(cancellationToken);
@@ -385,10 +467,29 @@ public sealed class SqliteStore : ITelltaleStore
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
 
         // The table is itself derived: before the first rebuild it does not exist.
-        var built = await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object WHERE name = 'run');"));
-        return built
-            ? await connection.QuerySingleOrDefaultAsync<DerivedSource?>(Command(cancellationToken, "SELECT raw_digest, time_zone, holidays, baseline_sprint_ids FROM run;"))
-            : null;
+        if (!await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object WHERE name = 'run');")))
+        {
+            return null;
+        }
+
+        // Another version's table can lack a column read here, so its version is asked first.
+        await RequireDerivedByThisVersionAsync(connection, cancellationToken);
+        return await connection.QuerySingleOrDefaultAsync<DerivedSource?>(Command(cancellationToken, "SELECT raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids FROM run;"));
+    }
+
+    /// <summary>
+    /// Stops when the derived tables and metric views were created by other scripts than this version's.
+    /// Their columns and rules are then not the ones this version reads and relies on. Deriving again repairs it.
+    /// </summary>
+    private static async Task RequireDerivedByThisVersionAsync(DbConnection connection, CancellationToken cancellationToken)
+    {
+        // Derived data from before the version was recorded has no such column.
+        var recordsVersion = await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM pragma_table_info('run') WHERE name = 'objects_version');"));
+        var version = recordsVersion ? await connection.QuerySingleOrDefaultAsync<string?>(Command(cancellationToken, "SELECT objects_version FROM run;")) : null;
+        if (version != DerivedObjectsVersion)
+        {
+            throw new UserFacingException("The derived data in the store was built by another version of this tool. Run derive first.");
+        }
     }
 
     public async Task<IReadOnlySet<(string IssueId, string Message)>> ReadAnomaliesAsync(CancellationToken cancellationToken = default)
@@ -407,11 +508,82 @@ public sealed class SqliteStore : ITelltaleStore
     public async Task<IReadOnlyList<T>> QueryViewsAsync<T>(string sql, object? parameters = null, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_readOnlyConnectionString, cancellationToken);
+        var views = await LimitToMetricViewsAsync(connection, sql, cancellationToken);
+        try
+        {
+            return (await connection.QueryAsync<T>(new CommandDefinition(sql, parameters, cancellationToken: cancellationToken))).AsList();
+        }
+        catch (SqliteException exception) when (exception.SqliteErrorCode == raw.SQLITE_AUTH)
+        {
+            throw NotAMetricView(views, exception);
+        }
+    }
 
-        // The query runs against copies of the metric views' rows in the connection's temporary schema, and from
-        // here on the connection may read nothing else. So the views' own rules (the minimum group size above all,
-        // ADR-0003) are applied before the query sees a row, whatever SQL it is given. An unqualified view name
-        // finds the copy first.
+    public async Task<ViewRows> QueryViewRowsAsync(string sql, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(_readOnlyConnectionString, cancellationToken);
+        var views = await LimitToMetricViewsAsync(connection, sql, cancellationToken);
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            await using var reader = await ExecuteWithoutParametersAsync(command, cancellationToken);
+            var columns = Enumerable.Range(0, reader.FieldCount).Select(reader.GetName).ToList();
+            var rows = new List<IReadOnlyList<object?>>();
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var values = new object?[reader.FieldCount];
+                reader.GetValues(values!);
+                rows.Add([.. values.Select(value => value is DBNull ? null : value)]);
+            }
+
+            // Whatever follows the first statement is prepared here, so the guard refuses it before a row is
+            // given back; and a second result would have no place in the answer.
+            if (await reader.NextResultAsync(cancellationToken))
+            {
+                throw new UserFacingException("The SQL holds more than one statement. Give one query at a time.");
+            }
+
+            return new ViewRows(columns, rows);
+        }
+        catch (SqliteException exception) when (exception.SqliteErrorCode == raw.SQLITE_AUTH)
+        {
+            throw NotAMetricView(views, exception);
+        }
+        catch (SqliteException exception) when (exception.SqliteErrorCode == raw.SQLITE_ERROR)
+        {
+            // A fault in the SQL itself. SQLite's message names what it could not read, never a row's data.
+            throw new UserFacingException($"The query could not be run: {exception.Message}", exception);
+        }
+    }
+
+    /// <summary>
+    /// Runs the owner's SQL, which is given no parameter values. SQL that holds a parameter (<c>@id</c>,
+    /// <c>$id</c>, <c>:id</c>) is refused by the provider before it runs; that is said plainly here.
+    /// </summary>
+    private static async Task<DbDataReader> ExecuteWithoutParametersAsync(SqliteCommand command, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await command.ExecuteReaderAsync(cancellationToken);
+        }
+        catch (InvalidOperationException exception) when (exception.InnerException is null)
+        {
+            throw new UserFacingException(
+                "The query could not be run: the SQL holds a parameter (a name after @, $ or :), and a query is given no values for one. Write the value into the SQL.",
+                exception);
+        }
+    }
+
+    /// <summary>
+    /// Prepares a connection for a query over the metric views. The query will run against copies of the
+    /// metric views' rows in the connection's temporary schema, and from here on the connection may read
+    /// nothing else. So the views' own rules (the minimum group size above all, ADR-0003) are applied before
+    /// the query sees a row, whatever SQL it is given. An unqualified view name finds the copy first.
+    /// Returns the names of the metric views.
+    /// </summary>
+    private static async Task<HashSet<string>> LimitToMetricViewsAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)
+    {
         var views = await CopyMetricViewsAsync(connection, sql, cancellationToken);
         var rc = raw.sqlite3_set_authorizer(connection.Handle, MetricViewsOnly, views);
         if (rc != raw.SQLITE_OK)
@@ -419,17 +591,11 @@ public sealed class SqliteStore : ITelltaleStore
             throw new InvalidOperationException($"SQLite did not accept the guard that limits a query to the metric views (result code {rc}), so the query was not run.");
         }
 
-        try
-        {
-            return (await connection.QueryAsync<T>(new CommandDefinition(sql, parameters, cancellationToken: cancellationToken))).AsList();
-        }
-        catch (SqliteException exception) when (exception.SqliteErrorCode == raw.SQLITE_AUTH)
-        {
-            throw new InvalidOperationException(
-                $"This query reads only the metric views ({string.Join(", ", views.Order(StringComparer.Ordinal))}), and it asked for something else: {exception.Message}",
-                exception);
-        }
+        return views;
     }
+
+    private static InvalidOperationException NotAMetricView(HashSet<string> views, SqliteException exception) =>
+        new($"This query reads only the metric views ({string.Join(", ", views.Order(StringComparer.Ordinal))}), and it asked for something else: {exception.Message}", exception);
 
     /// <summary>
     /// Identifies the scripts that create the derived tables and the metric views: a digest of their names and
@@ -456,13 +622,7 @@ public sealed class SqliteStore : ITelltaleStore
             throw new UserFacingException("The store has no derived data yet. Run derive first.");
         }
 
-        // Derived data from before the version was recorded has no such column.
-        var recordsVersion = await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM pragma_table_info('run') WHERE name = 'objects_version');"));
-        var version = recordsVersion ? await connection.QuerySingleOrDefaultAsync<string?>(Command(cancellationToken, "SELECT objects_version FROM run;")) : null;
-        if (version != DerivedObjectsVersion)
-        {
-            throw new UserFacingException("The derived data in the store was built by another version of this tool. Run derive first.");
-        }
+        await RequireDerivedByThisVersionAsync(connection, cancellationToken);
 
         // SQLite matches table names without regard to case, and so must the guard.
         var views = (await connection.QueryAsync<string>(Command(cancellationToken, "SELECT name FROM derived_object WHERE kind = 'view' ORDER BY name;"))).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -491,14 +651,15 @@ public sealed class SqliteStore : ITelltaleStore
 
     /// <summary>
     /// SQLite's authorizer for a query over the metric views. It allows a SELECT, the functions it calls and
-    /// reads of the temporary schema, which holds the copies and nothing else. Every other action is denied:
+    /// reads of the temporary schema, which holds the copies and nothing else, also in a recursive query. Every other action is denied:
     /// a read of a raw or derived table or of the schema, a write, a PRAGMA, an ATTACH.
     /// </summary>
     private static int MetricViewsOnly(object userData, int action, string? first, string? second, string? database, string? accessor)
     {
         var allowed = action switch
         {
-            raw.SQLITE_SELECT or raw.SQLITE_FUNCTION => true,
+            // A recursive query grants no read of its own: each table it names is still asked about below.
+            raw.SQLITE_SELECT or raw.SQLITE_FUNCTION or raw.SQLITE_RECURSIVE => true,
 
             // A read that names no column (COUNT(*), EXISTS) comes without a schema name. The table's name
             // decides then: the metric views' names are all it may be.
@@ -573,18 +734,31 @@ public sealed class SqliteStore : ITelltaleStore
 
     private static string Quoted(string identifier) => $"\"{identifier.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
 
+    /// <summary>
+    /// Opens a connection. One that can write overwrites what it deletes (<c>secure_delete</c>): without it a
+    /// deleted row stays readable in the file's free pages, and a backfill under a new salt, or the removal
+    /// of an issue, would leave the old person hashes in the file for anyone who holds it. The setting is
+    /// per connection, so it is set on every one.
+    /// </summary>
     private static async Task<SqliteConnection> OpenAsync(string connectionString, CancellationToken cancellationToken)
     {
         var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
+        if (!IsReadOnly(connectionString))
+        {
+            await connection.ExecuteAsync(Command(cancellationToken, "PRAGMA secure_delete = ON;"));
+        }
+
         return connection;
     }
+
+    private static bool IsReadOnly(string connectionString) =>
+        new SqliteConnectionStringBuilder(connectionString).Mode == SqliteOpenMode.ReadOnly;
 
     // Row shapes as stored. Times are text; StoredTime converts them.
     private sealed class IssueRow
     {
         public string IssueId { get; init; } = "";
-        public string IssueKey { get; init; } = "";
         public string IssueTypeId { get; init; } = "";
         public string Created { get; init; } = "";
         public string StatusId { get; init; } = "";
@@ -618,7 +792,11 @@ public sealed class SqliteStore : ITelltaleStore
 
     private sealed class WatermarkRow
     {
-        public string Covers { get; init; } = "";
+        public string SiteUrl { get; init; } = "";
+        public long BoardId { get; init; }
+        public string ProjectKeys { get; init; } = "";
+        public string? StartDate { get; init; }
+        public string HistoryFields { get; init; } = "";
         public string? UpdatedThrough { get; init; }
     }
 

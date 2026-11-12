@@ -1,5 +1,6 @@
+using Telltale.Core;
 using Telltale.Core.Workflow;
-using static Telltale.Core.Tests.TestTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Core.Tests;
 
@@ -146,5 +147,19 @@ public class PointHistoryTests
 
         await Assert.That(change.From).IsNull();
         await Assert.That(change.To).IsEqualTo(0.5);
+    }
+
+    [Test]
+    [Arguments("three")]
+    [Arguments("")]
+    [Arguments("NaN")]
+    public async Task A_stored_value_that_is_not_a_number_stops_derive_with_a_message_that_does_not_quote_it(string stored)
+    {
+        // B16 of the final review: the collector stores numbers only, so this is a row edited by hand, and
+        // what was put there could be anything.
+        var exception = await Assert.That(() => PointChange.FromRaw("1", CycleStart, from: null, to: stored)).Throws<UserFacingException>();
+
+        await Assert.That(exception!.Message).IsEqualTo(
+            "A stored story point change holds a value that is not a story point number, which the collector never stores. Run backfill to fetch the history again. No figures were derived.");
     }
 }

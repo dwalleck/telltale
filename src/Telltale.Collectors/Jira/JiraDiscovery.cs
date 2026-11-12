@@ -90,10 +90,7 @@ public sealed class JiraDiscovery
     private async Task<List<DiscoveredStatus>> ReadStatusesAsync(JiraClient jira, CancellationToken cancellationToken)
     {
         using var document = await FirstCallAsync(jira, "rest/api/3/status", cancellationToken);
-        return Read<List<DiscoveredStatus>>("status list", () => [.. document.RootElement.EnumerateArray().Select(status => new DiscoveredStatus(
-            Text(status, "id"),
-            Text(status, "name"),
-            Text(status.GetProperty("statusCategory"), "key")))]);
+        return Read<List<DiscoveredStatus>>("status list", () => [.. Statuses(document.RootElement).Select(status => new DiscoveredStatus(status.Id, status.Name, status.CategoryKey))]);
     }
 
     /// <summary>
@@ -184,19 +181,6 @@ public sealed class JiraDiscovery
         JiraClient jira, string path, string what, Func<JsonElement, T> parse, Func<T, string> keyOf, CancellationToken cancellationToken) =>
         OffsetPages.ReadAllAsync(jira, path, PageSize, OffsetPaging.EndsWhenNothingNew, what, "Nothing was written.", page => Read(what, page), parse, keyOf, cancellationToken);
 
-    /// <summary>
-    /// Reads Jira's answer. An answer in a shape the tool does not know stops the command with a plain
-    /// message that names only the kind of failure, never a value from the answer.
-    /// </summary>
-    private static T Read<T>(string what, Func<T> parse)
-    {
-        try
-        {
-            return parse();
-        }
-        catch (Exception exception) when (exception is KeyNotFoundException or InvalidOperationException or FormatException)
-        {
-            throw new UserFacingException($"Jira's {what} answered in a shape this tool does not understand ({exception.GetType().Name}). Nothing was written.", exception);
-        }
-    }
+    /// <summary>Reads Jira's answer (<see cref="JiraJson.Read"/>); when its shape is not known, nothing was written.</summary>
+    private static T Read<T>(string what, Func<T> parse) => JiraJson.Read(what, "Nothing was written.", parse);
 }

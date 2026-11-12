@@ -3,12 +3,12 @@ id: xt-m11
 status: active
 project: Pipeline
 filter: '/*/*/ConfigurationAndSecretsTests/*'
-file: src/Telltale.Cli/Commands/PipelineSteps.cs
+file: src/Telltale.Core/Configuration/TelltaleSettings.cs
 expectedMatches: 1
 find: |-
-  if (config.StatusRoles.Keys.Any(statusId => statusId.Length == 0 || !statusId.All(char.IsAsciiDigit)))
+              if (!statusRoles.Keys.All(SettingRules.IsJiraId))
 replace: |-
-  if (config.StatusRoles.Keys.Any(statusId => statusId.Length == 0))
+              if (!statusRoles.Keys.All(statusId => statusId.Length > 0))
 ---
 # xt-m11: run accepts a status ID that is not digits
 
@@ -19,3 +19,7 @@ Expected red: `A_status_id_that_is_not_digits_is_refused_and_not_shown` (it also
 - Verified 2026-11-12 at bd15475: red, 1 failed of 52 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
 - Verified 2026-11-12 at 4af92da: red, 1 failed of 52 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
 - Verified 2026-11-12 at 2fa24b9: red, 1 failed of 52 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
+- Re-pointed 2026-11-12 by fin (final fix pass): the configuration rules moved to TelltaleSettings.From (A1).
+- Verified 2026-11-12 at 5c4f1d9: red, 1 failed of 53 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
+- Verified 2026-11-12 at 741dd98: red, 1 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
+- Verified 2026-11-12 at 1268959: red, 1 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.

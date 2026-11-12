@@ -10,8 +10,22 @@ public sealed record PointChange(string HistoryId, DateTimeOffset At, double? Fr
     public static PointChange FromRaw(string historyId, DateTimeOffset at, string? from, string? to) =>
         new(historyId, at, Parse(from), Parse(to));
 
-    private static double? Parse(string? raw) =>
-        raw is null ? null : double.Parse(raw, NumberStyles.Float, CultureInfo.InvariantCulture);
+    /// <summary>
+    /// The collector stores only finite numbers that are not negative, so anything else was put in the store
+    /// by hand. The message does not repeat it: what is not a number could be anything.
+    /// </summary>
+    private static double? Parse(string? raw)
+    {
+        if (raw is null)
+        {
+            return null;
+        }
+
+        return double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var points) && double.IsFinite(points) && points >= 0
+            ? points
+            : throw new UserFacingException(
+                "A stored story point change holds a value that is not a story point number, which the collector never stores. Run backfill to fetch the history again. No figures were derived.");
+    }
 }
 
 public static class PointHistory

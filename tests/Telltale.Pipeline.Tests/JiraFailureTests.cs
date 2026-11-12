@@ -1,6 +1,6 @@
 using System.Net;
 using Telltale.Pipeline.Tests.Harness;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -147,6 +147,64 @@ public class JiraFailureTests
     }
 
     [Test]
+    [Arguments("sprintFieldId", "jira.sprintFieldId in the configuration file names a field Jira does not list, so every issue would read as in no sprint. ")]
+    [Arguments("storyPointFieldId", "jira.storyPointFieldId in the configuration file names a field Jira does not list, so every issue would read as unestimated. ")]
+    public async Task A_configured_field_id_that_jira_does_not_list_stops_the_collection_naming_the_setting(string setting, string finding)
+    {
+        // Final review C2: Jira leaves a field it does not know out of the answer, which reads the same as
+        // an empty one. The fake does the same: the search carries the fields it has, under their own IDs.
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        pipeline.Config["jira"]![setting] = "customfield_10099";
+
+        var exit = await pipeline.RunAsync("backfill");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            finding + "Correct the setting (discover finds the field) and run again. Nothing was stored.\n");
+        await Assert.That(pipeline.Jira.Handler.Requests.Count(request => request.Path == "/rest/api/3/search/jql")).IsEqualTo(0);
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM issue;")).IsEquivalentTo(new[] { 0L });
+    }
+
+    [Test]
+    public async Task The_field_list_is_asked_for_once_in_a_collection()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        pipeline.Jira.SearchPageSize = 1;
+
+        await pipeline.RunAllAsync(["backfill"]);
+
+        await Assert.That(pipeline.Jira.Handler.Requests.Count(request => request.Path == "/rest/api/3/field")).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task An_issue_search_that_gives_a_new_token_and_a_full_page_without_end_stops_at_a_page_limit()
+    {
+        // B15 of the final review: a new token and a page that is not empty every time passes the other two
+        // checks for ever.
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        // It refuses after 2100 pages, so a tool that kept asking fails the test with the refusal instead of hanging it.
+        var page = 0;
+        pipeline.Jira.Handler.Override(HttpMethod.Post, "/rest/api/3/search/jql", _ => true, request =>
+        {
+            var number = Interlocked.Increment(ref page);
+            var answer = """{"issues":[{"id":"900009","fields":{"issuetype":{"id":"800003","hierarchyLevel":1}}}],"nextPageToken":"FAKE_TOKEN_PAGE_NUMBER","isLast":false}"""
+                .Replace("NUMBER", number.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
+            return number <= 2100 ? StubHttpHandler.Json(answer)(request) : StubHttpHandler.Json("{}", HttpStatusCode.InternalServerError)(request);
+        });
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira's issue search gave 2000 pages and says more follow. This tool reads no more than that from one list, so that a list without an end cannot keep it running. Nothing was stored.\n");
+        await Assert.That(pipeline.Jira.Handler.Requests.Count(request => request.Path == "/rest/api/3/search/jql")).IsEqualTo(2000);
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM issue;")).IsEquivalentTo(new[] { 0L });
+    }
+
+    [Test]
     [Arguments(
         """{"issueChangeLogs":[],"nextPageToken":"FAKE_CHANGELOG_TOKEN_2"}""",
         "Jira's bulk changelog gave an empty page and says more follow, so entries could be missing. Nothing was stored.\n")]
@@ -213,7 +271,7 @@ public class JiraFailureTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprintAndIssue(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41);
+        pipeline.Jira.AddTeam(41);
         pipeline.Jira.Handler.Override(HttpMethod.Get, $"/rest/agile/1.0/board/{FakeJira.BoardId}/sprint", _ => true,
             StubHttpHandler.Json("""{"maxResults":50,"startAt":0,"total":1,"values":[{"id":41,"state":"closed","name":"Fake Sprint 41","startDate":"2026-01-05T15:00:00.000Z","completeDate":"2026-01-19T16:00:00.000Z"}]}"""));
 
@@ -221,7 +279,7 @@ public class JiraFailureTests
 
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -253,7 +311,7 @@ public class JiraFailureTests
     }
 
     [Test]
-    [Arguments("""{"issues":[{"id":"900001","key":null,"fields":{"issuetype":{"id":"800001","hierarchyLevel":0}}}]}""")]
+    [Arguments("""{"issues":[{"id":null,"key":"FAKE-1","fields":{"issuetype":{"id":"800001","hierarchyLevel":0}}}]}""")]
     [Arguments("""{"issues":[{"id":"900001","key":"FAKE-1","fields":{"issuetype":{"id":"800001","hierarchyLevel":0},"created":"2026-01-06T15:00:00.000+0000","status":{"id":null}}}]}""")]
     public async Task A_null_where_jira_must_give_a_value_is_reported_plainly_and_nothing_is_stored(string searchAnswer)
     {
@@ -270,7 +328,7 @@ public class JiraFailureTests
         // "Nothing was stored": the store holds no issue key, and the status and sprint lists fetched before the search are not in it either.
         var files = await pipeline.ReadAllFilesAsync();
         await Assert.That(files.Keys).Contains("store.db");
-        await Assert.That(files["store.db"]).DoesNotContain("FAKE-1").And.DoesNotContain("Fake Sprint 41");
+        await Assert.That(files["store.db"]).DoesNotContain(pipeline.Jira.IdOf("FAKE-1")).And.DoesNotContain("Fake Sprint 41");
     }
 
     [Test]
@@ -328,7 +386,7 @@ public class JiraFailureTests
 
     private static void AddSprintAndIssue(FakeJira jira)
     {
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
+        jira.AddSprint41();
         jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).AssignedTo(People.One)
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 15), Workflow.Done);

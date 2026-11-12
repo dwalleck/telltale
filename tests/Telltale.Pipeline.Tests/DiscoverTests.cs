@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 using Telltale.Cli;
 using Telltale.Core.Secrets;
 using Telltale.Pipeline.Tests.Harness;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -24,11 +24,11 @@ public class DiscoverTests
     public async Task Run_accepts_the_file_discover_wrote_without_any_edit()
     {
         await using var pipeline = new PipelineHarness();
-        pipeline.Jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
+        pipeline.Jira.AddSprint41();
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).AssignedTo(People.One)
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 15), Workflow.Done);
-        pipeline.Jira.AddIdleTeam(41);
+        pipeline.Jira.AddTeam(41);
 
         var discovered = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
         var written = await File.ReadAllTextAsync(pipeline.ConfigPath);
@@ -37,7 +37,7 @@ public class DiscoverTests
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(discovered).IsEqualTo(0);
         await Assert.That(ran).IsEqualTo(0);
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("Delivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("Delivered issues: 4\n");
         await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(written);
     }
 
@@ -153,7 +153,7 @@ public class DiscoverTests
     {
         // Owner decision D2: the collector reads the project keys from the configuration on every sync.
         await using var pipeline = new PipelineHarness();
-        pipeline.Jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
+        pipeline.Jira.AddSprint41();
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 

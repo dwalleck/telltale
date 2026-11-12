@@ -1,31 +1,14 @@
 using Telltale.Core.Intervals;
 using Telltale.Core.Workflow;
 using static Telltale.Core.Tests.TestTime;
+using static Telltale.Core.Tests.TestWorkflow;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Core.Tests;
 
 /// <summary>November 2026 for reading the dates: the 2nd, 9th and 16th are Mondays.</summary>
 public class CyclesTests
 {
-    private const string New = "1";
-    private const string Development = "4";
-    private const string Review = "5";
-    private const string QE = "6";
-    private const string Blocked = "7";
-    private const string Done = "8";
-    private const string Shipped = "9";
-
-    private static readonly StatusRoles Roles = StatusRoles.Parse(new Dictionary<string, string>
-    {
-        [New] = "not started",
-        [Development] = "work",
-        [Review] = "work",
-        [QE] = "work",
-        [Blocked] = "blocked",
-        [Done] = "done",
-        [Shipped] = "done",
-    });
-
     private static readonly IReadOnlySet<string> NoAbandonedResolutions = new HashSet<string>();
 
     private static readonly DateTimeOffset Created = Local(2026, 11, 2, 9);
@@ -208,7 +191,7 @@ public class CyclesTests
     private static Cycle? CycleOf(string currentStatusId, params StatusChange[] changes)
     {
         var timeline = StatusTimeline.Build(Created, currentStatusId, changes);
-        var delivered = (Delivered)Delivery.Of(currentStatusId, currentResolutionId: null, timeline.Entries, Roles, NoAbandonedResolutions).Value!;
+        var delivered = (Delivered)Delivery.Of(currentStatusId, currentResolutionId: null, timeline.Entries, new DeliveryRules(Roles, NoAbandonedResolutions)).Value!;
         return Cycles.Measure(timeline.Entries, Roles, delivered.At, TeamCalendar());
     }
 

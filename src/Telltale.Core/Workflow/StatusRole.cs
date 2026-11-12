@@ -8,14 +8,6 @@ namespace Telltale.Core.Workflow;
 /// </summary>
 public closed record StatusRole
 {
-    /// <summary>
-    /// Reads a role from its configuration label. Throws <see cref="FormatException"/> for anything else. The
-    /// message does not repeat the label: it comes from the configuration file, and what is not a role could
-    /// be a secret pasted into the wrong place (owner decision D43).
-    /// </summary>
-    public static StatusRole Parse(string label) =>
-        TryParse(label, out var role) ? role : throw new FormatException("The label is not a status role. Use one of: not started, work, blocked, done.");
-
     /// <summary>Reads a role from its configuration label. False for anything that is not one of the four labels.</summary>
     public static bool TryParse(string? label, [NotNullWhen(true)] out StatusRole? role)
     {

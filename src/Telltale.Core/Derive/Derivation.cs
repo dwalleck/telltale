@@ -7,17 +7,19 @@ namespace Telltale.Core.Derive;
 
 /// <summary>
 /// Rebuilds all derived data from the raw rows. It is a pure function of the raw data, the
-/// configured board, status roles, abandoned resolutions and business calendar, and the as-of time, so changing a definition means rerunning it (ADR-0002).
+/// configured status roles, abandoned resolutions and business calendar, and the as-of time, so changing a definition means rerunning it (ADR-0002).
 /// </summary>
 /// <remarks>
-/// Throws <see cref="UserFacingException"/> when an issue is in, or its timeline entered, a status that has no configured role, when
-/// a closed sprint of the board has neither a completion time nor a planned end, or when an issue was stored
-/// before its Sprint field was fetched.
+/// Throws <see cref="UserFacingException"/> when an issue is in, or its timeline entered, a status that has no configured role,
+/// or when an issue was stored before its Sprint field was fetched.
 /// </remarks>
 public static class Derivation
 {
-    public static DerivedData Derive(RawData raw, long boardId, StatusRoles roles, IReadOnlySet<string> abandonedResolutionIds, BusinessCalendar calendar, DateTimeOffset asOf)
+    public static DerivedData Derive(RawData raw, DerivationSettings settings, DateTimeOffset asOf)
     {
+        var (delivery, calendar) = settings;
+        var roles = delivery.Roles;
+
         // Unknown is not "in no sprint": deriving anyway would leave these issues out of every sprint's time in status.
         var sprintsUnknown = raw.Issues.Count(issue => issue.SprintIds is null);
         if (sprintsUnknown > 0)
@@ -39,13 +41,10 @@ public static class Derivation
             .Where(change => change.Field == ChangeFields.Points)
             .ToLookup(change => change.IssueId, change => PointChange.FromRaw(change.HistoryId, change.At, change.From, change.To));
 
-        // Which sprints count is decided here and nowhere else. Only the configured board's: the store can
-        // still hold sprints of a board ID that was since corrected. And only sprints that have started:
-        // a future sprint has no window yet, even when it carries planned dates.
-        var windows = raw.Sprints
-            .Where(sprint => sprint.BoardId == boardId && sprint.State != SprintStates.Future && sprint.Start is not null)
-            .Select(sprint => new SprintWindow(sprint.SprintId, sprint.Start!.Value, WindowEnd(sprint)))
-            .ToList();
+        // Which sprints count is decided by SprintWindows: the sprints that have a window. Every sprint in the
+        // store is the configured board's: a backfill replaces them all, and no command reads a store filled
+        // under another board (CollectionScope.RequireSameAs).
+        var windows = raw.Sprints.Select(SprintWindows.Of).OfType<SprintWindow>().ToList();
 
         // Every status has exactly one role. Guessing one for a status the configuration does not mention
         // (a new status, a mistyped ID) would quietly move issues in or out of the delivered count. Checked
@@ -83,19 +82,17 @@ public static class Derivation
             intervals.AddRange(timeline.Intervals.Select(interval => new IssueStatusInterval(issue.IssueId, interval.StatusId, interval.Start, interval.End)));
 
             var reopens = Cycles.ReopenCount(timeline.Entries, roles);
-            var outcome = Delivery.Of(issue.StatusId, issue.ResolutionId, timeline.Entries, roles, abandonedResolutionIds);
+            var outcome = Delivery.Of(issue.StatusId, issue.ResolutionId, timeline.Entries, delivery);
+
+            // The one place an issue's cycle is built from its outcome.
             cycles.Add(outcome switch
             {
-                Delivered delivered => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At), reopens)
-                {
-                    Cycle = Cycles.Measure(timeline.Entries, roles, delivered.At, calendar),
-                    PointBucket = issue.StoryPoints,
-                }.WithBucketFromHistory(delivered, pointChanges[issue.IssueId]),
+                Delivered delivered => DeliveredCycle(issue, delivered, deliverySprints.For(delivered.At), Cycles.Measure(timeline.Entries, roles, delivered.At, calendar), pointChanges[issue.IssueId], reopens),
 
                 // An abandoned issue reached done, so it has a cycle end, but it is not a delivery: it belongs to
                 // no delivery sprint and has no cycle time.
-                Abandoned abandoned => new IssueCycle(issue.IssueId, abandoned.At, Delivered: false, DeliverySprintId: null, reopens),
-                NotDelivered => new IssueCycle(issue.IssueId, CycleEnd: null, Delivered: false, DeliverySprintId: null, reopens),
+                Abandoned abandoned => IssueCycle.OfAbandoned(issue.IssueId, abandoned.At, reopens),
+                NotDelivered => IssueCycle.OfNotDelivered(issue.IssueId, reopens),
             });
 
             var membership = SprintMembership.Build(issue.Created, SprintMembership.ParseSprintIds(issue.SprintIds), sprintChanges[issue.IssueId]);
@@ -123,38 +120,26 @@ public static class Derivation
         {
             AsOf = asOf,
             Anomalies = anomalies,
+            ClosedSprintsWithoutAnEnd = [.. raw.Sprints.Where(SprintWindows.IsClosedWithoutAnEnd).Select(sprint => sprint.SprintId)],
         };
     }
 
     /// <summary>
-    /// Puts a delivered issue in the bucket of its estimate at the start of its cycle, so a later re-estimate
-    /// does not move it (ADR-0006). An issue that never entered a work status has no cycle start; its bucket
-    /// is its estimate at the delivery moment (owner decision D35). <paramref name="cycle"/> comes with the
-    /// current estimate as its bucket.
+    /// A delivered issue's cycle, in the bucket of its estimate at the start of its cycle, so a later
+    /// re-estimate does not move it (ADR-0006). An issue that never entered a work status has no cycle start;
+    /// its bucket is its estimate at the delivery moment (owner decision D35).
     /// </summary>
-    private static IssueCycle WithBucketFromHistory(this IssueCycle cycle, Delivered delivered, IEnumerable<PointChange> pointChanges) =>
-        cycle with
-        {
-            PointBucket = cycle.Cycle is { } measured
-                ? PointHistory.EstimateAt(measured.Start, measured.StartHistoryId, cycle.PointBucket, pointChanges)
-                : PointHistory.EstimateAt(delivered.At, delivered.HistoryId, cycle.PointBucket, pointChanges),
-        };
-
-    /// <summary>
-    /// When a sprint's window ends: at its completion; for a closed sprint Jira gives no completion time,
-    /// at its planned end (owner decision D7); null while the sprint is still running, so its window runs
-    /// to the as-of time. A closed sprint with neither time stops the run: nothing says when it ended.
-    /// </summary>
-    private static DateTimeOffset? WindowEnd(RawSprint sprint)
-    {
-        if (sprint.State != SprintStates.Closed)
-        {
-            return sprint.Completed;
-        }
-
-        return sprint.Completed
-            ?? sprint.PlannedEnd
-            ?? throw new UserFacingException(
-                $"Sprint {sprint.SprintId} is closed, but Jira gives it neither a completion time nor a planned end, so when it ended is unknown. No figures were derived.");
-    }
+    private static IssueCycle DeliveredCycle(RawIssue issue, Delivered delivered, string? deliverySprintId, Cycle? cycle, IEnumerable<PointChange> pointChanges, int reopens) =>
+        IssueCycle.OfDelivered(
+            issue.IssueId,
+            delivered.At,
+            deliverySprintId,
+            cycle,
+            cycle is { } measured
+                ? PointHistory.EstimateAt(measured.Start, measured.StartHistoryId, issue.StoryPoints, pointChanges)
+                : PointHistory.EstimateAt(delivered.At, delivered.HistoryId, issue.StoryPoints, pointChanges),
+            reopens);
 }
+
+/// <summary>Everything a rebuild is decided with besides the raw data and the as-of time: how a delivery is decided, and the business calendar.</summary>
+public sealed record DerivationSettings(DeliveryRules Delivery, BusinessCalendar Calendar);

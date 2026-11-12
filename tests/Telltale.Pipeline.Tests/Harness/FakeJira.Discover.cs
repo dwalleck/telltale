@@ -40,13 +40,22 @@ public sealed partial class FakeJira
     /// <summary>The site's resolutions. Edit the list to change what the site reports.</summary>
     public List<FakeResolution> Resolutions { get; } = [ResolutionDone, ResolutionWontDo];
 
-    /// <summary>The site's fields: one system field, the Sprint field, the story point field and a number field that is neither.</summary>
+    public const string TextFieldType = "com.atlassian.jira.plugin.system.customfieldtypes:textfield";
+
+    /// <summary>
+    /// A custom field the site lists that is neither the Sprint field nor the story point field: what a
+    /// configuration names when it names the wrong field. The collector stops on a field the site does not list.
+    /// </summary>
+    public const string OtherFieldId = "customfield_10098";
+
+    /// <summary>The site's fields: one system field, the Sprint field, the story point field, a number field that is neither, and a text field.</summary>
     public List<FakeField> Fields { get; } =
     [
         new("status", "Status", "status", null),
         new(SprintFieldId, "Fake Sprint", "array", SprintFieldType),
         new(StoryPointFieldId, "Fake Story point estimate", "number", StoryPointEstimateFieldType),
         new("customfield_10030", "Fake Budget", "number", NumberFieldType),
+        new(OtherFieldId, "Fake Other Field", "string", TextFieldType),
     ];
 
     /// <summary>The keys of the board's projects.</summary>

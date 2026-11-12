@@ -1,24 +1,12 @@
 using Telltale.Core.Intervals;
 using Telltale.Core.Workflow;
-using static Telltale.Core.Tests.TestTime;
+using static Telltale.Core.Tests.TestWorkflow;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Core.Tests;
 
 public class DeliveryTests
 {
-    private const string New = "1";
-    private const string Development = "4";
-    private const string Done = "8";
-    private const string Shipped = "9";
-
-    private static readonly StatusRoles Roles = StatusRoles.Parse(new Dictionary<string, string>
-    {
-        [New] = "not started",
-        [Development] = "work",
-        [Done] = "done",
-        [Shipped] = "done",
-    });
-
     private const string WontDo = "32";
 
     private static readonly HashSet<string> AbandonedResolutions = [WontDo];
@@ -192,5 +180,5 @@ public class DeliveryTests
         Outcome(currentStatusId, resolutionId: null, changes);
 
     private static IssueOutcome Outcome(string currentStatusId, string? resolutionId, params StatusChange[] changes) =>
-        Delivery.Of(currentStatusId, resolutionId, StatusTimeline.Build(Created, currentStatusId, changes).Entries, Roles, AbandonedResolutions);
+        Delivery.Of(currentStatusId, resolutionId, StatusTimeline.Build(Created, currentStatusId, changes).Entries, new DeliveryRules(Roles, AbandonedResolutions));
 }

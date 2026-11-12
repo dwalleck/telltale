@@ -1,10 +1,12 @@
 using Microsoft.Data.Sqlite;
 using Telltale.Core;
+using Telltale.Core.Identity;
+using Telltale.Core.Storage;
 using Telltale.Pipeline.Tests.Harness;
 using Telltale.Reporting;
 using Telltale.Storage.Sqlite;
 using TUnit.Assertions.Enums;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -98,6 +100,7 @@ public class StoreTests
     [Test]
     [Arguments("UPDATE run SET objects_version = 'synthetic-older-version';")]
     [Arguments("ALTER TABLE run DROP COLUMN objects_version;")]
+    [Arguments("DROP TABLE run; CREATE TABLE run (as_of TEXT NOT NULL, raw_digest TEXT NOT NULL, time_zone TEXT NOT NULL, holidays TEXT NOT NULL, objects_version TEXT NOT NULL); INSERT INTO run VALUES ('2026-02-03T18:00:00.000Z', 'synthetic-digest', 'America/Chicago', '', 'synthetic-older-version');")]
     public async Task A_report_from_derived_data_built_by_another_version_of_the_tool_is_refused_until_derive_runs_again(string howTheStoreWasLeft)
     {
         // An earlier version's views may lack a rule this version relies on, the minimum group size above all.
@@ -194,29 +197,79 @@ public class StoreTests
     public async Task A_migration_numbered_below_one_already_applied_is_still_applied_and_a_gap_in_the_numbers_is_accepted()
     {
         // Two branches each add a migration, and the higher number can reach a store first. The store is put in
-        // that state by hand: 0005 is recorded, and 0003 (the watermark table) is neither recorded nor there.
+        // that state by hand: 0006 is recorded and 0005 is not. (0005 rewrites Sprint changes in the stored
+        // form; TimeInStatusTableTests shows what it does to the rows.)
         // (Until ticket 06 brought 0004, the tree held 0001 to 0003 and 0005, and every run accepted that gap.)
         await using var pipeline = new PipelineHarness();
         AddSprintAndIssue(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 6, 9)).InSprints(41).SprintsChanged(Local(2026, 1, 7, 9), 41, 42);
         await pipeline.RunAllAsync(["backfill"]);
         await pipeline.ExecuteAsync(
             """
-            DROP TABLE watermark;
-            DELETE FROM schema_migration WHERE name = '0003_watermark.sql';
+            UPDATE change SET to_value = '41, 42' WHERE field = 'sprint';
+            DELETE FROM schema_migration WHERE name = '0005_sprint_change_form.sql';
             """);
         var recordedBefore = await pipeline.QueryAsync<string>("SELECT name FROM schema_migration ORDER BY name;");
 
         await pipeline.RunAllAsync(["derive"]);
 
-        await Assert.That(recordedBefore).IsEquivalentTo(new[] { "0001_raw_tables.sql", "0002_issue_sprint_ids.sql", "0004_person_hashing.sql", "0005_sprint_change_form.sql" }, CollectionOrdering.Matching);
+        await Assert.That(recordedBefore).Contains("0006_collection_scope.sql");
+        await Assert.That(recordedBefore).DoesNotContain("0005_sprint_change_form.sql");
         await Assert.That(await pipeline.QueryAsync<string>("SELECT name FROM schema_migration ORDER BY name;"))
-            .IsEquivalentTo(new[] { "0001_raw_tables.sql", "0002_issue_sprint_ids.sql", "0003_watermark.sql", "0004_person_hashing.sql", "0005_sprint_change_form.sql" }, CollectionOrdering.Matching);
-        await Assert.That(await pipeline.QueryAsync<string>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'watermark';")).IsEquivalentTo(new[] { "watermark" });
+            .IsEquivalentTo(recordedBefore.Append("0005_sprint_change_form.sql").Order(StringComparer.Ordinal), CollectionOrdering.Matching);
+        await Assert.That(await pipeline.QueryAsync<string>("SELECT DISTINCT to_value FROM change WHERE field = 'sprint';")).IsEquivalentTo(new[] { "41,42" });
+    }
+
+    [Test]
+    public async Task A_query_over_the_views_opens_the_file_read_only_so_it_never_creates_one()
+    {
+        // B14 of the final review: the guard refuses a write before the connection would, so a write no
+        // longer shows that the connection is read-only. What still does: a connection that could write
+        // creates a missing database file when it opens, and a read-only one cannot open it.
+        await using var pipeline = new PipelineHarness();
+        var store = new SqliteStore(pipeline.DatabasePath);
+
+        await Assert.That(async () => await store.QueryViewsAsync<long>("SELECT COUNT(*) FROM delivered_per_sprint;")).Throws<SqliteException>();
+
+        await Assert.That(File.Exists(pipeline.DatabasePath)).IsFalse();
+    }
+
+    [Test]
+    public async Task The_store_itself_refuses_a_batch_added_under_another_salt_than_its_people_were_hashed_with()
+    {
+        // B10 of the final review: the collector checks the salt before it fetches, but the store is where
+        // both fingerprints meet, so a caller that skipped the collector cannot leave people under two salts.
+        await using var pipeline = new PipelineHarness();
+        var store = new SqliteStore(pipeline.DatabasePath);
+        await store.InitializeAsync();
+        var at = Local(2026, 1, 6, 9);
+        var reached = new Watermark("synthetic-collector", new CollectionScope("https://example.invalid/", FakeJira.BoardId, FakeJira.ProjectKey, new DateOnly(2025, 1, 1), "status"), UpdatedThrough: at);
+        RawBatch Batch(string issueId, string salt, bool replacesEverything = false) => new(
+            new RawData(
+                Issues: [new RawIssue { IssueId = issueId, IssueTypeId = FakeJira.IssueTypeStoryId, Created = at, StatusId = Workflow.New.Id, ResolutionId = null, StoryPoints = null, AssigneeHash = IdentityHash.Of("fake-account-0001", salt), Updated = at, SprintIds = "" }],
+                Changes: [],
+                Sprints: [],
+                Statuses: []),
+            reached,
+            IdentityHash.SaltFingerprint(salt))
+        { ReplacesEverything = replacesEverything };
+        await store.WriteRawAsync(Batch("1", "synthetic-salt-one"));
+
+        await Assert.That(async () => await store.WriteRawAsync(Batch("2", "synthetic-salt-two"))).Throws<UserFacingException>().WithMessage(
+            "The hashing salt in the secret store is not the one the people in the database were hashed with, so one person would count as two. "
+            + "Restore the original salt, or run backfill to hash everyone again with this one.");
+        await Assert.That(await pipeline.QueryAsync<string>("SELECT issue_id FROM issue;")).IsEquivalentTo(new[] { "1" });
+
+        // The same salt is added, and a batch that replaces everything may come under another.
+        await store.WriteRawAsync(Batch("3", "synthetic-salt-one"));
+        await store.WriteRawAsync(Batch("4", "synthetic-salt-two", replacesEverything: true));
+        await Assert.That(await pipeline.QueryAsync<string>("SELECT issue_id FROM issue;")).IsEquivalentTo(new[] { "4" });
+        await Assert.That(await store.ReadSaltFingerprintAsync()).IsEqualTo(IdentityHash.SaltFingerprint("synthetic-salt-two"));
     }
 
     private static void AddSprintAndIssue(FakeJira jira)
     {
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
+        jira.AddSprint41();
         jira.ServeEachIssueOncePer(People.Team);
         jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).InSprints(41)
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)

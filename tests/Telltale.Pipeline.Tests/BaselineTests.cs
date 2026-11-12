@@ -2,7 +2,7 @@ using System.Text.Json.Nodes;
 using Telltale.Pipeline.Tests.Harness;
 using Telltale.Storage.Sqlite;
 using TUnit.Assertions.Enums;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -28,7 +28,7 @@ public class BaselineTests
     public async Task With_baseline_sprints_configured_both_tables_show_figures_pooled_over_all_issues_of_those_sprints()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("41", "42");
 
         // Sprint 41, bucket 3: five people, cycle times 1 to 5 business days.
@@ -67,7 +67,7 @@ public class BaselineTests
     public async Task With_no_baseline_configured_no_baseline_columns_appear_and_the_baseline_views_are_empty(bool settingPresentAndEmpty)
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         if (settingPresentAndEmpty)
         {
             pipeline.Config["baselineSprintIds"] = new JsonArray();
@@ -104,7 +104,7 @@ public class BaselineTests
     public async Task With_a_baseline_the_method_note_says_what_it_is_pooled_over_and_when_a_baseline_cell_reads_suppressed_or_none()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("42", "41");
         AddSprintWithOneAssigneeInBucketThreeAndInReview(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
@@ -113,9 +113,10 @@ public class BaselineTests
 
         await Assert.That(await pipeline.ReadReportAsync(42)).Contains(
             "- An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. An unassigned issue counts toward nobody.\n"
-            + "- The baseline columns pool every issue of the baseline sprints, a list fixed in the configuration (sprints 41, 42), each a completed sprint with a team of five or more. "
+            + "- The baseline columns pool every issue of the baseline sprints, a list fixed in the configuration (sprints 41, 42), each a completed sprint. "
             + "A baseline figure reads \"suppressed\" when any baseline sprint has that row suppressed in its own report, so that a pooled figure cannot give back a withheld one. "
-            + "It reads \"none\" when no issue of the baseline sprints is in the row.\n"
+            + "It reads \"none\" when no issue of the baseline sprints is in the row. "
+            + "When a baseline sprint has a team smaller than five, every baseline figure reads \"suppressed\".\n"
             + "- An interval that is still open");
     }
 
@@ -123,7 +124,7 @@ public class BaselineTests
     public async Task Without_a_baseline_the_report_says_nothing_about_one()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
 
         await pipeline.RunAllAsync(["run", "--sprint", "42"]);
@@ -135,7 +136,7 @@ public class BaselineTests
     public async Task The_sprint_being_reported_may_be_the_only_baseline_sprint_and_then_reads_against_its_own_figures()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("41");
         foreach (var (person, days) in People.Team.Select((person, index) => (person, index + 1)))
         {
@@ -158,7 +159,7 @@ public class BaselineTests
     public async Task A_query_over_the_views_reads_the_two_baseline_views()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("41");
         foreach (var (person, days) in People.Team.Select((person, index) => (person, index + 1)))
         {
@@ -184,9 +185,9 @@ public class BaselineTests
     public async Task A_query_over_the_views_cannot_read_the_derived_table_that_holds_the_baseline_list(string sql)
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("41");
-        pipeline.Jira.AddIdleTeam(41);
+        pipeline.Jira.AddTeam(41);
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
         var store = new SqliteStore(pipeline.DatabasePath);
 
@@ -198,7 +199,7 @@ public class BaselineTests
     public async Task Unestimated_issues_have_a_baseline_row_of_their_own()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("41");
         foreach (var (person, days) in People.Team.Select((person, index) => (person, index + 1)))
         {
@@ -214,7 +215,7 @@ public class BaselineTests
     public async Task A_baseline_figure_with_fewer_than_three_assignees_is_suppressed_in_the_view_and_the_report_and_a_row_the_baseline_lacks_reads_none()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("41");
 
         // The baseline sprint. Bucket 3: five people, 1 to 5 days. Bucket 5: two people and an unassigned issue.
@@ -274,7 +275,7 @@ public class BaselineTests
         // Owner decision D44. Without it the pooled bucket 3 would read 2, 3, 4, 6: its P85 is the fourth of
         // four values, which is the one cycle time sprint 41's own report withholds.
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("41", "42");
         AddSprintWithOneAssigneeInBucketThreeAndInReview(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
@@ -314,7 +315,7 @@ public class BaselineTests
         // lack issues delivered in it, and a baseline pooled from it would be too low without a sign.
         // Sprint 41 started on 5 January and sprint 42 on 19 January.
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         AddSprintWithOneAssigneeInBucketThreeAndInReview(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
         pipeline.Config["jira"]!["backfillStart"] = "2026-01-10";
@@ -336,7 +337,7 @@ public class BaselineTests
     public async Task A_report_refuses_a_baseline_list_that_gained_a_sprint_from_before_the_start_date_and_a_sprint_after_it_is_accepted()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         AddSprintWithOneAssigneeInBucketThreeAndInReview(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
         pipeline.Config["jira"]!["backfillStart"] = "2026-01-10";
@@ -358,59 +359,111 @@ public class BaselineTests
         await Assert.That(await pipeline.ReadReportAsync(42)).IsEqualTo(written);
     }
 
-    // Replaced (owner decision D47): a test here asserted that a baseline sprint short of five assignees
-    // withheld the baseline rows it had an issue in. The review showed that the pattern of withheld, shown
-    // and absent rows gave back which buckets and statuses of that sprint were not empty, which the sprint's
-    // own report withholds. Such a sprint is now refused as a baseline sprint.
     [Test]
-    [Arguments("41,42", "lists 41, which has fewer than five assignees. A sprint with fewer than five assignees cannot be a baseline sprint: take it out of the list and run again.")]
-    [Arguments("41", "lists 41, which has fewer than five assignees. A sprint with fewer than five assignees cannot be a baseline sprint: take it out of the list and run again.")]
-    [Arguments("41,42,43", "lists 41, 43, which each have fewer than five assignees. A sprint with fewer than five assignees cannot be a baseline sprint: take them out of the list and run again.")]
-    public async Task A_sprint_short_of_five_assignees_cannot_be_a_baseline_sprint_and_derive_refuses_the_list_naming_it(string listed, string refusal)
+    public async Task A_report_asks_the_start_date_rule_again_for_an_unchanged_list_after_a_backfill_from_a_later_start_date()
+    {
+        // B7 of the final review. Every issue was updated after the later start date, so the backfill from it
+        // stores the same raw rows and the derived data is not stale; only the date the store is complete
+        // from has moved, past the start of baseline sprint 41.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
+        AddSprintWithOneAssigneeInBucketThreeAndInReview(pipeline.Jira);
+        AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
+        foreach (var issue in pipeline.Jira.Issues)
+        {
+            issue.Moved(Local(2026, 2, 2, 9), Workflow.Shipped);
+        }
+
+        pipeline.Config["baselineSprintIds"] = new JsonArray("41", "42");
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+        var written = await pipeline.ReadReportAsync(42);
+        var digest = await pipeline.QueryAsync<string>("SELECT digest FROM raw_state;");
+        pipeline.Config["jira"]!["backfillStart"] = "2026-01-10";
+        await pipeline.RunAllAsync(["backfill"]);
+
+        var exit = await pipeline.RunAsync("report", "--sprint", "42");
+
+        await Assert.That(await pipeline.QueryAsync<string>("SELECT digest FROM raw_state;")).IsEquivalentTo(digest);
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "baselineSprintIds in the configuration file lists 41, which started before 2026-01-10, the jira.backfillStart the store was last filled from, "
+            + "so issues delivered in it can be missing and the baseline would be too low. "
+            + "Take it out of the list, or set jira.backfillStart to a date before it started and run backfill.\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).IsEqualTo(written);
+    }
+
+    // Owner decision D50 (changes D47, which refused such a list). A reassignment in Jira can take a fixed
+    // baseline sprint below five, and the owner should not have to edit a fixed list to get a report. So
+    // nothing stops: every baseline figure is withheld, and the console and the report name the sprint. The
+    // baseline views have no row at all then: which rows they had would say which buckets and statuses of
+    // the small sprint were not empty, and its own report withholds that.
+    [Test]
+    [Arguments("41,42", "Baseline sprint 41 has fewer than five assignees")]
+    [Arguments("41", "Baseline sprint 41 has fewer than five assignees")]
+    [Arguments("41,42,43", "Baseline sprints 41 and 43 each have fewer than five assignees")]
+    public async Task A_baseline_sprint_short_of_five_assignees_stops_nothing_withholds_every_baseline_figure_and_is_named_on_the_console(string listed, string named)
     {
         // Sprint 41 has four people, sprint 42 six, and sprint 43 completed with no issue at all. Pooled, 41
         // and 42 have a team of six.
         await using var pipeline = new PipelineHarness(Local(2026, 2, 17, 12));
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Jira.AddSprint(43, "Fake Sprint 43", Local(2026, 2, 2, 9), plannedEnd: Local(2026, 2, 13, 17), completed: Local(2026, 2, 13, 17));
         AddSprintFortyOneWithFourAssignees(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
-        await pipeline.RunAllAsync(["backfill"], ["derive"]);
-        var before = await pipeline.ReadStoreContentAsync();
+        await pipeline.RunAllAsync(["backfill"]);
         pipeline.Config["baselineSprintIds"] = new JsonArray([.. listed.Split(',').Select(id => (JsonNode)id)]);
 
         var exit = await pipeline.RunAsync("derive");
 
-        await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo($"baselineSprintIds in the configuration file {refusal}\n");
-
-        // Nothing was rebuilt: the store is as the derive without a baseline left it.
-        await Assert.That(await pipeline.ReadStoreContentAsync()).IsEqualTo(before);
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"{named}, so every baseline figure is withheld (baselineSprintIds in the configuration file).\n");
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM baseline_cycle_time_per_bucket;")).IsEquivalentTo(new[] { 0L });
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM baseline_time_in_status;")).IsEquivalentTo(new[] { 0L });
+        var sprints = await pipeline.QueryAsync<(string SprintId, long Suppressed)>("SELECT sprint_id, suppressed FROM baseline_sprint ORDER BY sprint_id;");
+        await Assert.That(sprints).IsEquivalentTo(listed.Split(',').Select(id => (id, id == "42" ? 0L : 1L)), CollectionOrdering.Matching);
     }
 
     [Test]
-    public async Task A_run_whose_baseline_holds_a_sprint_short_of_five_assignees_writes_no_report()
+    public async Task A_run_whose_baseline_holds_a_sprint_short_of_five_assignees_writes_the_report_with_every_baseline_cell_suppressed_and_names_the_sprint()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         AddSprintFortyOneWithFourAssignees(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("41", "42");
 
         var exit = await pipeline.RunAsync("run", "--sprint", "42");
 
-        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(exit).IsEqualTo(0);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            "baselineSprintIds in the configuration file lists 41, which has fewer than five assignees. "
-            + "A sprint with fewer than five assignees cannot be a baseline sprint: take it out of the list and run again.\n");
-        await Assert.That(Directory.Exists(pipeline.ReportDirectory)).IsFalse();
+            "Baseline sprint 41 has fewer than five assignees, so every baseline figure is withheld (baselineSprintIds in the configuration file).\n");
+
+        // Bucket 5 is in sprint 42 only: without the small sprint its cell would hold a figure, and no cell reads "none".
+        var report = await pipeline.ReadReportAsync(42);
+        await Assert.That(report).Contains(
+            CycleTimeHeader
+            + "| 3 | 3 | 3.0 | 4.0 | 3.0 | 6.0 | suppressed | suppressed |\n"
+            + "| 5 | 3 | 2.0 | 2.0 | 2.0 | 2.0 | suppressed | suppressed |\n");
+        await Assert.That(report).Contains(
+            TimeInStatusHeader
+            + "| Fake New | 6 | 1.0 | suppressed |\n"
+            + "| Fake Development | 6 | 1.5 | suppressed |\n"
+            + "| Fake Review | 3 | 2.0 | suppressed |\n");
+        await Assert.That(report).Contains(
+            "- The baseline columns pool every issue of the baseline sprints, a list fixed in the configuration (sprints 41, 42), each a completed sprint. "
+            + "A baseline figure reads \"suppressed\" when any baseline sprint has that row suppressed in its own report, so that a pooled figure cannot give back a withheld one. "
+            + "It reads \"none\" when no issue of the baseline sprints is in the row. "
+            + "When a baseline sprint has a team smaller than five, every baseline figure reads \"suppressed\".\n"
+            + "- Baseline sprint 41 has a team smaller than five, so every baseline figure in this report reads \"suppressed\".\n"
+            + "- An interval that is still open");
     }
 
     [Test]
-    public async Task A_report_refuses_a_baseline_list_that_gained_a_sprint_short_of_five_assignees_naming_it()
+    public async Task A_report_under_a_baseline_list_that_gained_a_sprint_short_of_five_assignees_asks_for_derive_like_any_changed_list()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         AddSprintFortyOneWithFourAssignees(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("42");
@@ -421,8 +474,50 @@ public class BaselineTests
 
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            "baselineSprintIds in the configuration file lists 41, which has fewer than five assignees. "
-            + "A sprint with fewer than five assignees cannot be a baseline sprint: take it out of the list and run again.\n");
+            "baselineSprintIds in the configuration file changed since the derived data was built. Run derive first.\n");
+        await Assert.That(Directory.Exists(pipeline.ReportDirectory)).IsFalse();
+    }
+
+    [Test]
+    public async Task A_baseline_sprint_that_fell_below_five_assignees_after_a_reassignment_in_jira_no_longer_stops_the_run()
+    {
+        // The finding behind D50: the list is fixed, and the assignees are read as of the last sync.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
+        foreach (var (person, days) in People.Team.Select((person, index) => (person, index + 1)))
+        {
+            Delivered(pipeline.Jira, 41, $"FAKE-{days}", points: 3, person, days);
+        }
+
+        AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
+        pipeline.Config["baselineSprintIds"] = new JsonArray("41");
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+        var before = await pipeline.ReadReportAsync(42);
+
+        pipeline.Jira.Issues[4].AssignedTo(People.One).Moved(Local(2026, 2, 2, 9), Workflow.Shipped);
+        var exit = await pipeline.RunAsync("run", "--sprint", "42");
+
+        await Assert.That(before).Contains(CycleTimeHeader + "| 3 | 3 | 3.0 | 4.0 | 3.0 | 6.0 | 3.0 | 5.0 |\n");
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains(CycleTimeHeader + "| 3 | 3 | 3.0 | 4.0 | 3.0 | 6.0 | suppressed | suppressed |\n");
+    }
+
+    [Test]
+    public async Task A_baseline_sprint_jira_gives_no_start_date_has_no_sprint_window_and_is_refused_with_a_message_of_its_own()
+    {
+        // B8 of the final review: such a sprint was reported as having "fewer than five assignees".
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
+        pipeline.Jira.AddClosedSprintWithoutStart(43, "Fake Sprint 43", completed: Local(2026, 2, 2, 9));
+        AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
+        pipeline.Config["baselineSprintIds"] = new JsonArray("42", "43");
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "42");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "baselineSprintIds in the configuration file lists 43, which has no sprint window: Jira gives it no start date, or no completion time and no planned end, so nothing says when it ran. "
+            + "A sprint without a window has no figures and cannot be a baseline sprint: take it out of the list and run again.\n");
         await Assert.That(Directory.Exists(pipeline.ReportDirectory)).IsFalse();
     }
 
@@ -432,7 +527,7 @@ public class BaselineTests
         // The list is meant to be fixed, but it is a setting, and reports made under two lists can be laid side
         // by side. Sprint 41 has one assignee in bucket 3 and in Review.
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         AddSprintWithOneAssigneeInBucketThreeAndInReview(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
 
@@ -468,7 +563,7 @@ public class BaselineTests
     public async Task A_report_is_refused_when_the_baseline_list_changed_since_derive_so_it_never_shows_another_lists_baseline()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         AddSprintWithOneAssigneeInBucketThreeAndInReview(pipeline.Jira);
         AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("42");
@@ -493,7 +588,7 @@ public class BaselineTests
     public async Task A_baseline_sprint_id_that_is_not_digits_is_refused_before_anything_is_fetched(string ids)
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = JsonNode.Parse(ids);
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -509,7 +604,7 @@ public class BaselineTests
     public async Task Baseline_sprint_ids_are_trimmed_and_one_listed_twice_counts_once()
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray(" 41 ", "41");
         foreach (var (person, days) in People.Team.Select((person, index) => (person, index + 1)))
         {
@@ -534,11 +629,11 @@ public class BaselineTests
         // Sprint 77 was created on another board; Jira lists it on this one, and it is not this board's sprint.
         // Sprint 43 is running and sprint 44 has not started: a baseline is fixed, so it is drawn from completed sprints.
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Jira.AddSprint(43, "Fake Sprint 43", Local(2026, 2, 2, 9), plannedEnd: Local(2026, 2, 13, 17));
         pipeline.Jira.AddFutureSprint(44, "Fake Sprint 44");
         pipeline.Jira.AddSprint(77, "Fake Other Team Sprint", Local(2026, 1, 12, 9), plannedEnd: Local(2026, 1, 26, 9), completed: Local(2026, 1, 26, 9), originBoardId: 499999);
-        pipeline.Jira.AddIdleTeam(41);
+        pipeline.Jira.AddTeam(41);
         await pipeline.RunAllAsync(["backfill"]);
         var before = await pipeline.ReadStoreContentAsync();
         pipeline.Config["baselineSprintIds"] = new JsonArray([.. listed.Split(',').Select(id => (JsonNode)id)]);
@@ -547,7 +642,7 @@ public class BaselineTests
 
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            $"baselineSprintIds in the configuration file lists {refused}, and the store holds no completed sprint of board 400001 with such an ID. "
+            $"baselineSprintIds in the configuration file lists {refused}, and the store holds no completed sprint with such an ID. "
             + "The baseline is drawn from completed sprints only. Correct the list, or run backfill if the sprint has completed since, and run again.\n");
         await Assert.That(await pipeline.ReadStoreContentAsync()).IsEqualTo(before);
     }
@@ -558,9 +653,9 @@ public class BaselineTests
     public async Task A_baseline_sprint_id_that_is_not_a_completed_sprint_of_the_configured_board_stops_report_too(string listed)
     {
         await using var pipeline = new PipelineHarness();
-        AddSprints(pipeline.Jira);
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
         pipeline.Jira.AddSprint(43, "Fake Sprint 43", Local(2026, 2, 2, 9), plannedEnd: Local(2026, 2, 13, 17));
-        pipeline.Jira.AddIdleTeam(41);
+        pipeline.Jira.AddTeam(41);
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
         pipeline.Config["baselineSprintIds"] = new JsonArray(listed);
 
@@ -568,7 +663,7 @@ public class BaselineTests
 
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            $"baselineSprintIds in the configuration file lists {listed}, and the store holds no completed sprint of board 400001 with such an ID. "
+            $"baselineSprintIds in the configuration file lists {listed}, and the store holds no completed sprint with such an ID. "
             + "The baseline is drawn from completed sprints only. Correct the list, or run backfill if the sprint has completed since, and run again.\n");
         await Assert.That(File.Exists(Path.Combine(pipeline.ReportDirectory, "sprint-41.md"))).IsFalse();
     }
@@ -624,10 +719,11 @@ public class BaselineTests
         public double? P85CalendarDays { get; init; }
     }
 
-    private static void AddSprints(FakeJira jira)
+    /// <summary>The harness's two sprints as two working weeks each: Monday 09:00 to the second Friday 17:00, completed as planned.</summary>
+    private static void AddTwoSprintsOfTwoWorkingWeeks(FakeJira jira)
     {
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 16, 17), completed: Local(2026, 1, 16, 17));
-        jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 9), plannedEnd: Local(2026, 1, 30, 17), completed: Local(2026, 1, 30, 17));
+        jira.AddSprint41(plannedEnd: Local(2026, 1, 16, 17), completed: Local(2026, 1, 16, 17));
+        jira.AddSprint42(start: Local(2026, 1, 19, 9), plannedEnd: Local(2026, 1, 30, 17), completed: Local(2026, 1, 30, 17));
     }
 
     /// <summary>

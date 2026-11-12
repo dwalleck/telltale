@@ -1,7 +1,7 @@
 using Telltale.Cli;
 using Telltale.Core.Secrets;
 using Telltale.Pipeline.Tests.Harness;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -12,7 +12,7 @@ public class ConfigurationAndSecretsTests
     {
         // The file has no place for a secret: one pasted into it stops the run.
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config["jira"]!["apiToken"] = "synthetic-pasted-token";
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -31,7 +31,7 @@ public class ConfigurationAndSecretsTests
     {
         // The field is asked for by name: "description" would have Jira send free text.
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config["jira"]!["storyPointFieldId"] = fieldId;
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -45,7 +45,7 @@ public class ConfigurationAndSecretsTests
     public async Task A_status_role_outside_the_four_roles_is_refused_and_the_status_is_named_not_the_role()
     {
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config["statusRoles"]![Workflow.Done.Id] = "finished";
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -62,10 +62,12 @@ public class ConfigurationAndSecretsTests
     [Arguments("holidays")]
     [Arguments("statusRoles")]
     [Arguments("jira")]
+    [Arguments("abandonedResolutionIds")]
+    [Arguments("baselineSprintIds")]
     public async Task A_required_setting_given_as_null_is_refused_and_named(string setting)
     {
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config[setting] = null;
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -84,7 +86,7 @@ public class ConfigurationAndSecretsTests
     {
         // Over http the Jira email and API token would travel in clear text.
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config["jira"]!["siteUrl"] = siteUrl;
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -99,7 +101,7 @@ public class ConfigurationAndSecretsTests
     {
         // The file holds no secrets, and a password in the address is one.
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config["jira"]!["siteUrl"] = "https://fake.user:synthetic-password@example.invalid/";
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -117,7 +119,7 @@ public class ConfigurationAndSecretsTests
     public async Task A_configuration_without_project_keys_is_refused_and_names_the_setting(string how)
     {
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         var jira = pipeline.Config["jira"]!.AsObject();
         switch (how)
         {
@@ -152,7 +154,7 @@ public class ConfigurationAndSecretsTests
     {
         // The keys are written into the JQL, so only text that can be nothing but a key is accepted.
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config["jira"]!["projectKeys"] = new System.Text.Json.Nodes.JsonArray("FAKE", key);
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -172,7 +174,7 @@ public class ConfigurationAndSecretsTests
     public async Task A_project_key_in_jiras_key_form_is_accepted(string key)
     {
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config["jira"]!["projectKeys"] = new System.Text.Json.Nodes.JsonArray(key);
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -188,7 +190,7 @@ public class ConfigurationAndSecretsTests
     public async Task A_site_url_with_a_path_and_no_trailing_slash_keeps_its_path()
     {
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config["jira"]!["siteUrl"] = "https://example.invalid/tenant";
 
         // The fake serves nothing under /tenant, so the run fails; what matters is where the request went.
@@ -202,7 +204,7 @@ public class ConfigurationAndSecretsTests
     {
         // With two values for one setting, the reader of the file cannot tell which one is in force.
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.RawConfig = pipeline.Config.ToJsonString().Replace("\"timeZone\":", "\"timeZone\":\"Europe/Paris\",\"timeZone\":", StringComparison.Ordinal);
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -219,7 +221,7 @@ public class ConfigurationAndSecretsTests
     public async Task An_empty_story_point_field_id_is_refused(string fieldId)
     {
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config["jira"]!["storyPointFieldId"] = fieldId;
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -235,7 +237,7 @@ public class ConfigurationAndSecretsTests
     public async Task A_board_id_that_is_not_positive_is_refused(long boardId)
     {
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config["jira"]!["boardId"] = boardId;
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -249,7 +251,7 @@ public class ConfigurationAndSecretsTests
     public async Task A_run_that_stops_for_a_missing_secret_leaves_no_database_behind()
     {
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Secrets.Remove(SecretName.JiraApiToken);
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -264,7 +266,7 @@ public class ConfigurationAndSecretsTests
     {
         // Jira's status IDs are digits. Anything else matches no issue, and could be a secret pasted in the wrong place.
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config["statusRoles"]!["synthetic-pasted-token"] = "work";
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -279,7 +281,7 @@ public class ConfigurationAndSecretsTests
     public async Task A_status_role_map_with_no_done_status_is_refused()
     {
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config["statusRoles"]![Workflow.Done.Id] = "work";
         pipeline.Config["statusRoles"]![Workflow.Shipped.Id] = "work";
 
@@ -295,7 +297,7 @@ public class ConfigurationAndSecretsTests
     {
         // Every status has one role. Guessing "not done" for a new or mistyped status would quietly drop deliveries.
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config["statusRoles"]!.AsObject().Remove(Workflow.Review.Id);
         pipeline.Config["statusRoles"]!.AsObject().Remove(Workflow.Shipped.Id);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
@@ -317,7 +319,7 @@ public class ConfigurationAndSecretsTests
     {
         // The visit took no time, but it is a move: read as "not done", it would be a reopen and a later delivery.
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config["statusRoles"]!.AsObject().Remove(Workflow.Shipped.Id);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
@@ -339,8 +341,8 @@ public class ConfigurationAndSecretsTests
         // The changelog says the issue left Review, though no change ever put it there (history Jira lost).
         // The timeline follows where each change went, so no rule reads Review: it is an anomaly, not a status the issue was in.
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41);
+        pipeline.Jira.AddSprint41();
+        pipeline.Jira.AddTeam(41);
         pipeline.Config["statusRoles"]!.AsObject().Remove(Workflow.Review.Id);
         var odd = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
@@ -354,7 +356,7 @@ public class ConfigurationAndSecretsTests
             "Changelog anomalies: 1 across 1 issue, 1 new since the previous derive.\n"
             + $"Changelog anomaly: issue {odd.Id}: its status history does not line up.\n");
         await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -363,7 +365,7 @@ public class ConfigurationAndSecretsTests
         // Only the first change's "from" says which status the issue was created in. It spent no time there,
         // but it is the timeline's first entry, which the reopen rule reads.
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config["statusRoles"]!.AsObject().Remove(Workflow.Review.Id);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9), createdIn: Workflow.Review)
             .Moved(Local(2026, 1, 6, 9), Workflow.Development)
@@ -380,8 +382,8 @@ public class ConfigurationAndSecretsTests
     public async Task A_status_no_issue_has_been_in_needs_no_role()
     {
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41);
+        pipeline.Jira.AddSprint41();
+        pipeline.Jira.AddTeam(41);
         pipeline.Config["statusRoles"]!.AsObject().Remove(Workflow.Blocked.Id);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
@@ -390,7 +392,7 @@ public class ConfigurationAndSecretsTests
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -398,7 +400,7 @@ public class ConfigurationAndSecretsTests
     {
         // ADR-0001: the holiday list is required. Left out, every holiday would silently count as a business day.
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config.Remove("holidays");
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -415,7 +417,7 @@ public class ConfigurationAndSecretsTests
     public async Task A_holiday_that_is_not_a_calendar_date_is_refused(string holiday)
     {
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config["holidays"] = new System.Text.Json.Nodes.JsonArray("2026-01-01", holiday);
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -430,7 +432,7 @@ public class ConfigurationAndSecretsTests
     public async Task An_unknown_time_zone_is_refused()
     {
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Config["timeZone"] = "Nowhere/Invalid";
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -447,7 +449,7 @@ public class ConfigurationAndSecretsTests
     public async Task A_missing_secret_stops_the_run_before_any_call_to_jira_and_is_named(SecretName missing, string expectedName, string howToSet)
     {
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Secrets.Remove(missing);
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -461,7 +463,7 @@ public class ConfigurationAndSecretsTests
     public async Task A_blank_hashing_salt_is_refused()
     {
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Secrets[SecretName.HashingSalt] = " ";
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
@@ -474,7 +476,7 @@ public class ConfigurationAndSecretsTests
     public async Task Jira_is_called_with_the_email_and_api_token_from_the_secret_store()
     {
         await using var pipeline = new PipelineHarness();
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
@@ -508,6 +510,38 @@ public class ConfigurationAndSecretsTests
         await Assert.That(store.Get(SecretName.HashingSalt)).IsNull();
     }
 
-    private static void AddOneSprint(FakeJira jira) =>
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
+    [Test]
+    public async Task A_run_reads_each_secret_from_the_secret_store_once()
+    {
+        // Cross-ticket finding 8: the secrets were read when the command started, again by the collector, and
+        // the salt once more by derive and by report. On the work laptop each read is a call to Credential Manager.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.AddSprint41();
+        var counting = new CountingSecretStore(new InMemorySecretStore(pipeline.Secrets));
+        pipeline.SecretStore = counting;
+
+        await pipeline.RunAllAsync(["run", "--sprint", "41"]);
+
+        await Assert.That(counting.Reads).IsEquivalentTo(new Dictionary<SecretName, int>
+        {
+            [SecretName.JiraEmail] = 1,
+            [SecretName.JiraApiToken] = 1,
+            [SecretName.HashingSalt] = 1,
+        });
+    }
+
+    /// <summary>A secret store that counts how often each secret is read.</summary>
+    private sealed class CountingSecretStore(ISecretStore inner) : ISecretStore
+    {
+        public Dictionary<SecretName, int> Reads { get; } = [];
+
+        public string? Get(SecretName name)
+        {
+            Reads[name] = Reads.GetValueOrDefault(name) + 1;
+            return inner.Get(name);
+        }
+
+        public string HowToSet(SecretName name) => inner.HowToSet(name);
+    }
+
 }

@@ -1,6 +1,6 @@
 using Telltale.Cli;
 using Telltale.Pipeline.Tests.Harness;
-using static Telltale.Pipeline.Tests.Harness.TeamTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
 
@@ -42,7 +42,7 @@ public class CredentialManagerSecretStoreTests
     {
         await using var pipeline = new PipelineHarness();
         var vault = UseVault(pipeline);
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
 
         pipeline.Console.TypeLine(PipelineHarness.JiraEmail);
         await pipeline.RunAsync("secrets", "set", "jira-email");
@@ -63,7 +63,7 @@ public class CredentialManagerSecretStoreTests
         await using var pipeline = new PipelineHarness();
         var vault = UseVault(pipeline, withAllSecrets: true);
         vault.Entries.Remove(TokenEntry);
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
@@ -80,7 +80,7 @@ public class CredentialManagerSecretStoreTests
         await using var pipeline = new PipelineHarness();
         var vault = UseVault(pipeline, withAllSecrets: true);
         vault.Entries[TokenEntry] = [.. TokenBytes, .. new byte[2 * nulCount]];
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
@@ -98,7 +98,7 @@ public class CredentialManagerSecretStoreTests
         await using var pipeline = new PipelineHarness();
         var vault = UseVault(pipeline, withAllSecrets: true);
         vault.Entries[TokenEntry] = stored;
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
@@ -149,7 +149,7 @@ public class CredentialManagerSecretStoreTests
         await using var pipeline = new PipelineHarness();
         var vault = UseVault(pipeline, withAllSecrets: true);
         vault.ReadError = 5;
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
@@ -248,7 +248,7 @@ public class CredentialManagerSecretStoreTests
     private static async Task<FakeCredentialVault> RunOnceWithAnAssigneeThenMakeTheSaltUnreadableAsync(PipelineHarness pipeline)
     {
         var vault = UseVault(pipeline, withAllSecrets: true);
-        AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddSprint41();
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).AssignedTo(People.One)
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 9), Workflow.Done);
@@ -288,6 +288,4 @@ public class CredentialManagerSecretStoreTests
         return vault;
     }
 
-    private static void AddOneSprint(FakeJira jira) =>
-        jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
 }

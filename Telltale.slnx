@@ -3,6 +3,7 @@
     <Project Path="src/Telltale.Cli/Telltale.Cli.csproj" />
     <Project Path="src/Telltale.Collectors/Telltale.Collectors.csproj" />
     <Project Path="src/Telltale.Core/Telltale.Core.csproj" />
+    <Project Path="src/Telltale.Pipeline/Telltale.Pipeline.csproj" />
     <Project Path="src/Telltale.Reporting/Telltale.Reporting.csproj" />
     <Project Path="src/Telltale.Storage.Sqlite/Telltale.Storage.Sqlite.csproj" />
   </Folder>

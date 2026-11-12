@@ -1,5 +1,6 @@
 using System.Net;
 using Telltale.Core.Secrets;
+using Telltale.Storage.Sqlite;
 
 namespace Telltale.Cli;
 
@@ -27,6 +28,13 @@ public sealed record AppServices(
 {
     /// <summary>The keyboard and standard input, where <c>secrets set</c> reads a secret's value from.</summary>
     public IConsoleInput ConsoleInput { get; init; } = new SystemConsoleInput();
+
+    /// <summary>
+    /// Whether the store holds at least one hashed person. Once it does, the hashing salt cannot be chosen
+    /// freely: every command that asks for, sets or replaces the salt asks this first, here.
+    /// </summary>
+    public Task<bool> StoreHoldsHashedPeopleAsync(CancellationToken cancellationToken) =>
+        SqliteStore.HoldsHashedPeopleAsync(DatabasePath, cancellationToken);
 
     /// <summary>The real thing, with files under the current directory.</summary>
     public static AppServices ForProduction() => new(

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Telltale.Pipeline</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Telltale.Core\Telltale.Core.csproj" />
+    <ProjectReference Include="..\Telltale.Collectors\Telltale.Collectors.csproj" />
+    <ProjectReference Include="..\Telltale.Reporting\Telltale.Reporting.csproj" />
+  </ItemGroup>
+
+</Project>

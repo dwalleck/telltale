@@ -3,6 +3,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Telltale.Tests.Shared;
 
 namespace Telltale.Pipeline.Tests.Harness;
 
@@ -273,6 +274,7 @@ public sealed partial class FakeJira
     private readonly Lock _gate = new();
     private readonly List<FakeSprint> _sprints = [];
     private readonly List<FakeIssue> _issues = [];
+    private readonly Dictionary<string, string> _idsByKey = [];
     private readonly List<IReadOnlyList<string>> _searchAnswers = [];
     private readonly Dictionary<string, (List<FakeIssue> Found, int Answer, int Offset)> _searchPages = [];
     private readonly Dictionary<string, string> _statusNames = Workflow.BoardOrder.ToDictionary(status => status.Id, status => status.DefaultName);
@@ -416,6 +418,10 @@ public sealed partial class FakeJira
     public FakeSprint AddClosedSprintWithoutCompletion(long id, string name, DateTimeOffset start, DateTimeOffset? plannedEnd = null) =>
         Add(new FakeSprint(id, name, "closed", start, plannedEnd, Completed: null, BoardId));
 
+    /// <summary>Adds a closed sprint for which Jira gives no start date.</summary>
+    public FakeSprint AddClosedSprintWithoutStart(long id, string name, DateTimeOffset? completed = null) =>
+        Add(new FakeSprint(id, name, "closed", Start: null, PlannedEnd: null, completed, BoardId));
+
     /// <summary>Adds a sprint that has not started. Jira lets a future sprint carry planned dates, or none.</summary>
     public FakeSprint AddFutureSprint(long id, string name, DateTimeOffset? plannedStart = null, DateTimeOffset? plannedEnd = null) =>
         Add(new FakeSprint(id, name, "future", plannedStart, plannedEnd, Completed: null, BoardId));
@@ -445,9 +451,28 @@ public sealed partial class FakeJira
         {
             var issue = new FakeIssue(this, (_nextIssueId++).ToString(CultureInfo.InvariantCulture), key, created, createdIn ?? Workflow.New);
             _issues.Add(issue);
+            _idsByKey[key] = issue.Id;
             return issue;
         }
     }
+
+    /// <summary>
+    /// The Jira issue ID of the issue added with <paramref name="key"/>, also after it was deleted from the
+    /// site. The store identifies an issue by this ID and never holds its key (owner decision D52).
+    /// </summary>
+    public string IdOf(string key)
+    {
+        lock (_gate)
+        {
+            return _idsByKey[key];
+        }
+    }
+
+    /// <summary>
+    /// The start of every row about the issue added with <paramref name="key"/> in
+    /// <see cref="PipelineHarness.ReadStoreContentAsync"/>: its tables' first column is the issue ID.
+    /// </summary>
+    public string StoredRowOf(string key) => $"\n{IdOf(key)} | ";
 
     /// <summary>Deletes an issue from the site: no search finds it again, and nothing says it is gone.</summary>
     public void Delete(FakeIssue issue)
@@ -455,6 +480,16 @@ public sealed partial class FakeJira
         lock (_gate)
         {
             _issues.Remove(issue);
+        }
+    }
+
+    /// <summary>Puts an issue taken off the site with <see cref="Delete"/> back, in its old place.</summary>
+    public void Restore(FakeIssue issue)
+    {
+        lock (_gate)
+        {
+            _issues.Add(issue);
+            _issues.Sort((left, right) => long.Parse(left.Id, CultureInfo.InvariantCulture).CompareTo(long.Parse(right.Id, CultureInfo.InvariantCulture)));
         }
     }
 
@@ -467,18 +502,46 @@ public sealed partial class FakeJira
         }
     }
 
-    /// <summary>
-    /// Gives the sprints a team of five without delivering anything: one issue per person of
-    /// <see cref="People.Team"/>, listed in the sprints since 2 January 2026 and left in New. A delivered count is
-    /// shown only for a sprint with five distinct assignees (ADR-0003), so a test about delivered counts calls
-    /// this and keeps its own counts. The five issues do show in New in the sprints' time in status.
-    /// </summary>
-    public void AddIdleTeam(params long[] sprintIds) => AddIdleTeam(TeamTime.Local(2026, 1, 2, 9), sprintIds);
+    /// <summary>How many issues <see cref="AddTeam(long[])"/> delivers in each sprint: one for each of three people.</summary>
+    public const int TeamDeliveries = 3;
 
     /// <summary>
-    /// <see cref="AddIdleTeam(long[])"/> with the five issues created at <paramref name="created"/>: earlier, for
-    /// sprints before January 2026, or later than the test's other issues, so that a search ordered by update
-    /// time returns them last.
+    /// Gives the sprints a team whose delivered count is shown: a count needs a team of five and three distinct
+    /// assignees among the delivered issues (ADR-0003; owner decision D49). A test about delivered counts calls
+    /// this after adding its sprints and expects <see cref="TeamDeliveries"/> more than it delivers itself.
+    /// <list type="bullet">
+    /// <item>One issue per person of <see cref="People.Team"/>, listed in the sprints since 2 January 2026 and
+    /// left in New. These five show in New in the sprints' time in status.</item>
+    /// <item>In each of the sprints the site has by now and that has started: three issues of three of those
+    /// people, moved from New to Done one minute into the sprint. They are in no sprint and never in a work
+    /// status, so they add to the delivered count and to neither table.</item>
+    /// </list>
+    /// </summary>
+    public void AddTeam(params long[] sprintIds) => AddTeam(TeamTime.Local(2026, 1, 2, 9), sprintIds);
+
+    /// <summary>
+    /// <see cref="AddTeam(long[])"/> with the five issues that stay in New created at <paramref name="created"/>:
+    /// earlier, for sprints before January 2026, or later than the test's other issues, so that a search
+    /// ordered by update time returns them last.
+    /// </summary>
+    public void AddTeam(DateTimeOffset created, params long[] sprintIds)
+    {
+        AddIdleTeam(created, sprintIds);
+
+        foreach (var sprint in SprintList().Where(sprint => sprintIds.Contains(sprint.Id) && sprint.State != "future" && sprint.Start is not null))
+        {
+            var start = sprint.Start!.Value;
+            foreach (var (person, number) in People.Team.Take(TeamDeliveries).Select((person, index) => (person, index + 1)))
+            {
+                AddIssue($"{ProjectKey}-{sprint.Id}9{number}", start.AddHours(-1)).AssignedTo(person).Moved(start.AddMinutes(1), Workflow.Done);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The part of <see cref="AddTeam(DateTimeOffset, long[])"/> that delivers nothing: one issue per person of
+    /// <see cref="People.Team"/>, created at <paramref name="created"/>, listed in the sprints and left in New.
+    /// For a test whose own delivered issues have three assignees among them, or that counts what is fetched.
     /// </summary>
     public void AddIdleTeam(DateTimeOffset created, params long[] sprintIds)
     {

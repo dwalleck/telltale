@@ -1,6 +1,7 @@
 using Telltale.Core.Intervals;
 using TUnit.Assertions.Enums;
 using static Telltale.Core.Tests.TestTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Core.Tests;
 
