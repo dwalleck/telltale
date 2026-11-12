@@ -1,5 +1,5 @@
 -- Not a metric view: it applies no minimum group size, so only the metric views read it, and each withholds
--- what the rule says. One row per group of duration_sample (scope, measure, sprint, group_key) with the two
+-- what the rule says. One row per group of duration_sample (scope, measure, sprint, bucket, status_id) with the two
 -- figures every table of the report shows, each picked here and nowhere else.
 -- Median: the middle value, or the mean of the two middle values. P85: nearest rank, the smallest value with
 -- at least 85% of the values at or below it. Both are picked by integer rank: (n + 1) / 2 and (n + 2) / 2 are
@@ -11,18 +11,20 @@ WITH ranked AS (
     SELECT s.scope,
            s.measure,
            s.sprint_id,
-           s.group_key,
+           s.bucket,
+           s.status_id,
            s.days,
-           ROW_NUMBER() OVER (PARTITION BY s.scope, s.measure, s.sprint_id, s.group_key ORDER BY s.days) AS rn,
-           COUNT(*)     OVER (PARTITION BY s.scope, s.measure, s.sprint_id, s.group_key)                 AS n
+           ROW_NUMBER() OVER (PARTITION BY s.scope, s.measure, s.sprint_id, s.bucket, s.status_id ORDER BY s.days) AS rn,
+           COUNT(*)     OVER (PARTITION BY s.scope, s.measure, s.sprint_id, s.bucket, s.status_id)                 AS n
     FROM duration_sample s
 )
 SELECT r.scope,
        r.measure,
        r.sprint_id,
-       r.group_key,
+       r.bucket,
+       r.status_id,
        r.n AS sample_count,
        AVG(CASE WHEN r.rn IN ((r.n + 1) / 2, (r.n + 2) / 2) THEN r.days END) AS median_days,
        MAX(CASE WHEN r.rn = (85 * r.n + 99) / 100 THEN r.days END)           AS p85_days
 FROM ranked r
-GROUP BY r.scope, r.measure, r.sprint_id, r.group_key;
+GROUP BY r.scope, r.measure, r.sprint_id, r.bucket, r.status_id;

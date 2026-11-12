@@ -17,15 +17,15 @@ WITH withheld AS (
     JOIN baseline_sprint b ON b.sprint_id = v.sprint_id
     GROUP BY v.status_id
 )
-SELECT f.group_key                    AS status_id,
-       COALESCE(s.name, f.group_key)  AS status_name,
+SELECT f.status_id,
+       COALESCE(s.name, f.status_id)  AS status_name,
        b.position                     AS board_position,
        CASE WHEN w.suppressed = 0 THEN f.median_days END AS median_business_days,
        CASE WHEN w.suppressed = 0 THEN 0 ELSE 1 END      AS suppressed
 FROM duration_figures f
-LEFT JOIN withheld w ON w.status_id = f.group_key
-JOIN board_status b ON b.status_id = f.group_key
-LEFT JOIN status s ON s.status_id = f.group_key
+LEFT JOIN withheld w ON CAST(w.status_id AS TEXT) = CAST(f.status_id AS TEXT)
+JOIN board_status b ON CAST(b.status_id AS TEXT) = CAST(f.status_id AS TEXT)
+LEFT JOIN status s ON CAST(s.status_id AS TEXT) = CAST(f.status_id AS TEXT)
 WHERE f.scope = 'baseline' AND f.measure = 'status'
   AND b.is_done = 0
   AND NOT EXISTS (SELECT 1 FROM baseline_sprint WHERE suppressed <> 0);

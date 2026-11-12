@@ -31,7 +31,7 @@ SELECT st.sprint_id,
 FROM status_time st
 JOIN sprint_team t ON t.sprint_id = st.sprint_id
 JOIN board_status b ON b.status_id = st.status_id
-JOIN duration_figures f ON f.scope = 'sprint' AND f.measure = 'status' AND f.sprint_id = st.sprint_id AND f.group_key = st.status_id
+JOIN duration_figures f ON f.scope = 'sprint' AND f.measure = 'status' AND f.sprint_id = st.sprint_id AND CAST(f.status_id AS TEXT) = CAST(st.status_id AS TEXT)
 LEFT JOIN status s ON s.status_id = st.status_id
 WHERE b.is_done = 0
   AND t.suppressed = 0

@@ -25,16 +25,16 @@ WITH withheld AS (
     JOIN baseline_sprint b ON b.sprint_id = v.sprint_id
     GROUP BY v.point_bucket
 )
-SELECT business.group_key AS point_bucket,
+SELECT business.bucket AS point_bucket,
        CASE WHEN w.suppressed = 0 THEN business.median_days END AS median_business_days,
        CASE WHEN w.suppressed = 0 THEN business.p85_days END    AS p85_business_days,
        CASE WHEN w.suppressed = 0 THEN calendar.median_days END AS median_calendar_days,
        CASE WHEN w.suppressed = 0 THEN calendar.p85_days END    AS p85_calendar_days,
        CASE WHEN w.suppressed = 0 THEN 0 ELSE 1 END             AS suppressed
 FROM duration_figures business
-JOIN duration_figures calendar ON calendar.scope = 'baseline' AND calendar.measure = 'cycle calendar' AND calendar.group_key IS business.group_key
+JOIN duration_figures calendar ON calendar.scope = 'baseline' AND calendar.measure = 'cycle calendar' AND calendar.bucket IS business.bucket
 -- A left join: a bucket the per-sprint view has no row for (it should have one for every pooled issue) reads
 -- as withheld, never as shown.
-LEFT JOIN withheld w ON w.point_bucket IS business.group_key
+LEFT JOIN withheld w ON CAST(w.point_bucket AS REAL) IS business.bucket
 WHERE business.scope = 'baseline' AND business.measure = 'cycle business'
   AND NOT EXISTS (SELECT 1 FROM baseline_sprint WHERE suppressed <> 0);

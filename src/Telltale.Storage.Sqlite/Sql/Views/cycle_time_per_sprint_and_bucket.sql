@@ -43,8 +43,8 @@ SELECT s.sprint_id,
        CASE WHEN s.suppressed = 0 THEN calendar.p85_days END    AS p85_calendar_days,
        s.suppressed
 FROM shown s
-JOIN duration_figures business ON business.scope = 'sprint' AND business.measure = 'cycle business' AND business.sprint_id = s.sprint_id AND business.group_key IS s.point_bucket
-JOIN duration_figures calendar ON calendar.scope = 'sprint' AND calendar.measure = 'cycle calendar' AND calendar.sprint_id = s.sprint_id AND calendar.group_key IS s.point_bucket
+JOIN duration_figures business ON business.scope = 'sprint' AND business.measure = 'cycle business' AND business.sprint_id = s.sprint_id AND business.bucket IS CAST(s.point_bucket AS REAL)
+JOIN duration_figures calendar ON calendar.scope = 'sprint' AND calendar.measure = 'cycle calendar' AND calendar.sprint_id = s.sprint_id AND calendar.bucket IS CAST(s.point_bucket AS REAL)
 UNION ALL
 SELECT t.sprint_id, NULL, NULL, NULL, NULL, NULL, NULL, 1
 FROM sprint_team t

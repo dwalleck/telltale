@@ -211,6 +211,27 @@ public class TimeInStatusTableTests
     }
 
     [Test]
+    public async Task What_a_duration_is_grouped_by_is_text_for_a_status_and_a_number_for_a_bucket_never_one_column_of_both()
+    {
+        // Review of the final fix pass, finding 1: one key column for buckets and statuses left its affinity to
+        // SQLite, and a status join that compares a number with text matches nothing. This reads the internal
+        // view directly, as only a test may.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsThreeHoursApart(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41).Estimated(3)
+            .Moved(Local(2026, 1, 7, 9), Workflow.Done);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        var keys = await pipeline.QueryAsync<(string Measure, string Bucket, string StatusId)>(
+            "SELECT DISTINCT measure, typeof(bucket), typeof(status_id) FROM duration_figures WHERE scope = 'sprint' ORDER BY measure;");
+        await Assert.That(keys).IsEquivalentTo(
+            new[] { ("cycle business", "real", "null"), ("cycle calendar", "real", "null"), ("status", "null", "text") }, CollectionOrdering.Matching);
+        await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(new[] { "| Fake Development | 5 | 2.0 |" }, CollectionOrdering.Matching);
+    }
+
+    [Test]
     public async Task A_median_that_is_not_a_round_number_is_shown_to_one_decimal_place()
     {
         // B14 of the final review: every other median in these tests is exact to one decimal.
