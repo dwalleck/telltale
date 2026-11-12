@@ -61,12 +61,24 @@ Behaviors to preserve:
 ## Jira collector
 
 - Changed issues: JQL `updated >= "<watermark>"`, overlapping the window by a few minutes (JQL `updated` has minute precision; upserts make overlap harmless).
-- Changelogs: `POST /rest/api/3/changelog/bulkfetch` with `issueIdsOrKeys` (≤1000), `fieldIds` (status + the Sprint custom field, ≤10), `maxResults` (≤10000), `nextPageToken`; stop when the token is null. Response: `issueChangeLogs[]` of `{ issueId, changeHistories[] }`; each history has `id`, `created`, `author`, `historyMetadata`, `items[]` with `field`, `fieldId`, `fieldtype`, `from`, `fromString`, `to`, `toString`. Grouped by numeric issue ID, not key.
+- Changelogs: `POST /rest/api/3/changelog/bulkfetch` with `issueIdsOrKeys` (≤1000), `fieldIds` (status, the Sprint custom field and the story point field, ≤10), `maxResults` (≤10000), `nextPageToken`; stop when the token is null. Response: `issueChangeLogs[]` of `{ issueId, changeHistories[] }`; each history has `id`, `created`, `author`, `historyMetadata`, `items[]` with `field`, `fieldId`, `fieldtype`, `from`, `fromString`, `to`, `toString`. Grouped by numeric issue ID, not key.
 - Changelog items: `from`/`to`/`fromString`/`toString` can be null; `fieldId` can be missing on old history (fall back to `field`); `fieldtype` is `jira` or `custom`; user fields may carry `tmpFromAccountId`/`tmpToAccountId`. Sprint items hold comma-separated sprint IDs.
 - `created` timestamps use `+0000` (no colon) offsets; parse with an explicit format.
 - Sprints: Agile API `/rest/agile/1.0/board/{boardId}/sprint` (start, end, complete dates, state).
 - Also: `/rest/api/3/field` (find the Sprint and story point field IDs), `/rest/api/3/status` (ID → name, category), worklogs (`started` vs `created` for reliability checks).
 - `historyMetadata.cause` / actor can identify automation; workflow migrations and bulk moves create status changes no human made.
+
+### Workflow mapping
+
+The board's statuses, in order: New, Approved, Committed (not started; development cannot start until Committed), Development, Review, QE, Blocked, Done, Shipped. Statuses are matched by ID; the IDs, the abandoned resolution IDs ("Won't Do" is expected, to be confirmed) and any category overrides are configuration written by `discover`.
+
+- Cycle start: first entry into Development, or into Review or QE if Development was skipped. Blocked never starts a cycle, but time in Blocked after the start counts. Jira's history does not say which stage a blocked issue was in, so Blocked time is reported as Blocked.
+- Cycle end: last entry into the done category, which is Done. Done → Shipped is a move inside the category and does not move the end. Time in Shipped is kept in status intervals for later use and is not analysed now.
+- Abandoned: Done with an abandoned resolution. Developers cannot cancel issues themselves.
+- Reopen: any move out of the done category.
+- Scope: every issue type except epics and sub-tasks; no split by type (ADR-0006).
+- Point bucket: the story point value at cycle start, from the story point field's history.
+- One team time zone and one holiday list.
 
 ## GitHub collector
 

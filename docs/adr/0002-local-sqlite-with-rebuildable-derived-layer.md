@@ -2,6 +2,8 @@
 
 The tool runs on one developer laptop for the first 3–4 sprints (no infrastructure until there is buy-in), so the store is a single SQLite file. It has three layers: raw tables that mirror source data and are never edited after import; derived tables (status intervals, membership intervals, PR wait intervals) rebuilt from raw on every run; and metric views that reports read from. Because derived data is rebuilt, changing a definition means rerunning, never migrating.
 
+"Mirror" means selected fields only. Every person field is hashed on the way in (ADR-0003), and no original payloads, summaries, descriptions or comments are stored. A new metric that needs an uncollected field means a refetch through the backfill.
+
 ## Considered Options
 
 - Computing metrics once per sprint without storing history: cheap per sprint, but every definition change and every trend query would mean refetching everything.

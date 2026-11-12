@@ -30,15 +30,18 @@ A day that is neither a weekend nor a company holiday, counted in full (24 hours
 _Avoid_: Working day, workday, working hours
 
 **Cycle time**:
-Business days from an issue entering an in-progress status category to entering a done status category.
+Business days from the first time development work starts on an issue to the last time it enters a done status category, for delivered issues only. It belongs to the sprint in which the issue was delivered.
+
+**Reopen**:
+A move of an issue out of a done status category back to any earlier status.
 _Avoid_: Lead time, turnaround
 
 **Delivered**:
-An issue that is in a done status category and was not abandoned (closed as won't-do, cancelled or similar).
+An issue that is in a done status category and was not abandoned (closed with a won't-do resolution). Delivery is reaching Done; shipping to customers is a later step outside the team's control.
 _Avoid_: Completed, closed, resolved
 
 **Point bucket**:
-A group of issues with the same story point estimate, used to compare like with like.
+A group of issues with the same story point estimate at the moment their cycle started, used to compare like with like. Later re-estimates are ignored; issues with no estimate at that moment are unestimated.
 _Avoid_: Size class, issue type
 
 ### AI use
