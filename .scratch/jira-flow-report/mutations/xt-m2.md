@@ -14,3 +14,4 @@ replace: |-
 
 Claim (cross-ticket finding 20, owner decision D40): only the first discover writes a file in which no status has the done role; a rerun over such a file is still refused, and the file is neither rewritten nor copied.
 The test `A_rerun_over_a_file_with_no_done_status_is_still_refused_and_the_file_is_neither_rewritten_nor_copied` passed when it was written, because it guards behaviour the change had to keep.
+- Verified 2026-11-12 at 0c2c2c7: red, 1 failed of 107 (Pipeline, filter /*/*/DiscoverTests/*); restored.

@@ -199,12 +199,53 @@ public class CredentialManagerSecretStoreTests
         await Assert.That(System.Text.Encoding.Unicode.GetString(vault.Entries[SaltEntry])).IsEqualTo("synthetic-salt-three");
     }
 
+    private const string UnreadableSaltOverHashedPeople =
+        "The stored hashing salt cannot be read, and the database already holds people hashed with a salt. A different salt would give every person a second hash, "
+        + "so each would count as two. To store a salt over the one that cannot be read, add --replace.\n";
+
     [Test]
-    [Arguments(false)]
-    [Arguments(true)]
-    public async Task A_stored_salt_that_cannot_be_read_is_replaced_over_hashed_people_only_with_the_replace_option(bool generate)
+    public async Task A_typed_salt_replaces_a_stored_one_that_cannot_be_read_over_hashed_people_only_with_the_replace_option()
     {
         await using var pipeline = new PipelineHarness();
+        var vault = await RunOnceWithAnAssigneeThenMakeTheSaltUnreadableAsync(pipeline);
+
+        // Typed once: the refused command stops before it asks, so the line is still there for the second.
+        pipeline.Console.TypeLine("synthetic-salt-three");
+        var refused = await pipeline.RunAsync("secrets", "set", "hashing-salt");
+        var errorWhenRefused = pipeline.Error.ToString().ReplaceLineEndings("\n");
+        var entryWhenRefused = vault.Entries[SaltEntry];
+        var replaced = await pipeline.RunAsync("secrets", "set", "hashing-salt", "--replace");
+
+        await Assert.That(refused).IsEqualTo(1);
+        await Assert.That(errorWhenRefused).IsEqualTo(UnreadableSaltOverHashedPeople);
+        await Assert.That(entryWhenRefused).IsEquivalentTo(NotText);
+        await Assert.That(replaced).IsEqualTo(0);
+        await Assert.That(System.Text.Encoding.Unicode.GetString(vault.Entries[SaltEntry])).IsEqualTo("synthetic-salt-three");
+    }
+
+    [Test]
+    public async Task A_generated_salt_replaces_a_stored_one_that_cannot_be_read_over_hashed_people_only_with_the_replace_option()
+    {
+        await using var pipeline = new PipelineHarness();
+        var vault = await RunOnceWithAnAssigneeThenMakeTheSaltUnreadableAsync(pipeline);
+
+        var refused = await pipeline.RunAsync("secrets", "set", "hashing-salt", "--generate");
+        var errorWhenRefused = pipeline.Error.ToString().ReplaceLineEndings("\n");
+        var entryWhenRefused = vault.Entries[SaltEntry];
+        var replaced = await pipeline.RunAsync("secrets", "set", "hashing-salt", "--generate", "--replace");
+
+        await Assert.That(refused).IsEqualTo(1);
+        await Assert.That(errorWhenRefused).IsEqualTo(UnreadableSaltOverHashedPeople);
+        await Assert.That(entryWhenRefused).IsEquivalentTo(NotText);
+        await Assert.That(replaced).IsEqualTo(0);
+
+        // A generated salt is 256 random bits, stored as base64 text.
+        await Assert.That(Convert.FromBase64String(System.Text.Encoding.Unicode.GetString(vault.Entries[SaltEntry])).Length).IsEqualTo(32);
+    }
+
+    /// <summary>A store that holds one hashed person, and a salt entry Credential Manager can no longer give as text.</summary>
+    private static async Task<FakeCredentialVault> RunOnceWithAnAssigneeThenMakeTheSaltUnreadableAsync(PipelineHarness pipeline)
+    {
         var vault = UseVault(pipeline, withAllSecrets: true);
         AddOneSprint(pipeline.Jira);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).AssignedTo(People.One)
@@ -212,26 +253,7 @@ public class CredentialManagerSecretStoreTests
             .Moved(Local(2026, 1, 9, 9), Workflow.Done);
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
         vault.Entries[SaltEntry] = [.. NotText];
-        string[] set = generate ? ["secrets", "set", "hashing-salt", "--generate"] : ["secrets", "set", "hashing-salt"];
-
-        // Typed once: the refused command stops before it asks, so the line is still there for the second.
-        if (!generate)
-        {
-            pipeline.Console.TypeLine("synthetic-salt-three");
-        }
-
-        var refused = await pipeline.RunAsync(set);
-        var errorWhenRefused = pipeline.Error.ToString().ReplaceLineEndings("\n");
-        var entryWhenRefused = vault.Entries[SaltEntry];
-        var replaced = await pipeline.RunAsync([.. set, "--replace"]);
-
-        await Assert.That(refused).IsEqualTo(1);
-        await Assert.That(errorWhenRefused).IsEqualTo(
-            "The stored hashing salt cannot be read, and the database already holds people hashed with a salt. A different salt would give every person a second hash, "
-            + "so each would count as two. To store a salt over the one that cannot be read, add --replace.\n");
-        await Assert.That(entryWhenRefused).IsEquivalentTo(NotText);
-        await Assert.That(replaced).IsEqualTo(0);
-        await Assert.That(vault.Entries[SaltEntry]).IsNotEquivalentTo(NotText);
+        return vault;
     }
 
     [Test]
