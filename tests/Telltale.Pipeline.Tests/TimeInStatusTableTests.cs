@@ -345,6 +345,39 @@ public class TimeInStatusTableTests
     }
 
     [Test]
+    public async Task A_sprint_change_is_stored_in_the_form_the_sprint_field_is_stored_in()
+    {
+        // Jira writes a Sprint change as "41, 42". The store holds one form, "41,42", so the two columns compare.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development)
+            .InSprints(41)
+            .SprintsChanged(Local(2026, 1, 19, 10), 41, 42);
+
+        await pipeline.RunAllAsync(["backfill"]);
+
+        var changes = await pipeline.QueryAsync<(string From, string To)>("SELECT from_value, to_value FROM change WHERE field = 'sprint';");
+        await Assert.That(changes).IsEquivalentTo(new[] { ("41", "41,42") });
+        await Assert.That(await pipeline.QueryAsync<string>("SELECT sprint_ids FROM issue;")).IsEquivalentTo(new[] { "41,42" });
+    }
+
+    [Test]
+    public async Task White_space_of_any_kind_in_a_sprint_change_is_not_stored()
+    {
+        // A no-break space and a tab around the IDs: accepted as before, and gone from what is stored.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development)
+            .AddHistory(Local(2026, 1, 7, 9), FakeJira.SprintFieldId, "Sprint", "", "", "41,\u00A042\t", "Fake Sprint 41, Fake Sprint 42")
+            .InSprints(41, 42);
+
+        await pipeline.RunAllAsync(["backfill"]);
+
+        var changes = await pipeline.QueryAsync<(string From, string To)>("SELECT from_value, to_value FROM change WHERE field = 'sprint';");
+        await Assert.That(changes).IsEquivalentTo(new[] { ("", "41,42") });
+    }
+
+    [Test]
     public async Task An_issue_stored_before_the_sprint_field_was_kept_stops_derive_with_a_message_to_backfill()
     {
         await using var pipeline = new PipelineHarness();
