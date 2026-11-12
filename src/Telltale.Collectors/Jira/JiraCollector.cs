@@ -220,7 +220,7 @@ public sealed class JiraCollector
         {
             var fields = issue.GetProperty("fields");
             var issueType = fields.GetProperty("issuetype");
-            var issueId = Text(issue, "id");
+            var issueId = IssueId(issue);
             if (!IsInScope(issueType))
             {
                 seen[issueId] = null;
@@ -441,6 +441,16 @@ public sealed class JiraCollector
         {
             throw new UserFacingException($"Jira's {what} answered in a shape this tool does not understand ({exception.GetType().Name}). Nothing was stored.", exception);
         }
+    }
+
+    /// <summary>
+    /// An issue's ID. Jira's issue IDs are digits; anything else is an answer in an unknown shape. The ID is
+    /// stored and written to the anomaly log as it is, so no other text may travel in it.
+    /// </summary>
+    private static string IssueId(JsonElement issue)
+    {
+        var id = Text(issue, "id");
+        return id.Length > 0 && id.All(char.IsAsciiDigit) ? id : throw new FormatException("The issue ID is not digits.");
     }
 
     private static DateTimeOffset? OptionalTime(JsonElement parent, string name) =>

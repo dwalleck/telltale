@@ -439,7 +439,11 @@ public class CycleTimeTests
             ],
             MembershipIntervals: [],
             SprintStatusTimes: [],
-            BoardStatuses: []), rawDigest: "synthetic-digest");
+            BoardStatuses: [])
+        {
+            AsOf = end,
+            Anomalies = [],
+        }, new DerivedSource("synthetic-digest", ZoneId, Holidays: ""));
 
         var rows = await CycleTimeRowsAsync(pipeline, 41);
         await Assert.That(rows.Select(row => (row.PointBucket, row.IssueCount, row.P85BusinessDays, row.P85CalendarDays)))
@@ -457,6 +461,9 @@ public class CycleTimeTests
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).Estimated(3)
             .Moved(Local(2026, 1, 14, 9), Workflow.Development)
             .Moved(Local(2026, 1, 19, 10, 15), Workflow.Done);
+
+        // Both sprints have a team, so neither has the single row of a suppressed sprint (owner decision D45).
+        pipeline.Jira.AddIdleTeam(41, 42);
 
         await pipeline.RunAsync("run", "--sprint", "41");
 

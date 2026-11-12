@@ -75,6 +75,7 @@ public static class Derivation
         var cycles = new List<IssueCycle>();
         var memberships = new List<IssueMembershipInterval>();
         var sprintStatusTimes = new List<SprintStatusTime>();
+        var anomalies = new List<IssueAnomaly>();
 
         foreach (var issue in raw.Issues)
         {
@@ -82,7 +83,8 @@ public static class Derivation
             intervals.AddRange(timeline.Intervals.Select(interval => new IssueStatusInterval(issue.IssueId, interval.StatusId, interval.Start, interval.End)));
 
             var reopens = Cycles.ReopenCount(timeline.Entries, roles);
-            cycles.Add(Delivery.Of(issue.StatusId, issue.ResolutionId, timeline.Entries, roles, abandonedResolutionIds) switch
+            var outcome = Delivery.Of(issue.StatusId, issue.ResolutionId, timeline.Entries, roles, abandonedResolutionIds);
+            cycles.Add(outcome switch
             {
                 Delivered delivered => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At), reopens)
                 {
@@ -97,6 +99,7 @@ public static class Derivation
             });
 
             var membership = SprintMembership.Build(issue.Created, SprintMembership.ParseSprintIds(issue.SprintIds), sprintChanges[issue.IssueId]);
+            anomalies.AddRange(ChangelogAnomalies.Of(issue, timeline, membership, outcome, roles));
             memberships.AddRange(membership.Intervals.Select(interval => new IssueMembershipInterval(issue.IssueId, interval.SprintId, interval.Start, interval.End)));
 
             // Only sprints that count (the windows above) have time in status. A sprint the issue was never in
@@ -116,7 +119,11 @@ public static class Derivation
             cycles,
             memberships,
             sprintStatusTimes,
-            [.. roles.StatusIds.Select((statusId, index) => new BoardStatus(statusId, index + 1, roles.IsDone(statusId)))]);
+            [.. roles.StatusIds.Select((statusId, index) => new BoardStatus(statusId, index + 1, roles.IsDone(statusId)))])
+        {
+            AsOf = asOf,
+            Anomalies = anomalies,
+        };
     }
 
     /// <summary>

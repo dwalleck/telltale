@@ -96,8 +96,8 @@ public class StoreTests
     }
 
     [Test]
-    [Arguments("UPDATE derived_source SET objects_version = 'synthetic-older-version';")]
-    [Arguments("ALTER TABLE derived_source DROP COLUMN objects_version;")]
+    [Arguments("UPDATE run SET objects_version = 'synthetic-older-version';")]
+    [Arguments("ALTER TABLE run DROP COLUMN objects_version;")]
     public async Task A_report_from_derived_data_built_by_another_version_of_the_tool_is_refused_until_derive_runs_again(string howTheStoreWasLeft)
     {
         // An earlier version's views may lack a rule this version relies on, the minimum group size above all.

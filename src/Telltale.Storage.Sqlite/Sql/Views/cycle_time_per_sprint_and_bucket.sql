@@ -9,10 +9,12 @@
 --
 -- Minimum group size (GLOSSARY, ADR-0003): the four figures are null and suppressed is 1 when the sprint has
 -- fewer than five distinct assignees (sprint_team) or the bucket has fewer than three behind it. A bucket
--- short of three keeps its issue_count (owner decision D5). In a sprint short of five issue_count is null
--- too (D41): the counts of a small sprint are its people's throughput, and summed they give back the
--- delivered count that is withheld. An issue counts toward its assignee at the time of the sync, and an
--- unassigned issue toward nobody.
+-- short of three keeps its issue_count (owner decision D5). A sprint short of five has no bucket rows at
+-- all: it has exactly one row, with no bucket, no count (D41: the counts of a small sprint are its people's
+-- throughput, and summed they give back the delivered count that is withheld) and suppressed = 1, whether
+-- or not anything was delivered in it (D45: which buckets have rows would say what its few people worked
+-- on). In that row a null point_bucket does not mean unestimated. An issue counts toward its assignee at
+-- the time of the sync, and an unassigned issue toward nobody.
 CREATE VIEW cycle_time_per_sprint_and_bucket AS
 WITH ranked AS (
     SELECT c.delivery_sprint_id AS sprint_id,
@@ -41,12 +43,17 @@ bucket AS (
 )
 SELECT b.sprint_id,
        b.point_bucket,
-       CASE WHEN t.suppressed = 0 THEN b.issue_count END AS issue_count,
-       CASE WHEN t.suppressed = 0 AND b.assignees >= 3 THEN b.median_business_days END AS median_business_days,
-       CASE WHEN t.suppressed = 0 AND b.assignees >= 3 THEN b.p85_business_days END    AS p85_business_days,
-       CASE WHEN t.suppressed = 0 AND b.assignees >= 3 THEN b.median_calendar_days END AS median_calendar_days,
-       CASE WHEN t.suppressed = 0 AND b.assignees >= 3 THEN b.p85_calendar_days END    AS p85_calendar_days,
-       CASE WHEN t.suppressed = 0 AND b.assignees >= 3 THEN 0 ELSE 1 END               AS suppressed
+       b.issue_count,
+       CASE WHEN b.assignees >= 3 THEN b.median_business_days END AS median_business_days,
+       CASE WHEN b.assignees >= 3 THEN b.p85_business_days END    AS p85_business_days,
+       CASE WHEN b.assignees >= 3 THEN b.median_calendar_days END AS median_calendar_days,
+       CASE WHEN b.assignees >= 3 THEN b.p85_calendar_days END    AS p85_calendar_days,
+       CASE WHEN b.assignees >= 3 THEN 0 ELSE 1 END               AS suppressed
 FROM bucket b
 -- An inner join: an issue delivered between sprints has no sprint, so it is in no row.
-JOIN sprint_team t ON t.sprint_id = b.sprint_id;
+JOIN sprint_team t ON t.sprint_id = b.sprint_id
+WHERE t.suppressed = 0
+UNION ALL
+SELECT t.sprint_id, NULL, NULL, NULL, NULL, NULL, NULL, 1
+FROM sprint_team t
+WHERE t.suppressed = 1;

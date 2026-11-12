@@ -248,7 +248,7 @@ public sealed class SqliteStore : ITelltaleStore
             [.. statuses.Select(row => new RawStatus(row.StatusId, row.Name, row.Category))]);
     }
 
-    public async Task ReplaceDerivedAsync(DerivedData derived, string rawDigest, CancellationToken cancellationToken = default)
+    public async Task ReplaceDerivedAsync(DerivedData derived, DerivedSource source, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -325,7 +325,21 @@ public sealed class SqliteStore : ITelltaleStore
             derived.BoardStatuses.Select(status => new object?[] { status.StatusId, (long)status.Position, status.IsDone ? 1L : 0L }),
             cancellationToken);
 
-        await connection.ExecuteAsync(Command(cancellationToken, "INSERT INTO derived_source (raw_digest, objects_version) VALUES (@rawDigest, @DerivedObjectsVersion);", new { rawDigest, DerivedObjectsVersion }, transaction));
+        await ExecuteForEachRowAsync(
+            connection,
+            transaction,
+            "INSERT INTO run (as_of, raw_digest, time_zone, holidays, objects_version) VALUES (@asOf, @rawDigest, @timeZone, @holidays, @objectsVersion);",
+            ["@asOf", "@rawDigest", "@timeZone", "@holidays", "@objectsVersion"],
+            [[StoredTime.ToStored(derived.AsOf), source.RawDigest, source.TimeZone, source.Holidays, DerivedObjectsVersion]],
+            cancellationToken);
+
+        await ExecuteForEachRowAsync(
+            connection,
+            transaction,
+            "INSERT INTO anomaly (issue_id, message) VALUES (@issueId, @message);",
+            ["@issueId", "@message"],
+            derived.Anomalies.Select(anomaly => new object?[] { anomaly.IssueId, anomaly.Message }),
+            cancellationToken);
 
         foreach (var (_, sql) in Scripts.InFolder("Views"))
         {
@@ -342,15 +356,28 @@ public sealed class SqliteStore : ITelltaleStore
         await transaction.CommitAsync(cancellationToken);
     }
 
-    public async Task<string?> ReadDerivedSourceAsync(CancellationToken cancellationToken = default)
+    public async Task<DerivedSource?> ReadDerivedSourceAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
 
         // The table is itself derived: before the first rebuild it does not exist.
-        var built = await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object WHERE name = 'derived_source');"));
+        var built = await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object WHERE name = 'run');"));
         return built
-            ? await connection.QuerySingleOrDefaultAsync<string?>(Command(cancellationToken, "SELECT raw_digest FROM derived_source;"))
+            ? await connection.QuerySingleOrDefaultAsync<DerivedSource?>(Command(cancellationToken, "SELECT raw_digest, time_zone, holidays FROM run;"))
             : null;
+    }
+
+    public async Task<IReadOnlySet<(string IssueId, string Message)>> ReadAnomaliesAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
+
+        // Before the first rebuild there is no anomaly table, and so no anomaly the store has seen.
+        if (!await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object WHERE name = 'anomaly');")))
+        {
+            return new HashSet<(string, string)>();
+        }
+
+        return (await connection.QueryAsync<(string, string)>(Command(cancellationToken, "SELECT issue_id, message FROM anomaly;"))).ToHashSet();
     }
 
     public async Task<IReadOnlyList<T>> QueryViewsAsync<T>(string sql, object? parameters = null, CancellationToken cancellationToken = default)
@@ -400,14 +427,14 @@ public sealed class SqliteStore : ITelltaleStore
     /// </remarks>
     private static async Task<HashSet<string>> CopyMetricViewsAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)
     {
-        if (!await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object WHERE name = 'derived_source');")))
+        if (!await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM derived_object WHERE name = 'run');")))
         {
             throw new UserFacingException("The store has no derived data yet. Run derive first.");
         }
 
         // Derived data from before the version was recorded has no such column.
-        var recordsVersion = await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM pragma_table_info('derived_source') WHERE name = 'objects_version');"));
-        var version = recordsVersion ? await connection.QuerySingleOrDefaultAsync<string?>(Command(cancellationToken, "SELECT objects_version FROM derived_source;")) : null;
+        var recordsVersion = await connection.ExecuteScalarAsync<bool>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM pragma_table_info('run') WHERE name = 'objects_version');"));
+        var version = recordsVersion ? await connection.QuerySingleOrDefaultAsync<string?>(Command(cancellationToken, "SELECT objects_version FROM run;")) : null;
         if (version != DerivedObjectsVersion)
         {
             throw new UserFacingException("The derived data in the store was built by another version of this tool. Run derive first.");

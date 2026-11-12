@@ -4,7 +4,9 @@
 -- stays in sprint_status_time and status_interval.
 -- Minimum group size (GLOSSARY, ADR-0003): the median is null and suppressed is 1 when the sprint has fewer
 -- than five distinct assignees (sprint_team) or fewer than three are behind the row's issues. A row short
--- of three keeps its issue_count (owner decision D5); in a sprint short of five issue_count is null too (D41).
+-- of three keeps its issue_count (owner decision D5). A sprint short of five has no status rows at all: it
+-- has exactly one row, with no status, no count (D41) and suppressed = 1, whether or not an issue spent
+-- time in it (D45: which statuses have rows would say where its few people's work sat).
 -- An unassigned issue counts toward nobody.
 CREATE VIEW time_in_status_per_sprint AS
 WITH ranked AS (
@@ -34,11 +36,16 @@ SELECT st.sprint_id,
        st.status_id,
        COALESCE(s.name, st.status_id) AS status_name,
        b.position                     AS board_position,
-       CASE WHEN t.suppressed = 0 THEN st.issue_count END AS issue_count,
-       CASE WHEN t.suppressed = 0 AND st.assignees >= 3 THEN st.median_business_days END AS median_business_days,
-       CASE WHEN t.suppressed = 0 AND st.assignees >= 3 THEN 0 ELSE 1 END                AS suppressed
+       st.issue_count,
+       CASE WHEN st.assignees >= 3 THEN st.median_business_days END AS median_business_days,
+       CASE WHEN st.assignees >= 3 THEN 0 ELSE 1 END                AS suppressed
 FROM status_time st
 JOIN sprint_team t ON t.sprint_id = st.sprint_id
 JOIN board_status b ON b.status_id = st.status_id
 LEFT JOIN status s ON s.status_id = st.status_id
-WHERE b.is_done = 0;
+WHERE b.is_done = 0
+  AND t.suppressed = 0
+UNION ALL
+SELECT t.sprint_id, NULL, NULL, NULL, NULL, NULL, 1
+FROM sprint_team t
+WHERE t.suppressed = 1;
