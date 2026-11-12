@@ -13,25 +13,15 @@ public class IdentityHashTests
         await Assert.That(hash).IsEqualTo("5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
     }
 
+    // Expected values computed with openssl, not with the code under test:
+    // printf '<account>' | openssl dgst -sha256 -hmac '<salt>'
     [Test]
-    public async Task The_same_account_and_salt_give_the_same_hash()
+    [Arguments("fake-account-0001", "synthetic-salt-one", "f9fd2e04c99208cd4033758d1e35d2b3a37fc967d7e0ee2a4c500d2a8142941e")]
+    [Arguments("fake-account-0001", "synthetic-salt-two", "5dd24bc546424219457808eae071bbf7d8896e0108fe561f0a8f4e224c4e6850")]
+    [Arguments("fake-account-0002", "synthetic-salt-one", "6718063a6f22307ddc5e634af96bbf55fa967e99c80c9bf389c6d1883e599bed")]
+    public async Task Each_account_and_salt_has_its_own_hash(string accountId, string salt, string expected)
     {
-        await Assert.That(IdentityHash.Of("fake-account-0001", "synthetic-salt-one"))
-            .IsEqualTo(IdentityHash.Of("fake-account-0001", "synthetic-salt-one"));
-    }
-
-    [Test]
-    public async Task A_different_salt_gives_a_different_hash()
-    {
-        await Assert.That(IdentityHash.Of("fake-account-0001", "synthetic-salt-one"))
-            .IsNotEqualTo(IdentityHash.Of("fake-account-0001", "synthetic-salt-two"));
-    }
-
-    [Test]
-    public async Task A_different_account_gives_a_different_hash()
-    {
-        await Assert.That(IdentityHash.Of("fake-account-0001", "synthetic-salt-one"))
-            .IsNotEqualTo(IdentityHash.Of("fake-account-0002", "synthetic-salt-one"));
+        await Assert.That(IdentityHash.Of(accountId, salt)).IsEqualTo(expected);
     }
 
     [Test]
