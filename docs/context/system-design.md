@@ -56,7 +56,7 @@ C# computes per-issue cycle times and per-sprint time in status into derived tab
 
 An issue counts toward its assignee at the time of the sync, hashed; assignee history is not collected. Unassigned issues count toward nobody.
 
-Changelog anomalies are logged by the sync, and each report's footer states how many issues had any.
+Changelog anomalies are logged by derive (and so by run), the step that builds each issue's history, and each report's footer states how many issues had any.
 
 ## First report
 
@@ -69,7 +69,7 @@ Interval math (`Interval`), business-day calendar (`BusinessCalendar`), status t
 Behaviors to preserve:
 
 - Changelog entries are deduplicated by history ID and ordered by time, then numeric history ID.
-- Inconsistent history produces anomaly messages but never stops the build of a timeline; the sync should log them.
+- Inconsistent history produces anomaly messages but never stops the build of a timeline; derive logs them (a total, then each anomaly new since the last derive) and stores the full list.
 - A sprint ends at its completion date; an uncompleted sprint runs to now.
 - Statuses are tracked by ID, never name.
 - Time in status is reported as calendar time, business time and business days.

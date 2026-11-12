@@ -39,7 +39,7 @@ This is the first slice of the whole system: every layer (collector, raw tables,
 16. As a team member, I want my Jira identity replaced by a salted hash before anything is written to disk, so that the store cannot be used to look me up (ADR-0003).
 17. As a team member, I want no issue summaries, descriptions or comments stored, so that the store holds no free text about my work (ADR-0002).
 18. As the project owner, I want epics and sub-tasks left out, so that containers and double-counted work don't distort throughput.
-19. As the project owner, I want the sync to log every changelog anomaly it finds, so that I can investigate bad history without the run stopping.
+19. As the project owner, I want derive (and so run) to log every changelog anomaly it finds, so that I can investigate bad history without the run stopping.
 20. As the project owner, I want the tool to back off and retry when Jira rate-limits it, so that a large backfill finishes unattended.
 
 ### Deriving
