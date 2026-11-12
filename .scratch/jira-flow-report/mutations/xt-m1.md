@@ -16,3 +16,4 @@ Claim (cross-ticket finding 1, review finding 3): the role check covers every en
 Expected red: `A_status_with_no_role_that_an_issue_entered_and_left_at_the_same_instant_stops_the_run_and_is_named` and `A_status_with_no_role_that_an_issue_was_created_in_and_left_at_that_instant_stops_the_run_and_is_named`. The first ran red before the fix; the second was written after it.
 The other direction (a later change's "from" the timeline was not in does not stop the run) ran red first: `A_status_with_no_role_that_a_later_change_only_names_as_the_status_moved_from_does_not_stop_the_run`.
 - Verified 2026-11-12 at 39943d6: red, 2 failed of 51 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
+- Verified 2026-11-12 at bd15475: red, 2 failed of 52 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
