@@ -5,7 +5,7 @@ public sealed class InMemorySecretStore(IDictionary<SecretName, string> secrets)
 {
     public string? Get(SecretName name) => secrets.TryGetValue(name, out var value) ? value : null;
 
-    public string HowToSet(SecretName name) => "Add it to the secrets this in-memory store was built over.";
+    public string HowToSet(SecretName name) => SecretInfo.Of(name).SetCommand;
 
     public void Set(SecretName name, string value) => secrets[name] = value;
 }

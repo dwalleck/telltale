@@ -49,8 +49,8 @@ public sealed class PipelineHarness : IAsyncDisposable
     /// <summary>When set, the commands get this secret store in place of the in-memory one over <see cref="Secrets"/>.</summary>
     public ISecretStore? SecretStore { get; set; }
 
-    /// <summary>What the person types when <c>secrets set</c> asks for a value, one entry per question.</summary>
-    public ScriptedSecretInput Input { get; } = new();
+    /// <summary>The keyboard and standard input <c>secrets set</c> reads a value from. Type or pipe the value before the run.</summary>
+    public FakeConsoleInput Console { get; } = new();
 
     /// <summary>The configuration file's content, written to disk before each run. Edit it to change a setting.</summary>
     public JsonObject Config { get; } = new()
@@ -103,7 +103,7 @@ public sealed class PipelineHarness : IAsyncDisposable
             DatabasePath,
             ReportDirectory)
         {
-            SecretInput = Input,
+            ConsoleInput = Console,
         };
 
         return await CliApp.RunAsync(args, services, Cancellation.Token);

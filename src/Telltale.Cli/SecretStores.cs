@@ -10,5 +10,5 @@ public static class SecretStores
     /// anywhere else, for development. On Windows no environment variable is ever read for a secret.
     /// </summary>
     public static ISecretStore ForPlatform(bool isWindows) =>
-        isWindows ? new CredentialManagerSecretStore() : new EnvironmentSecretStore();
+        isWindows ? new CredentialManagerSecretStore(new WindowsCredentialVault()) : new EnvironmentSecretStore();
 }

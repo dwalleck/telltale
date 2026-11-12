@@ -22,15 +22,7 @@ public sealed class EnvironmentSecretStore : ISecretStore
         _read = read;
     }
 
-    public static string VariableName(SecretName name) => name switch
-    {
-        SecretName.JiraEmail => "TELLTALE_JIRA_EMAIL",
-        SecretName.JiraApiToken => "TELLTALE_JIRA_API_TOKEN",
-        SecretName.HashingSalt => "TELLTALE_HASHING_SALT",
-        _ => throw new ArgumentOutOfRangeException(nameof(name), name, "Unknown secret."),
-    };
+    public string? Get(SecretName name) => _read(SecretInfo.Of(name).EnvironmentVariable);
 
-    public string? Get(SecretName name) => _read(VariableName(name));
-
-    public string HowToSet(SecretName name) => $"Set the environment variable {VariableName(name)}.";
+    public string HowToSet(SecretName name) => $"Set the environment variable {SecretInfo.Of(name).EnvironmentVariable}.";
 }

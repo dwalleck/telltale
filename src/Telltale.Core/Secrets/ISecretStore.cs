@@ -38,19 +38,10 @@ public static class SecretStoreExtensions
         var value = secrets.Get(name);
         if (string.IsNullOrWhiteSpace(value))
         {
-            throw new UserFacingException($"The secret {name.Describe()} is not set in the secret store. {secrets.HowToSet(name)}");
+            throw new UserFacingException($"The secret {SecretInfo.Of(name).Label} is not set in the secret store. {secrets.HowToSet(name)}");
         }
 
         // A value pasted with a trailing newline must behave like the clean one: for the salt, it decides every hash.
         return value.Trim();
     }
-
-    /// <summary>The secret's name as messages show it, in quotes. Never its value.</summary>
-    public static string Describe(this SecretName name) => name switch
-    {
-        SecretName.JiraEmail => "'Jira email'",
-        SecretName.JiraApiToken => "'Jira API token'",
-        SecretName.HashingSalt => "'hashing salt'",
-        _ => throw new ArgumentOutOfRangeException(nameof(name), name, "Unknown secret."),
-    };
 }

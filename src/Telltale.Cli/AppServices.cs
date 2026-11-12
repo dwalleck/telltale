@@ -25,8 +25,8 @@ public sealed record AppServices(
     string DatabasePath,
     string ReportDirectory)
 {
-    /// <summary>Where <c>secrets set</c> reads a secret's value from: the keyboard, without echo.</summary>
-    public ISecretInput SecretInput { get; init; } = new ConsoleSecretInput();
+    /// <summary>The keyboard and standard input, where <c>secrets set</c> reads a secret's value from.</summary>
+    public IConsoleInput ConsoleInput { get; init; } = new SystemConsoleInput();
 
     /// <summary>The real thing, with files under the current directory.</summary>
     public static AppServices ForProduction() => new(

@@ -38,10 +38,10 @@ public class SecretStoreSelectionTests
     [Test]
     [Arguments(SecretName.JiraEmail, "Run 'telltale secrets set jira-email'.")]
     [Arguments(SecretName.JiraApiToken, "Run 'telltale secrets set jira-api-token'.")]
-    [Arguments(SecretName.HashingSalt, "Run 'telltale secrets set hashing-salt', adding --generate for a new random salt.")]
+    [Arguments(SecretName.HashingSalt, "Run 'telltale secrets set hashing-salt'.")]
     public async Task Credential_manager_says_which_command_sets_a_secret(SecretName name, string expected)
     {
-        await Assert.That(new CredentialManagerSecretStore().HowToSet(name)).IsEqualTo(expected);
+        await Assert.That(new CredentialManagerSecretStore(new FakeCredentialVault()).HowToSet(name)).IsEqualTo(expected);
     }
 
     [Test]
@@ -57,7 +57,7 @@ public class SecretStoreSelectionTests
             ["TELLTALE_JIRA_API_TOKEN"] = PipelineHarness.JiraApiToken,
             ["TELLTALE_HASHING_SALT"] = PipelineHarness.HashingSalt,
         };
-        variables.Remove(EnvironmentSecretStore.VariableName(missing));
+        variables.Remove(SecretInfo.Of(missing).EnvironmentVariable);
         pipeline.SecretStore = new EnvironmentSecretStore(variables.GetValueOrDefault);
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
