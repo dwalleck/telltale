@@ -161,18 +161,26 @@ public class MethodNoteAndFooterTests
     }
 
     [Test]
-    public async Task A_report_is_not_refused_when_the_status_roles_are_written_again_as_they_were()
+    public async Task A_report_is_not_refused_when_lists_of_the_configuration_are_only_written_in_another_order()
     {
+        // What derive records is compared setting by setting, and the order a list is written in changes
+        // nothing a derived value depends on. (The order of statusRoles is board order, and is not such a list.)
         await using var pipeline = new PipelineHarness();
-        AddTwoSprintsWithATeam(pipeline.Jira);
+        pipeline.Jira.AddSprints41And42();
+        pipeline.Jira.AddTeam(41, 42);
+        pipeline.Config["abandonedResolutionIds"] = new System.Text.Json.Nodes.JsonArray("300001", "300002");
+        pipeline.Config["holidays"] = new System.Text.Json.Nodes.JsonArray("2026-01-19", "2026-01-01");
+        pipeline.Config["baselineSprintIds"] = new System.Text.Json.Nodes.JsonArray("41", "42");
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
 
-        // The same roles in the same board order.
-        pipeline.Config["statusRoles"] = pipeline.Config["statusRoles"]!.DeepClone();
+        pipeline.Config["abandonedResolutionIds"] = new System.Text.Json.Nodes.JsonArray(" 300002", "300001");
+        pipeline.Config["holidays"] = new System.Text.Json.Nodes.JsonArray("2026-01-01", "2026-01-19");
+        pipeline.Config["baselineSprintIds"] = new System.Text.Json.Nodes.JsonArray("42", "41", "41");
         var exit = await pipeline.RunAsync("report", "--sprint", "41");
 
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 3\n");
     }
 
     [Test]
