@@ -7,7 +7,7 @@ namespace Telltale.Core.Derive;
 
 /// <summary>
 /// Rebuilds all derived data from the raw rows. It is a pure function of the raw data, the
-/// configured board, status roles and business calendar, and the as-of time, so changing a definition means rerunning it (ADR-0002).
+/// configured board, status roles, abandoned resolutions and business calendar, and the as-of time, so changing a definition means rerunning it (ADR-0002).
 /// </summary>
 /// <remarks>
 /// Throws <see cref="UserFacingException"/> when an issue has been in a status that has no configured role, when
@@ -16,7 +16,7 @@ namespace Telltale.Core.Derive;
 /// </remarks>
 public static class Derivation
 {
-    public static DerivedData Derive(RawData raw, long boardId, StatusRoles roles, BusinessCalendar calendar, DateTimeOffset asOf)
+    public static DerivedData Derive(RawData raw, long boardId, StatusRoles roles, IReadOnlySet<string> abandonedResolutionIds, BusinessCalendar calendar, DateTimeOffset asOf)
     {
         // Unknown is not "in no sprint": deriving anyway would leave these issues out of every sprint's time in status.
         var sprintsUnknown = raw.Issues.Count(issue => issue.SprintIds is null);
@@ -54,9 +54,12 @@ public static class Derivation
             var timeline = StatusTimeline.Build(issue.Created, issue.StatusId, statusChanges[issue.IssueId]);
             intervals.AddRange(timeline.Intervals.Select(interval => new IssueStatusInterval(issue.IssueId, interval.StatusId, interval.Start, interval.End)));
 
-            cycles.Add(Delivery.Of(issue.StatusId, timeline.Intervals, roles) switch
+            cycles.Add(Delivery.Of(issue.StatusId, issue.ResolutionId, timeline.Intervals, roles, abandonedResolutionIds) switch
             {
                 Delivered delivered => new IssueCycle(issue.IssueId, delivered.At, Delivered: true, deliverySprints.For(delivered.At)),
+
+                // An abandoned issue reached done, so it has a cycle end, but it is not a delivery and belongs to no delivery sprint.
+                Abandoned abandoned => new IssueCycle(issue.IssueId, abandoned.At, Delivered: false, DeliverySprintId: null),
                 NotDelivered => new IssueCycle(issue.IssueId, CycleEnd: null, Delivered: false, DeliverySprintId: null),
             });
 

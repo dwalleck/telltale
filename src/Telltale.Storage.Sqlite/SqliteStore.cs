@@ -78,6 +78,12 @@ public sealed class SqliteStore : ITelltaleStore
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
+        // An issue that is out of scope now may have been stored while it was in scope (owner decision D13).
+        // Its rows go in the same transaction as the batch, so the store never holds half of the change.
+        var outOfScope = batch.OutOfScopeIssueIds.Select(issueId => new { issueId });
+        await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM change WHERE issue_id = @issueId;", outOfScope, transaction));
+        await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM issue WHERE issue_id = @issueId;", outOfScope, transaction));
+
         await connection.ExecuteAsync(Command(
             cancellationToken,
             """

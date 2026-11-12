@@ -240,8 +240,8 @@ public class JiraFailureTests
     }
 
     [Test]
-    [Arguments("""{"issues":[{"id":"900001","key":null,"fields":{}}]}""")]
-    [Arguments("""{"issues":[{"id":"900001","key":"FAKE-1","fields":{"issuetype":{"id":"800001"},"created":"2026-01-06T15:00:00.000+0000","status":{"id":null}}}]}""")]
+    [Arguments("""{"issues":[{"id":"900001","key":null,"fields":{"issuetype":{"id":"800001","hierarchyLevel":0}}}]}""")]
+    [Arguments("""{"issues":[{"id":"900001","key":"FAKE-1","fields":{"issuetype":{"id":"800001","hierarchyLevel":0},"created":"2026-01-06T15:00:00.000+0000","status":{"id":null}}}]}""")]
     public async Task A_null_where_jira_must_give_a_value_is_reported_plainly_and_nothing_is_stored(string searchAnswer)
     {
         await using var pipeline = new PipelineHarness();
