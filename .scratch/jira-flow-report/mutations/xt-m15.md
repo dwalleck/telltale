@@ -16,3 +16,4 @@ Claim (cross-ticket finding 21, owner decision D43): run's message about a proje
 Expected red: every case of `A_project_key_that_is_not_in_jiras_key_form_is_refused_before_any_search` (they also ran red before the fix).
 - Verified 2026-11-12 at 6c34c20: red, 7 failed of 52 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
 - Verified 2026-11-12 at 5c4f1d9: red, 7 failed of 53 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
+- Verified 2026-11-12 at 741dd98: red, 7 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.

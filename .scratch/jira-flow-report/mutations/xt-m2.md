@@ -18,3 +18,4 @@ The test `A_rerun_over_a_file_with_no_done_status_is_still_refused_and_the_file_
 - Re-pointed 2026-11-12 by xt (review of the cross-ticket fixes): the exemption is keyed on the file having had no roles (review finding 4); the mutation still exempts every discover.
 - Verified 2026-11-12 at 73ad3e6: red, 1 failed of 111 (Pipeline, filter /*/*/DiscoverTests/*); restored.
 - Verified 2026-11-12 at 5c4f1d9: red, 1 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.
+- Verified 2026-11-12 at 741dd98: red, 1 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.

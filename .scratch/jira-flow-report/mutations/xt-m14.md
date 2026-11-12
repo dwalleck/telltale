@@ -16,3 +16,4 @@ Claim (cross-ticket finding 21, owner decision D43): run's message about a statu
 Expected red: `A_status_role_outside_the_four_roles_is_refused_and_the_status_is_named_not_the_role` (it also ran red before the fix).
 - Verified 2026-11-12 at 6c34c20: red, 1 failed of 52 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
 - Verified 2026-11-12 at 5c4f1d9: red, 1 failed of 53 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
+- Verified 2026-11-12 at 741dd98: red, 1 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
