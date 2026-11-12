@@ -525,7 +525,7 @@ public class TimeInStatusTableTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41);
+        pipeline.Jira.AddTeam(41);
         var issue = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).AssignedTo(People.One);
         issue.AddHistory(Local(2026, 1, 7, 9), FakeJira.SprintFieldId, "Sprint", "", "", "41", "Fake Sprint 41", author: People.Two);
         issue.InSprints(41);

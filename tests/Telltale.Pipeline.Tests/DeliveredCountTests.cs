@@ -11,7 +11,7 @@ public class DeliveredCountTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 15), Workflow.Done);
@@ -28,7 +28,7 @@ public class DeliveredCountTests
         var report = await pipeline.ReadReportAsync(41);
         // The sprint started at 20:00 on 5 January in the team's zone, which is already 6 January in UTC.
         await Assert.That(report).StartsWith("# Fake Sprint 41 (2026-01-05 to 2026-01-19)\n");
-        await Assert.That(report).Contains("\nDelivered issues: 2\n");
+        await Assert.That(report).Contains("\nDelivered issues: 5\n");
     }
 
     [Test]
@@ -36,7 +36,7 @@ public class DeliveredCountTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 15), Workflow.Done);
@@ -51,8 +51,8 @@ public class DeliveredCountTests
 
         var rows = await pipeline.QueryAsync<(string SprintId, long DeliveredCount)>(
             "SELECT sprint_id, delivered_count FROM delivered_per_sprint ORDER BY sprint_id;");
-        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 1L), ("42", 2L) }, CollectionOrdering.Matching);
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 2\n");
+        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 4L), ("42", 5L) }, CollectionOrdering.Matching);
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 5\n");
     }
 
     [Test]
@@ -60,7 +60,7 @@ public class DeliveredCountTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 21, 9), Workflow.Done);
@@ -68,8 +68,8 @@ public class DeliveredCountTests
         await pipeline.RunAsync("run", "--sprint", "41");
         await pipeline.RunAsync("run", "--sprint", "42");
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 0\n");
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 3\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -77,7 +77,7 @@ public class DeliveredCountTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 9), Workflow.Done)
@@ -86,8 +86,8 @@ public class DeliveredCountTests
         await pipeline.RunAsync("run", "--sprint", "41");
         await pipeline.RunAsync("run", "--sprint", "42");
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 0\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 4\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 3\n");
     }
 
     [Test]
@@ -95,7 +95,7 @@ public class DeliveredCountTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 9), Workflow.Done)
@@ -104,8 +104,8 @@ public class DeliveredCountTests
         await pipeline.RunAsync("run", "--sprint", "41");
         await pipeline.RunAsync("run", "--sprint", "42");
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 0\n");
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 0\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 3\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 3\n");
     }
 
     [Test]
@@ -113,7 +113,7 @@ public class DeliveredCountTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 9), Workflow.Done)
@@ -123,8 +123,8 @@ public class DeliveredCountTests
         await pipeline.RunAsync("run", "--sprint", "41");
         await pipeline.RunAsync("run", "--sprint", "42");
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 0\n");
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 3\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -133,7 +133,7 @@ public class DeliveredCountTests
         // The issue's current status decides, not the last entry of its changelog.
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 9), Workflow.Done)
@@ -142,7 +142,7 @@ public class DeliveredCountTests
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 0\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 3\n");
     }
 
     [Test]
@@ -151,7 +151,7 @@ public class DeliveredCountTests
         // Owner decision D9. Without a transition into done there is no delivery moment, so no sprint to count it in.
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 8, 9), createdIn: Workflow.Done);
         pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 8, 9), createdIn: Workflow.Done)
             .Moved(Local(2026, 1, 22, 9), Workflow.Shipped);
@@ -161,7 +161,7 @@ public class DeliveredCountTests
         await Assert.That(exit).IsEqualTo(0);
         var rows = await pipeline.QueryAsync<(string SprintId, long DeliveredCount)>(
             "SELECT sprint_id, delivered_count FROM delivered_per_sprint ORDER BY sprint_id;");
-        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 0L), ("42", 0L) }, CollectionOrdering.Matching);
+        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 3L), ("42", 3L) }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -171,7 +171,7 @@ public class DeliveredCountTests
         // The earlier move into Done (in sprint 41) was undone, and nothing dates the present one.
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 9), Workflow.Done)
@@ -183,7 +183,7 @@ public class DeliveredCountTests
         await Assert.That(exit).IsEqualTo(0);
         var rows = await pipeline.QueryAsync<(string SprintId, long DeliveredCount)>(
             "SELECT sprint_id, delivered_count FROM delivered_per_sprint ORDER BY sprint_id;");
-        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 0L), ("42", 0L) }, CollectionOrdering.Matching);
+        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 3L), ("42", 3L) }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -191,7 +191,7 @@ public class DeliveredCountTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
 
         // The names now say the opposite of what the statuses are. Only the IDs carry the roles.
         pipeline.Jira.RenameStatus(Workflow.Done, "Fake New");
@@ -207,7 +207,7 @@ public class DeliveredCountTests
         await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -218,7 +218,7 @@ public class DeliveredCountTests
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.Shapes = shapes;
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 21, 9), Workflow.Done);
@@ -227,7 +227,7 @@ public class DeliveredCountTests
 
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]

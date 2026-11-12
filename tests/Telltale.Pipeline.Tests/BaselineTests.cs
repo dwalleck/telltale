@@ -186,7 +186,7 @@ public class BaselineTests
         await using var pipeline = new PipelineHarness();
         AddSprints(pipeline.Jira);
         pipeline.Config["baselineSprintIds"] = new JsonArray("41");
-        pipeline.Jira.AddIdleTeam(41);
+        pipeline.Jira.AddTeam(41);
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
         var store = new SqliteStore(pipeline.DatabasePath);
 
@@ -538,7 +538,7 @@ public class BaselineTests
         pipeline.Jira.AddSprint(43, "Fake Sprint 43", Local(2026, 2, 2, 9), plannedEnd: Local(2026, 2, 13, 17));
         pipeline.Jira.AddFutureSprint(44, "Fake Sprint 44");
         pipeline.Jira.AddSprint(77, "Fake Other Team Sprint", Local(2026, 1, 12, 9), plannedEnd: Local(2026, 1, 26, 9), completed: Local(2026, 1, 26, 9), originBoardId: 499999);
-        pipeline.Jira.AddIdleTeam(41);
+        pipeline.Jira.AddTeam(41);
         await pipeline.RunAllAsync(["backfill"]);
         var before = await pipeline.ReadStoreContentAsync();
         pipeline.Config["baselineSprintIds"] = new JsonArray([.. listed.Split(',').Select(id => (JsonNode)id)]);
@@ -560,7 +560,7 @@ public class BaselineTests
         await using var pipeline = new PipelineHarness();
         AddSprints(pipeline.Jira);
         pipeline.Jira.AddSprint(43, "Fake Sprint 43", Local(2026, 2, 2, 9), plannedEnd: Local(2026, 2, 13, 17));
-        pipeline.Jira.AddIdleTeam(41);
+        pipeline.Jira.AddTeam(41);
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
         pipeline.Config["baselineSprintIds"] = new JsonArray(listed);
 

@@ -28,7 +28,7 @@ public class DiscoverTests
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).AssignedTo(People.One)
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 15), Workflow.Done);
-        pipeline.Jira.AddIdleTeam(41);
+        pipeline.Jira.AddTeam(41);
 
         var discovered = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
         var written = await File.ReadAllTextAsync(pipeline.ConfigPath);
@@ -37,7 +37,7 @@ public class DiscoverTests
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(discovered).IsEqualTo(0);
         await Assert.That(ran).IsEqualTo(0);
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("Delivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("Delivered issues: 4\n");
         await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(written);
     }
 

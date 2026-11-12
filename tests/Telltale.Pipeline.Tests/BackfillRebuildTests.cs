@@ -16,7 +16,7 @@ public class BackfillRebuildTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development)
             .Moved(Local(2026, 1, 22, 9), Workflow.Done);
@@ -32,9 +32,9 @@ public class BackfillRebuildTests
         var storeAfterSync = await pipeline.ReadStoreContentAsync();
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "42"]);
 
-        await Assert.That(beforeTheDeletion).Contains("\nDelivered issues: 2\n");
-        await Assert.That(afterSync).Contains("\nDelivered issues: 2\n");
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(beforeTheDeletion).Contains("\nDelivered issues: 5\n");
+        await Assert.That(afterSync).Contains("\nDelivered issues: 5\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
 
         // Not only uncounted: no row of the issue is left, raw or derived.
         await Assert.That(storeAfterSync).Contains("FAKE-2");
@@ -164,7 +164,7 @@ public class BackfillRebuildTests
         await Assert.That(failed).IsEqualTo(1);
         await Assert.That(interrupted.Error.ToString()).Contains(failure);
         await Assert.That(storeBefore).Contains("FAKE-2");
-        await Assert.That(await interrupted.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await interrupted.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
         await Assert.That(storeAfterFailure).IsEqualTo(storeBefore);
         await Assert.That(reportAfterFailure).IsEqualTo(reportBefore);
         var store = await interrupted.ReadStoreContentAsync();
@@ -181,7 +181,7 @@ public class BackfillRebuildTests
                 .Moved(Local(2026, 1, 23, 9), Workflow.Done);
 
             // A team of five, so the report compared shows its figures.
-            jira.AddIdleTeam(41, 42);
+            jira.AddTeam(41, 42);
         }
 
         static void ChangeBoard(FakeJira jira)

@@ -108,7 +108,7 @@ public class SeparateCommandsTests
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
         await Assert.That(ReportFiles(pipeline)).IsEquivalentTo(new[] { "sprint-42.md" });
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -120,7 +120,7 @@ public class SeparateCommandsTests
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 2, 2, 11))
             .Moved(Local(2026, 2, 2, 12), Workflow.Development)
             .Moved(Local(2026, 2, 3, 9), Workflow.Done);
-        pipeline.Jira.AddIdleTeam(43);
+        pipeline.Jira.AddTeam(43);
 
         var exit = await pipeline.RunAsync("run");
 
@@ -131,7 +131,7 @@ public class SeparateCommandsTests
 
         // The store was synced and derived: the running sprint's report can be written from it as it is.
         await pipeline.RunAllAsync(["report", "--sprint", "43"]);
-        await Assert.That(await pipeline.ReadReportAsync(43)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(43)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -166,7 +166,7 @@ public class SeparateCommandsTests
         await Assert.That(stale).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo("The raw data changed since the derived data was built. Run derive first.\n");
         await Assert.That(staleReport).IsEqualTo(reportBefore);
-        await Assert.That(await pipeline.ReadReportAsync(43)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(43)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -198,7 +198,7 @@ public class SeparateCommandsTests
 
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -233,7 +233,7 @@ public class SeparateCommandsTests
 
         // The store is free again once the first command has ended.
         await pipeline.RunAllAsync(["derive"], ["report", "--sprint", "42"]);
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -249,7 +249,7 @@ public class SeparateCommandsTests
 
         await Assert.That(requestsDuringBackfill).IsGreaterThan(0);
         await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(requestsDuringBackfill);
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
     }
 
     private static string[] ReportFiles(PipelineHarness pipeline) =>
@@ -278,6 +278,6 @@ public class SeparateCommandsTests
         jira.AddIssue("FAKE-3", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 2, 2, 11), Workflow.Development);
         // A team of five in each sprint, so its delivered count is shown (SuppressionTests).
-        jira.AddIdleTeam(41, 42, 43);
+        jira.AddTeam(41, 42, 43);
     }
 }

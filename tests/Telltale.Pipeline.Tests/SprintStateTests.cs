@@ -14,7 +14,7 @@ public class SprintStateTests
     {
         await using var pipeline = new PipelineHarness(Now);
         AddClosedAndActiveSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development)
             .Moved(Local(2026, 1, 27, 9), Workflow.Done);
@@ -26,7 +26,7 @@ public class SprintStateTests
         var report = await pipeline.ReadReportAsync(42);
         // Not completed yet: the title says so and gives the planned end as that, not as the end of the figures.
         await Assert.That(report).StartsWith("# Fake Sprint 42 (from 2026-01-19, still running; planned end 2026-02-02)\n");
-        await Assert.That(report).Contains("\nDelivered issues: 1\n");
+        await Assert.That(report).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -35,14 +35,14 @@ public class SprintStateTests
         // Sprint 41 was planned to end at 9:00 on 19 January and was completed at 10:00.
         await using var pipeline = new PipelineHarness(Now);
         AddClosedAndActiveSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 19, 9, 30), Workflow.Done);
 
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -51,7 +51,7 @@ public class SprintStateTests
         // Sprint 42 was planned to end on 2 February and is still running on the 5th.
         await using var pipeline = new PipelineHarness(Local(2026, 2, 5, 12));
         AddClosedAndActiveSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development)
             .Moved(Local(2026, 2, 4, 9), Workflow.Done);
@@ -60,7 +60,7 @@ public class SprintStateTests
 
         var report = await pipeline.ReadReportAsync(42);
         await Assert.That(report).StartsWith("# Fake Sprint 42 (from 2026-01-19, still running; planned end 2026-02-02)\n");
-        await Assert.That(report).Contains("\nDelivered issues: 1\n");
+        await Assert.That(report).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -80,7 +80,7 @@ public class SprintStateTests
     {
         await using var pipeline = new PipelineHarness(Now);
         AddClosedAndActiveSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
 
         // Each of Jira's answers takes a minute, and the issue is moved to Done two minutes into the sync.
         pipeline.Jira.BeforeResponse = () => pipeline.Clock.Advance(TimeSpan.FromMinutes(1));
@@ -90,7 +90,7 @@ public class SprintStateTests
 
         await pipeline.RunAsync("run", "--sprint", "42");
 
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -99,14 +99,14 @@ public class SprintStateTests
         // Jira's clock and the laptop's are not the same clock.
         await using var pipeline = new PipelineHarness(Now);
         AddClosedAndActiveSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development)
             .Moved(Now.AddSeconds(30), Workflow.Done);
 
         await pipeline.RunAsync("run", "--sprint", "42");
 
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]
@@ -116,7 +116,7 @@ public class SprintStateTests
         await using var pipeline = new PipelineHarness(Now);
         pipeline.Jira.AddClosedSprintWithoutCompletion(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9));
         pipeline.Jira.AddSprint(42, "Fake Sprint 42", Local(2026, 1, 19, 10, 30), plannedEnd: Local(2026, 2, 2, 9));
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 14, 9), Workflow.Done);
@@ -135,7 +135,7 @@ public class SprintStateTests
         // FAKE-1 is inside sprint 41; FAKE-2 falls between its planned end and sprint 42's start; FAKE-3 is in sprint 42.
         var rows = await pipeline.QueryAsync<(string SprintId, long DeliveredCount)>(
             "SELECT sprint_id, delivered_count FROM delivered_per_sprint ORDER BY sprint_id;");
-        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 1L), ("42", 1L) }, CollectionOrdering.Matching);
+        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 4L), ("42", 4L) }, CollectionOrdering.Matching);
         await Assert.That(await pipeline.ReadReportAsync(41)).StartsWith("# Fake Sprint 41 (2026-01-05 to 2026-01-19)\n");
     }
 
@@ -179,7 +179,7 @@ public class SprintStateTests
         await using var pipeline = new PipelineHarness(Now);
         pipeline.Jira.AddFutureSprint(43, "Fake Sprint 43", plannedStart: Local(2026, 1, 12, 9), plannedEnd: Local(2026, 2, 9, 9));
         AddClosedAndActiveSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development)
             .Moved(Local(2026, 1, 27, 9), Workflow.Done);
@@ -188,7 +188,7 @@ public class SprintStateTests
 
         var rows = await pipeline.QueryAsync<(string SprintId, long DeliveredCount)>(
             "SELECT sprint_id, delivered_count FROM delivered_per_sprint ORDER BY sprint_id;");
-        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 0L), ("42", 1L) }, CollectionOrdering.Matching);
+        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 3L), ("42", 4L) }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -198,7 +198,7 @@ public class SprintStateTests
         await using var pipeline = new PipelineHarness(Now);
         pipeline.Jira.AddSprint(77, "Fake Other Team Sprint", Local(2026, 1, 12, 9), plannedEnd: Local(2026, 1, 26, 9), completed: Local(2026, 1, 26, 9), originBoardId: 499999);
         AddClosedAndActiveSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 14, 9), Workflow.Done);
@@ -207,7 +207,7 @@ public class SprintStateTests
 
         var rows = await pipeline.QueryAsync<(string SprintId, long DeliveredCount)>(
             "SELECT sprint_id, delivered_count FROM delivered_per_sprint ORDER BY sprint_id;");
-        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 1L), ("42", 0L) }, CollectionOrdering.Matching);
+        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 4L), ("42", 3L) }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -217,7 +217,7 @@ public class SprintStateTests
         const long wrongBoardId = 499999;
         await using var pipeline = new PipelineHarness(Now);
         AddClosedAndActiveSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42, 77);
+        pipeline.Jira.AddTeam(41, 42, 77);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 14, 9), Workflow.Done);
@@ -225,19 +225,20 @@ public class SprintStateTests
             """{"isLast":true,"values":[{"id":77,"state":"closed","name":"Fake Other Team Sprint","startDate":"2026-01-01T15:00:00.000Z","endDate":"2026-01-29T15:00:00.000Z","completeDate":"2026-01-29T15:00:00.000Z","originBoardId":499999}]}"""));
         pipeline.Config["jira"]!["boardId"] = wrongBoardId;
         await pipeline.RunAsync("run", "--sprint", "77");
-        await Assert.That(await pipeline.ReadReportAsync(77)).Contains("\nDelivered issues: 1\n");
+        // FAKE-1 and the team's three deliveries in each of sprints 41 and 42: all seven fall inside the other board's sprint.
+        await Assert.That(await pipeline.ReadReportAsync(77)).Contains("\nDelivered issues: 7\n");
 
         // A sync is refused once the board ID has changed (the watermark was for the other board), so the owner backfills.
         pipeline.Config["jira"]!["boardId"] = FakeJira.BoardId;
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
         var reportOfTheOtherBoardsSprint = await pipeline.RunAsync("report", "--sprint", "77");
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 4\n");
         await Assert.That(reportOfTheOtherBoardsSprint).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString()).Contains("Sprint 77 is not in the store, or has not started.");
         var rows = await pipeline.QueryAsync<(string SprintId, long DeliveredCount)>(
             "SELECT sprint_id, delivered_count FROM delivered_per_sprint ORDER BY sprint_id;");
-        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 1L), ("42", 0L) }, CollectionOrdering.Matching);
+        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 4L), ("42", 3L) }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -245,14 +246,14 @@ public class SprintStateTests
     {
         await using var pipeline = new PipelineHarness(Now);
         pipeline.Jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10), originBoardId: null);
-        pipeline.Jira.AddIdleTeam(41);
+        pipeline.Jira.AddTeam(41);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 14, 9), Workflow.Done);
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 4\n");
     }
 
     /// <summary>Sprint 41 (5 to 19 January 2026, completed) and sprint 42 (from 19 January, planned to end 2 February, still active).</summary>

@@ -55,13 +55,13 @@ public class RealJiraCollectionTests
         AddSprint41(pipeline.Jira);
         pipeline.Jira.AddIssue("FAKE-101", Local(2026, 1, 5, 10)).OfType(FakeIssueType.Epic);
         pipeline.Jira.AddIssue("FAKE-102", Local(2026, 1, 5, 11)).OfType(FakeIssueType.SubTask);
-        AddDeliveredIssues(pipeline.Jira, count: 2);
+        AddDeliveredIssues(pipeline.Jira, count: 3);
         AddTeamAfterTheOthers(pipeline.Jira);
 
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
 
-        await Assert.That(pipeline.Jira.SearchAnswers[0]).IsEquivalentTo(new[] { "FAKE-101", "FAKE-102", "FAKE-1", "FAKE-2", "FAKE-9001", "FAKE-9002", "FAKE-9003", "FAKE-9004", "FAKE-9005" }, TUnit.Assertions.Enums.CollectionOrdering.Matching);
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 2\n");
+        await Assert.That(pipeline.Jira.SearchAnswers[0]).IsEquivalentTo(new[] { "FAKE-101", "FAKE-102", "FAKE-1", "FAKE-2", "FAKE-3", "FAKE-9001", "FAKE-9002", "FAKE-9003", "FAKE-9004", "FAKE-9005" }, TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 3\n");
     }
 
     [Test]
@@ -135,12 +135,12 @@ public class RealJiraCollectionTests
             .Moved(Local(2026, 1, 2, 9), Workflow.Done);
 
         // A team of five in every sprint, there since before the first one, so each delivered count is shown.
-        pipeline.Jira.AddIdleTeam(Local(2025, 11, 1, 9), 41, 42, 43, 44, 45);
+        pipeline.Jira.AddTeam(Local(2025, 11, 1, 9), 41, 42, 43, 44, 45);
 
         await pipeline.RunAllAsync(["run"]);
 
         var delivered = await pipeline.QueryAsync<(string SprintId, long DeliveredCount)>("SELECT sprint_id, delivered_count FROM delivered_per_sprint ORDER BY sprint_id;");
-        await Assert.That(delivered).IsEquivalentTo(new[] { ("41", 1L), ("42", 0L), ("43", 0L), ("44", 0L), ("45", 1L) });
+        await Assert.That(delivered).IsEquivalentTo(new[] { ("41", 4L), ("42", 3L), ("43", 3L), ("44", 3L), ("45", 4L) });
         await Assert.That(await pipeline.ReadReportAsync(45)).StartsWith("# Fake Sprint 45 ");
     }
 
@@ -149,7 +149,7 @@ public class RealJiraCollectionTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint41(pipeline.Jira);
-        AddDeliveredIssues(pipeline.Jira, count: 1);
+        AddDeliveredIssues(pipeline.Jira, count: 3);
         AddTeamAfterTheOthers(pipeline.Jira);
         pipeline.Jira.Handler.AnswerNext(HttpMethod.Post, "/rest/api/3/search/jql", StubHttpHandler.RateLimited(30), StubHttpHandler.RateLimited(7));
 
@@ -160,7 +160,7 @@ public class RealJiraCollectionTests
             "Jira is limiting how often it can be asked. Waiting 30 seconds before asking again (POST rest/api/3/search/jql).\n"
             + "Jira is limiting how often it can be asked. Waiting 7 seconds before asking again (POST rest/api/3/search/jql).\n");
         await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 3\n");
 
         // The waits went through the clock the command was given, so they took no real time and are on record.
         await Assert.That(pipeline.Clock.Waits).IsEquivalentTo(new[] { TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(7) }, TUnit.Assertions.Enums.CollectionOrdering.Matching);
@@ -199,14 +199,14 @@ public class RealJiraCollectionTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint41(pipeline.Jira);
-        AddDeliveredIssues(pipeline.Jira, count: 1);
+        AddDeliveredIssues(pipeline.Jira, count: 3);
         AddTeamAfterTheOthers(pipeline.Jira);
         pipeline.Jira.Handler.AnswerNext(HttpMethod.Get, "/rest/api/3/status", StubHttpHandler.RateLimited(null), StubHttpHandler.RateLimited(null), StubHttpHandler.RateLimited(null));
 
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
 
         await Assert.That(pipeline.Clock.Waits).IsEquivalentTo(new[] { TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(20) }, TUnit.Assertions.Enums.CollectionOrdering.Matching);
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 3\n");
     }
 
     [Test]
@@ -215,7 +215,7 @@ public class RealJiraCollectionTests
         // The other documented form of Retry-After: an HTTP date instead of a number of seconds.
         await using var pipeline = new PipelineHarness();
         AddSprint41(pipeline.Jira);
-        AddDeliveredIssues(pipeline.Jira, count: 1);
+        AddDeliveredIssues(pipeline.Jira, count: 3);
         AddTeamAfterTheOthers(pipeline.Jira);
         var start = pipeline.Clock.GetUtcNow();
         pipeline.Jira.Handler.AnswerNext(HttpMethod.Get, $"/rest/agile/1.0/board/{FakeJira.BoardId}/sprint", StubHttpHandler.RateLimitedUntil(start.AddSeconds(90)));
@@ -223,7 +223,7 @@ public class RealJiraCollectionTests
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
 
         await Assert.That(pipeline.Clock.Waits).IsEquivalentTo(new[] { TimeSpan.FromSeconds(90) });
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 3\n");
     }
 
     [Test]
@@ -398,15 +398,15 @@ public class RealJiraCollectionTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint41(pipeline.Jira);
-        AddDeliveredIssues(pipeline.Jira, count: 1);
+        AddDeliveredIssues(pipeline.Jira, count: 3);
         AddTeamAfterTheOthers(pipeline.Jira);
         pipeline.Jira.Issues[0].AddHistory(Local(2026, 1, 8, 9), "customfield_10999", "status", null, null, "700001", "Synthetic custom value", withoutFieldId: true);
 
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
 
         // Taken for a move, it would put the issue in a status that does not exist, and derive would stop.
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
-        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM change;")).IsEquivalentTo(new[] { 2L });
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 3\n");
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM change;")).IsEquivalentTo(new[] { 6L });
     }
 
     [Test]
@@ -464,12 +464,16 @@ public class RealJiraCollectionTests
     private static void AddSprint41(FakeJira jira) =>
         jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
 
-    /// <summary>Issues FAKE-1 to FAKE-n, each created, started and finished inside sprint 41, an hour after the one before.</summary>
+    /// <summary>
+    /// Issues FAKE-1 to FAKE-n, each created, started and finished inside sprint 41, an hour after the one before,
+    /// and each assigned to the next person of the team: three or more of them have the three assignees a
+    /// delivered count needs (owner decision D49).
+    /// </summary>
     private static void AddDeliveredIssues(FakeJira jira, int count)
     {
         for (var number = 1; number <= count; number++)
         {
-            jira.AddIssue($"FAKE-{number}", Local(2026, 1, 6, 9))
+            jira.AddIssue($"FAKE-{number}", Local(2026, 1, 6, 9)).AssignedTo(People.Team[(number - 1) % People.Team.Count])
                 .Moved(Local(2026, 1, 7, 9 + number), Workflow.Development)
                 .Moved(Local(2026, 1, 9, 9 + number), Workflow.Done);
         }

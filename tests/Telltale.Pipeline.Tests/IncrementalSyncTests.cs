@@ -13,19 +13,19 @@ public class IncrementalSyncTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development)
             .Moved(Local(2026, 1, 22, 9), Workflow.Done);
         var inProgress = pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development);
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "42"]);
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
 
         inProgress.Moved(Local(2026, 1, 30, 9), Workflow.Done);
         await pipeline.RunAllAsync(["sync"], ["derive"], ["report", "--sprint", "42"]);
 
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 2\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 5\n");
     }
 
     [Test]
@@ -79,7 +79,7 @@ public class IncrementalSyncTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development)
             .Moved(Local(2026, 1, 29, 9), Workflow.Done);
@@ -94,8 +94,8 @@ public class IncrementalSyncTests
         var afterSync = await pipeline.ReadReportAsync(42);
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "42"]);
 
-        await Assert.That(afterSync).Contains("\nDelivered issues: 1\n");
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 2\n");
+        await Assert.That(afterSync).Contains("\nDelivered issues: 4\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 5\n");
     }
 
     [Test]
@@ -128,7 +128,7 @@ public class IncrementalSyncTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         var first = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development);
         var second = pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 20, 9))
@@ -149,7 +149,7 @@ public class IncrementalSyncTests
         await Assert.That(failed).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo("Jira answered 500 (InternalServerError) to POST rest/api/3/changelog/bulkfetch.\n");
         await Assert.That(pipeline.Jira.SearchAnswers[^1]).IsEquivalentTo(new[] { "FAKE-1", "FAKE-2" });
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 2\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 5\n");
     }
 
     [Test]
@@ -157,7 +157,7 @@ public class IncrementalSyncTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         var first = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development);
         var second = pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 20, 9))
@@ -179,7 +179,7 @@ public class IncrementalSyncTests
         await Assert.That(pipeline.Error.ToString()).Contains("synthetic write failure");
         await Assert.That(storeAfterFailure).IsEqualTo(storeBefore);
         await Assert.That(pipeline.Jira.SearchAnswers[^1]).IsEquivalentTo(new[] { "FAKE-1", "FAKE-2" });
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 2\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 5\n");
     }
 
     [Test]
@@ -225,7 +225,7 @@ public class IncrementalSyncTests
         // from it under the new settings would be the old settings' figures, without a sign.
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "42"]);
         var storeBefore = await pipeline.ReadStoreContentAsync();
         var reportBefore = await pipeline.ReadReportBytesAsync(42);
@@ -246,7 +246,7 @@ public class IncrementalSyncTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
 
         pipeline.Config["jira"]!["storyPointFieldId"] = "customfield_10098";
@@ -268,7 +268,7 @@ public class IncrementalSyncTests
         // migration cannot tell the settings apart, so the columns are empty, and no setting equals an empty one.
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
         await pipeline.ExecuteAsync("UPDATE watermark SET site_url = '', board_id = 0, project_keys = '', start_date = NULL, history_fields = '';");
 
@@ -315,7 +315,7 @@ public class IncrementalSyncTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
         var issue = pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 20, 9))
             .Moved(Local(2026, 1, 21, 9), Workflow.Development);
         await pipeline.RunAllAsync(["backfill"]);
@@ -325,7 +325,7 @@ public class IncrementalSyncTests
         issue.Moved(Local(2026, 1, 22, 9), Workflow.Done);
         await pipeline.RunAllAsync(["sync"], ["derive"], ["report", "--sprint", "42"]);
 
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 1\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
     }
 
     [Test]

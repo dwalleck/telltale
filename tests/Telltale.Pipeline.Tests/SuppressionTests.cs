@@ -120,6 +120,50 @@ public class SuppressionTests
     }
 
     [Test]
+    public async Task A_delivered_count_with_two_assignees_among_the_delivered_issues_reads_suppressed_and_the_tables_keep_their_rows()
+    {
+        // Owner decision D49: the count is a figure like any other, so it needs three distinct assignees
+        // behind it as well as a team of five. Three issues delivered by two people; three more people in the sprint.
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+        Delivered(pipeline.Jira, "FAKE-1", points: 3, People.One);
+        Delivered(pipeline.Jira, "FAKE-2", points: 3, People.One);
+        Delivered(pipeline.Jira, "FAKE-3", points: 3, People.Two);
+        InSprintFromItsStart(pipeline.Jira, "FAKE-4", People.Three);
+        InSprintFromItsStart(pipeline.Jira, "FAKE-5", People.Four);
+        InSprintFromItsStart(pipeline.Jira, "FAKE-6", People.Five);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(
+            "\nDelivered issues: suppressed\n"
+            + CycleTimeHeader
+            + "| 3 | 3 | suppressed | suppressed | suppressed | suppressed |\n"
+            + TimeInStatusHeading);
+        var delivered = await pipeline.QueryAsync<(long? DeliveredCount, long Suppressed, long TeamSuppressed)>("SELECT delivered_count, suppressed, team_suppressed FROM delivered_per_sprint WHERE sprint_id = '41';");
+        await Assert.That(delivered).IsEquivalentTo(new (long?, long, long)[] { (null, 1, 0) });
+    }
+
+    [Test]
+    public async Task A_delivered_count_with_three_assignees_among_the_delivered_issues_is_shown()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+        Delivered(pipeline.Jira, "FAKE-1", points: 3, People.One);
+        Delivered(pipeline.Jira, "FAKE-2", points: 3, People.Two);
+        Delivered(pipeline.Jira, "FAKE-3", points: 3, People.Three);
+        Delivered(pipeline.Jira, "FAKE-7", points: 3, assignee: null);
+        InSprintFromItsStart(pipeline.Jira, "FAKE-4", People.Four);
+        InSprintFromItsStart(pipeline.Jira, "FAKE-5", People.Five);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 4\n");
+        var delivered = await pipeline.QueryAsync<(long? DeliveredCount, long Suppressed, long TeamSuppressed)>("SELECT delivered_count, suppressed, team_suppressed FROM delivered_per_sprint WHERE sprint_id = '41';");
+        await Assert.That(delivered).IsEquivalentTo(new (long?, long, long)[] { (4, 0, 0) });
+    }
+
+    [Test]
     public async Task A_sprint_with_five_assignees_across_all_its_issues_but_four_among_the_delivered_ones_is_not_suppressed()
     {
         await using var pipeline = new PipelineHarness();
@@ -304,7 +348,7 @@ public class SuppressionTests
             DROP VIEW delivered_per_sprint;
             CREATE VIEW delivered_per_sprint AS
             SELECT '41' AS sprint_id, 'Fake Sprint 41' AS sprint_name, 'closed' AS state, '2026-01-05T15:00:00.000Z' AS started,
-                   '2026-01-19T16:00:00.000Z' AS ended, '2026-01-19T15:00:00.000Z' AS planned_end, 5 AS delivered_count, {{sprintSuppressed}} AS suppressed;
+                   '2026-01-19T16:00:00.000Z' AS ended, '2026-01-19T15:00:00.000Z' AS planned_end, 5 AS delivered_count, {{sprintSuppressed}} AS suppressed, {{sprintSuppressed}} AS team_suppressed;
             """);
 
         await pipeline.RunAllAsync(["report", "--sprint", "41"]);

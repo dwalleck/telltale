@@ -239,7 +239,7 @@ public class CycleTimeTests
     {
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
-        pipeline.Jira.AddIdleTeam(41);
+        pipeline.Jira.AddTeam(41);
 
         // Every cycle ends on Friday 16 January at noon and starts at most four days earlier, so none
         // touches a weekend and its business days equal its calendar days.
@@ -463,7 +463,7 @@ public class CycleTimeTests
             .Moved(Local(2026, 1, 19, 10, 15), Workflow.Done);
 
         // Both sprints have a team, so neither has the single row of a suppressed sprint (owner decision D45).
-        pipeline.Jira.AddIdleTeam(41, 42);
+        pipeline.Jira.AddTeam(41, 42);
 
         await pipeline.RunAsync("run", "--sprint", "41");
 

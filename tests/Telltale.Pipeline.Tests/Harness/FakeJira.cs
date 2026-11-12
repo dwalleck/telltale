@@ -467,18 +467,46 @@ public sealed partial class FakeJira
         }
     }
 
-    /// <summary>
-    /// Gives the sprints a team of five without delivering anything: one issue per person of
-    /// <see cref="People.Team"/>, listed in the sprints since 2 January 2026 and left in New. A delivered count is
-    /// shown only for a sprint with five distinct assignees (ADR-0003), so a test about delivered counts calls
-    /// this and keeps its own counts. The five issues do show in New in the sprints' time in status.
-    /// </summary>
-    public void AddIdleTeam(params long[] sprintIds) => AddIdleTeam(TeamTime.Local(2026, 1, 2, 9), sprintIds);
+    /// <summary>How many issues <see cref="AddTeam(long[])"/> delivers in each sprint: one for each of three people.</summary>
+    public const int TeamDeliveries = 3;
 
     /// <summary>
-    /// <see cref="AddIdleTeam(long[])"/> with the five issues created at <paramref name="created"/>: earlier, for
-    /// sprints before January 2026, or later than the test's other issues, so that a search ordered by update
-    /// time returns them last.
+    /// Gives the sprints a team whose delivered count is shown: a count needs a team of five and three distinct
+    /// assignees among the delivered issues (ADR-0003; owner decision D49). A test about delivered counts calls
+    /// this after adding its sprints and expects <see cref="TeamDeliveries"/> more than it delivers itself.
+    /// <list type="bullet">
+    /// <item>One issue per person of <see cref="People.Team"/>, listed in the sprints since 2 January 2026 and
+    /// left in New. These five show in New in the sprints' time in status.</item>
+    /// <item>In each of the sprints the site has by now and that has started: three issues of three of those
+    /// people, moved from New to Done one minute into the sprint. They are in no sprint and never in a work
+    /// status, so they add to the delivered count and to neither table.</item>
+    /// </list>
+    /// </summary>
+    public void AddTeam(params long[] sprintIds) => AddTeam(TeamTime.Local(2026, 1, 2, 9), sprintIds);
+
+    /// <summary>
+    /// <see cref="AddTeam(long[])"/> with the five issues that stay in New created at <paramref name="created"/>:
+    /// earlier, for sprints before January 2026, or later than the test's other issues, so that a search
+    /// ordered by update time returns them last.
+    /// </summary>
+    public void AddTeam(DateTimeOffset created, params long[] sprintIds)
+    {
+        AddIdleTeam(created, sprintIds);
+
+        foreach (var sprint in SprintList().Where(sprint => sprintIds.Contains(sprint.Id) && sprint.State != "future" && sprint.Start is not null))
+        {
+            var start = sprint.Start!.Value;
+            foreach (var (person, number) in People.Team.Take(TeamDeliveries).Select((person, index) => (person, index + 1)))
+            {
+                AddIssue($"{ProjectKey}-{sprint.Id}9{number}", start.AddHours(-1)).AssignedTo(person).Moved(start.AddMinutes(1), Workflow.Done);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The part of <see cref="AddTeam(DateTimeOffset, long[])"/> that delivers nothing: one issue per person of
+    /// <see cref="People.Team"/>, created at <paramref name="created"/>, listed in the sprints and left in New.
+    /// For a test whose own delivered issues have three assignees among them, or that counts what is fetched.
     /// </summary>
     public void AddIdleTeam(DateTimeOffset created, params long[] sprintIds)
     {
