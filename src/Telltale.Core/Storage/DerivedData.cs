@@ -82,12 +82,17 @@ public sealed record IssueAnomaly(string IssueId, ChangelogAnomalyKind Kind)
 
 /// <summary>
 /// What a rebuild of the derived data was built from, besides its as-of time: a digest that identifies the raw
-/// data it read, and the settings its business days were counted with. <see cref="Holidays"/> is the holiday
-/// list as ISO dates in order, separated by commas. <see cref="BaselineSprintIds"/> is the baseline sprint list
-/// the baseline views pool over, as a JSON array of the IDs in order, e.g. <c>["41","42"]</c>; <c>[]</c> when
-/// there is no baseline. When any of the four no longer matches, the derived data is stale.
+/// data it read, and every setting a derived value depends on. When any of them no longer matches, the derived
+/// data is stale. The settings that decide what was fetched are not here: the store records them with the raw
+/// data (<see cref="CollectionScope"/>).
 /// </summary>
-public sealed record DerivedSource(string RawDigest, string TimeZone, string Holidays, string BaselineSprintIds)
+/// <param name="RawDigest">Identifies the raw data the rebuild read.</param>
+/// <param name="TimeZone">The time zone business days were counted in.</param>
+/// <param name="Holidays">The holiday list as ISO dates in order, separated by commas.</param>
+/// <param name="BaselineSprintIds">The baseline sprint list the baseline views pool over, as a JSON array of the IDs in order, e.g. <c>["41","42"]</c>; <c>[]</c> when there is no baseline.</param>
+/// <param name="StatusRoles">Each status and its role in board order, e.g. <c>10001=work,10002=done</c>.</param>
+/// <param name="AbandonedResolutionIds">The abandoned resolution IDs in order, separated by commas.</param>
+public sealed record DerivedSource(string RawDigest, string TimeZone, string Holidays, string BaselineSprintIds, string StatusRoles, string AbandonedResolutionIds)
 {
     /// <summary><see cref="BaselineSprintIds"/> for a list of sprint IDs: the form the store keeps and the views read.</summary>
     public static string BaselineSprintIdsOf(IEnumerable<string> sprintIds) =>

@@ -125,6 +125,54 @@ public class MethodNoteAndFooterTests
     }
 
     [Test]
+    [Arguments("statusRoles")]
+    [Arguments("abandonedResolutionIds")]
+    public async Task A_report_is_refused_when_the_status_roles_or_the_abandoned_resolutions_changed_since_derive(string setting)
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done);
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+
+        // What is delivered, and when a cycle starts, was decided with the old setting.
+        if (setting == "statusRoles")
+        {
+            pipeline.Config["statusRoles"]![Workflow.Review.Id] = "blocked";
+        }
+        else
+        {
+            pipeline.Config["abandonedResolutionIds"] = new System.Text.Json.Nodes.JsonArray("700001");
+        }
+
+        var exit = await pipeline.RunAsync("report", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "statusRoles or abandonedResolutionIds in the configuration file changed since the derived data was built. Run derive first.\n");
+        await Assert.That(Directory.Exists(pipeline.ReportDirectory)).IsFalse();
+
+        await pipeline.RunAllAsync(["derive"], ["report", "--sprint", "41"]);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\n## Method\n");
+    }
+
+    [Test]
+    public async Task A_report_is_not_refused_when_the_status_roles_are_written_again_as_they_were()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+
+        // The same roles in the same board order.
+        pipeline.Config["statusRoles"] = pipeline.Config["statusRoles"]!.DeepClone();
+        var exit = await pipeline.RunAsync("report", "--sprint", "41");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+    }
+
+    [Test]
     [Arguments("timeZone")]
     [Arguments("holidays")]
     public async Task A_report_is_refused_when_the_time_zone_or_the_holidays_changed_since_derive(string setting)

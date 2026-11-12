@@ -3,7 +3,9 @@
 -- the derived tables and the views are stale. time_zone and holidays are the settings its business days
 -- were counted with (holidays as ISO dates in order, separated by commas). baseline_sprint_ids is the
 -- baseline sprint list (GLOSSARY: Baseline) as a JSON array of the IDs in order, '[]' when there is no
--- baseline: the baseline views pool over it, and never read the configuration. objects_version identifies the
+-- baseline: the baseline views pool over it, and never read the configuration. status_roles is each status
+-- and its role in board order ('10001=work,10002=done') and abandoned_resolution_ids the abandoned resolution
+-- IDs in order, separated by commas: what was delivered was decided with them. objects_version identifies the
 -- scripts that created the derived tables and the metric views: when the tool's scripts differ, the views
 -- may lack a rule the tool relies on (the minimum group size, ADR-0003), and nothing is read from them.
 CREATE TABLE run (
@@ -12,5 +14,7 @@ CREATE TABLE run (
     time_zone           TEXT NOT NULL,
     holidays            TEXT NOT NULL,
     baseline_sprint_ids TEXT NOT NULL,
+    status_roles        TEXT NOT NULL,
+    abandoned_resolution_ids TEXT NOT NULL,
     objects_version     TEXT NOT NULL
 ) STRICT;

@@ -443,7 +443,7 @@ public class CycleTimeTests
         {
             AsOf = end,
             Anomalies = [],
-        }, new DerivedSource("synthetic-digest", ZoneId, Holidays: "", BaselineSprintIds: "[]"));
+        }, new DerivedSource("synthetic-digest", ZoneId, Holidays: "", BaselineSprintIds: "[]", StatusRoles: "", AbandonedResolutionIds: ""));
 
         var rows = await CycleTimeRowsAsync(pipeline, 41);
         await Assert.That(rows.Select(row => (row.PointBucket, row.IssueCount, row.P85BusinessDays, row.P85CalendarDays)))

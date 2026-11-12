@@ -143,7 +143,9 @@ internal sealed class PipelineSteps : IDisposable
             DigestOf(raw),
             _config.TimeZone,
             string.Join(",", _config.Holidays.Order().Select(day => day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))),
-            DerivedSource.BaselineSprintIdsOf(_baselineSprintIds));
+            DerivedSource.BaselineSprintIdsOf(_baselineSprintIds),
+            string.Join(",", _config.StatusRoles.Select(status => $"{status.Key}={status.Value}")),
+            string.Join(",", _abandonedResolutionIds.Order(StringComparer.Ordinal)));
 
     /// <summary>
     /// Derive and report read what the store holds, and the store holds what the settings it was last filled
@@ -219,6 +221,12 @@ internal sealed class PipelineSteps : IDisposable
         if (derivedFrom.TimeZone != current.TimeZone || derivedFrom.Holidays != current.Holidays)
         {
             throw new UserFacingException("The time zone or the holidays in the configuration changed since the derived data was built. Run derive first.");
+        }
+
+        // What is delivered, when a cycle starts and what a reopen is were decided with the old roles and resolutions.
+        if (derivedFrom.StatusRoles != current.StatusRoles || derivedFrom.AbandonedResolutionIds != current.AbandonedResolutionIds)
+        {
+            throw new UserFacingException("statusRoles or abandonedResolutionIds in the configuration file changed since the derived data was built. Run derive first.");
         }
 
         // The baseline views were built from the list as it was at the last derive. A report under another
