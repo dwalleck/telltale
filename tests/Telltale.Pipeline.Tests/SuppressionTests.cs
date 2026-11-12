@@ -207,6 +207,47 @@ public class SuppressionTests
         await Assert.That(report).Contains(CycleTimeHeader + "| 3 | 6 | suppressed | suppressed | suppressed | suppressed |\n" + TimeInStatusHeading);
     }
 
+    [Test]
+    public async Task The_report_prints_no_figure_from_a_row_the_view_marks_suppressed_even_if_the_row_carries_one()
+    {
+        // The flag decides, not the figure being null: a view that set the flag and still let a figure through
+        // (a fault, or a view changed by hand) must not get that figure into the report.
+        await using var pipeline = new PipelineHarness();
+        AddSprint(pipeline.Jira);
+        foreach (var (person, number) in People.Team.Select((person, index) => (person, index + 1)))
+        {
+            Delivered(pipeline.Jira, $"FAKE-{number}", points: 3, person);
+        }
+
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+        await pipeline.ExecuteAsync(
+            """
+            DROP VIEW cycle_time_per_sprint_and_bucket;
+            CREATE VIEW cycle_time_per_sprint_and_bucket AS
+            SELECT '41' AS sprint_id, 3.0 AS point_bucket, 5 AS issue_count, 2.0 AS median_business_days, 2.0 AS p85_business_days,
+                   2.0 AS median_calendar_days, 2.0 AS p85_calendar_days, 1 AS suppressed;
+            DROP VIEW time_in_status_per_sprint;
+            CREATE VIEW time_in_status_per_sprint AS
+            SELECT '41' AS sprint_id, '600004' AS status_id, 'Fake Development' AS status_name, 4 AS board_position, 5 AS issue_count,
+                   2.0 AS median_business_days, 1 AS suppressed;
+            DROP VIEW delivered_per_sprint;
+            CREATE VIEW delivered_per_sprint AS
+            SELECT '41' AS sprint_id, 'Fake Sprint 41' AS sprint_name, 'closed' AS state, '2026-01-05T15:00:00.000Z' AS started,
+                   '2026-01-19T15:00:00.000Z' AS planned_end, '2026-01-19T16:00:00.000Z' AS completed, 5 AS delivered_count, 1 AS suppressed;
+            """);
+
+        await pipeline.RunAllAsync(["report", "--sprint", "41"]);
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).IsEqualTo(
+            "# Fake Sprint 41 (2026-01-05 to 2026-01-19)\n\n"
+            + "Delivered issues: suppressed\n"
+            + CycleTimeHeader
+            + "| 3 | 5 | suppressed | suppressed | suppressed | suppressed |\n"
+            + TimeInStatusHeading
+            + "\n| Status | Issues | Median business days |\n| --- | ---: | ---: |\n"
+            + "| Fake Development | 5 | suppressed |\n");
+    }
+
     private sealed class CycleTimeRow
     {
         public double? PointBucket { get; init; }

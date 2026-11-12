@@ -13,8 +13,8 @@ namespace Telltale.Reporting;
 public static class SprintReport
 {
     /// <summary>
-    /// What a cell says when the view withholds its figure (ADR-0003). A withheld figure is null in the view,
-    /// and a null never prints as a blank or a zero.
+    /// What a cell says when the view withholds its figure (ADR-0003): its row has suppressed = 1 and the
+    /// figure is null. Such a cell never prints as a blank or a zero.
     /// </summary>
     private const string Suppressed = "suppressed";
 
@@ -39,7 +39,7 @@ public static class SprintReport
     public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, CancellationToken cancellationToken = default)
     {
         var rows = await store.QueryViewsAsync<DeliveredRow>(
-            "SELECT sprint_name, started, planned_end, completed, delivered_count FROM delivered_per_sprint WHERE sprint_id = @sprintId;",
+            "SELECT sprint_name, started, planned_end, completed, delivered_count, suppressed FROM delivered_per_sprint WHERE sprint_id = @sprintId;",
             new { sprintId },
             cancellationToken);
 
@@ -54,7 +54,7 @@ public static class SprintReport
         AppendDeliveredCount(report, sprint);
         AppendCycleTime(report, await store.QueryViewsAsync<CycleTimeRow>(
             """
-            SELECT point_bucket, issue_count, median_business_days, p85_business_days, median_calendar_days, p85_calendar_days
+            SELECT point_bucket, issue_count, median_business_days, p85_business_days, median_calendar_days, p85_calendar_days, suppressed
             FROM cycle_time_per_sprint_and_bucket
             WHERE sprint_id = @sprintId
             ORDER BY point_bucket IS NULL, point_bucket;
@@ -69,7 +69,7 @@ public static class SprintReport
     // command refuses derived data that does not say which raw data it was built from (PipelineSteps.ReportAsync).
     private static Task<IReadOnlyList<TimeInStatusRow>> ReadTimeInStatusAsync(ITelltaleStore store, string sprintId, CancellationToken cancellationToken) =>
         store.QueryViewsAsync<TimeInStatusRow>(
-            "SELECT status_name, issue_count, median_business_days FROM time_in_status_per_sprint WHERE sprint_id = @sprintId ORDER BY board_position;",
+            "SELECT status_name, issue_count, median_business_days, suppressed FROM time_in_status_per_sprint WHERE sprint_id = @sprintId ORDER BY board_position;",
             new { sprintId },
             cancellationToken);
 
@@ -96,7 +96,7 @@ public static class SprintReport
     }
 
     private static void AppendDeliveredCount(StringBuilder report, DeliveredRow sprint) =>
-        report.Append("Delivered issues: ").Append(sprint.DeliveredCount?.ToString(CultureInfo.InvariantCulture) ?? Suppressed).Append('\n');
+        report.Append("Delivered issues: ").Append(Figure(sprint.Suppressed, sprint.DeliveredCount?.ToString(CultureInfo.InvariantCulture))).Append('\n');
 
     /// <summary>The cycle time table: one row per point bucket, smallest estimate first and unestimated issues last.</summary>
     private static void AppendCycleTime(StringBuilder report, IReadOnlyList<CycleTimeRow> buckets)
@@ -115,10 +115,10 @@ public static class SprintReport
         {
             report.Append("| ").Append(BucketLabel(bucket.PointBucket))
                 .Append(" | ").Append(bucket.IssueCount.ToString(CultureInfo.InvariantCulture))
-                .Append(" | ").Append(Days(bucket.MedianBusinessDays))
-                .Append(" | ").Append(Days(bucket.P85BusinessDays))
-                .Append(" | ").Append(Days(bucket.MedianCalendarDays))
-                .Append(" | ").Append(Days(bucket.P85CalendarDays))
+                .Append(" | ").Append(Days(bucket.Suppressed, bucket.MedianBusinessDays))
+                .Append(" | ").Append(Days(bucket.Suppressed, bucket.P85BusinessDays))
+                .Append(" | ").Append(Days(bucket.Suppressed, bucket.MedianCalendarDays))
+                .Append(" | ").Append(Days(bucket.Suppressed, bucket.P85CalendarDays))
                 .Append(" |\n");
         }
     }
@@ -139,7 +139,7 @@ public static class SprintReport
             // A status name is Jira's text: a "|" in it would otherwise end the cell.
             report.Append("| ").Append(row.StatusName.Replace("|", "\\|", StringComparison.Ordinal))
                 .Append(" | ").Append(row.IssueCount.ToString(CultureInfo.InvariantCulture))
-                .Append(" | ").Append(row.MedianBusinessDays?.ToString("0.0", CultureInfo.InvariantCulture) ?? Suppressed)
+                .Append(" | ").Append(Days(row.Suppressed, row.MedianBusinessDays))
                 .Append(" |\n");
         }
     }
@@ -151,8 +151,15 @@ public static class SprintReport
     private static string BucketLabel(double? pointBucket) =>
         pointBucket?.ToString("R", CultureInfo.InvariantCulture) ?? "unestimated";
 
-    /// <summary>A duration in days to one decimal place, e.g. 2.5, or <see cref="Suppressed"/>.</summary>
-    private static string Days(double? days) => days?.ToString("F1", CultureInfo.InvariantCulture) ?? Suppressed;
+    /// <summary>A duration in days to one decimal place, e.g. 2.5, or <see cref="Suppressed"/> (see <see cref="Figure"/>).</summary>
+    private static string Days(long suppressed, double? days) => Figure(suppressed, days?.ToString("F1", CultureInfo.InvariantCulture));
+
+    /// <summary>
+    /// A cell's text. The figure is printed only when its row says it is not suppressed (0) and carries it;
+    /// in every other case the cell reads <see cref="Suppressed"/>, so a figure can be withheld by mistake
+    /// but not shown by mistake.
+    /// </summary>
+    private static string Figure(long suppressed, string? figure) => suppressed == 0 && figure is not null ? figure : Suppressed;
 
     /// <summary>A stored time as a date in the team's zone, e.g. 2026-01-05.</summary>
     private static string LocalDate(string storedUtc, TimeZoneInfo teamTimeZone)
@@ -166,6 +173,7 @@ public static class SprintReport
         public string StatusName { get; init; } = "";
         public long IssueCount { get; init; }
         public double? MedianBusinessDays { get; init; }
+        public long Suppressed { get; init; } = 1;
     }
 
     private sealed class DeliveredRow
@@ -175,6 +183,7 @@ public static class SprintReport
         public string? PlannedEnd { get; init; }
         public string? Completed { get; init; }
         public long? DeliveredCount { get; init; }
+        public long Suppressed { get; init; } = 1;
     }
 
     private sealed class CycleTimeRow
@@ -185,5 +194,6 @@ public static class SprintReport
         public double? P85BusinessDays { get; init; }
         public double? MedianCalendarDays { get; init; }
         public double? P85CalendarDays { get; init; }
+        public long Suppressed { get; init; } = 1;
     }
 }

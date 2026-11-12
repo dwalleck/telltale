@@ -6,6 +6,7 @@ using Telltale.Core;
 using Telltale.Core.Calendar;
 using Telltale.Core.Configuration;
 using Telltale.Core.Derive;
+using Telltale.Core.Identity;
 using Telltale.Core.Secrets;
 using Telltale.Core.Storage;
 using Telltale.Core.Workflow;
@@ -90,8 +91,22 @@ internal sealed class PipelineSteps : IDisposable
     /// <summary>Rebuilds every derived table and metric view from the raw tables.</summary>
     public async Task DeriveAsync(CancellationToken cancellationToken)
     {
+        await RequireStoredSaltAsync(cancellationToken);
         var raw = await _store.ReadRawAsync(cancellationToken);
         await _store.ReplaceDerivedAsync(Derivation.Derive(raw, _config.Jira.BoardId, _roles, _abandonedResolutionIds, new BusinessCalendar(_timeZone, _config.Holidays), AsOf(raw)), DigestOf(raw), cancellationToken);
+    }
+
+    /// <summary>
+    /// Derive and report need no secret. But when the salt is at hand and is not the one the stored people
+    /// were hashed with, the store is about to be filled under two salts, and the figures' distinct-assignee
+    /// counts are not to be relied on until a backfill settles it: the command stops, as a sync would.
+    /// </summary>
+    private async Task RequireStoredSaltAsync(CancellationToken cancellationToken)
+    {
+        if (_services.Secrets.Get(SecretName.HashingSalt) is { } salt && !string.IsNullOrWhiteSpace(salt))
+        {
+            IdentityHash.RequireSaltOf(await _store.ReadSaltFingerprintAsync(cancellationToken), salt.Trim());
+        }
     }
 
     /// <summary>
@@ -129,6 +144,7 @@ internal sealed class PipelineSteps : IDisposable
     /// </summary>
     public async Task ReportAsync(long? sprintId, bool needsSprint, CancellationToken cancellationToken)
     {
+        await RequireStoredSaltAsync(cancellationToken);
         var derivedFrom = await _store.ReadDerivedSourceAsync(cancellationToken)
             ?? throw new UserFacingException("The store has no derived data yet. Run derive first.");
 

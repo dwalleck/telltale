@@ -56,6 +56,13 @@ public sealed record RawData(
     IReadOnlyList<RawStatus> Statuses)
 {
     /// <summary>
+    /// In a batch: the fingerprint (<c>IdentityHash.SaltFingerprint</c>) of the salt the batch's person hashes
+    /// were made with. The store records it, and refuses a batch made with another salt than its other rows
+    /// unless the batch replaces every one of them. Null when read back from the store.
+    /// </summary>
+    public string? SaltFingerprint { get; init; }
+
+    /// <summary>
     /// In a batch: the IDs of issues the collector saw and found out of scope (epics, sub-tasks, types above
     /// epic level). Writing the batch deletes whatever the store holds of them, since an issue stored while it
     /// was in scope can be converted later (owner decision D13). Always empty in what the store reads back.

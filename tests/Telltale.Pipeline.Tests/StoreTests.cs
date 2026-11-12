@@ -91,6 +91,57 @@ public class StoreTests
         await Assert.That(rows).IsEquivalentTo(new[] { 2L });
     }
 
+    [Test]
+    [Arguments("UPDATE derived_source SET objects_version = 'synthetic-older-version';")]
+    [Arguments("ALTER TABLE derived_source DROP COLUMN objects_version;")]
+    public async Task A_report_from_derived_data_built_by_another_version_of_the_tool_is_refused_until_derive_runs_again(string howTheStoreWasLeft)
+    {
+        // An earlier version's views may lack a rule this version relies on, the minimum group size above all.
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+        await pipeline.ExecuteAsync(howTheStoreWasLeft);
+
+        var exit = await pipeline.RunAsync("report", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo("The derived data in the store was built by another version of this tool. Run derive first.\n");
+        await Assert.That(Directory.Exists(pipeline.ReportDirectory)).IsFalse();
+
+        await pipeline.RunAllAsync(["derive"], ["report", "--sprint", "41"]);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 5\n");
+    }
+
+    [Test]
+    [Arguments("DROP VIEW sprint_team;", "The metric view sprint_team is not in the store. Run derive first.\n")]
+    [Arguments("DROP TABLE sprint_status_time;", "The metric view delivered_per_sprint could not be read. Run derive first.\n")]
+    public async Task A_report_is_refused_plainly_when_a_metric_view_is_missing_or_cannot_be_read(string damage, string message)
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+        await pipeline.ExecuteAsync(damage);
+
+        var exit = await pipeline.RunAsync("report", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(message);
+        await Assert.That(Directory.Exists(pipeline.ReportDirectory)).IsFalse();
+    }
+
+    [Test]
+    public async Task A_view_the_owner_saved_cannot_be_read_by_a_query_over_the_views()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        await pipeline.RunAsync("run", "--sprint", "41");
+        await pipeline.ExecuteAsync("CREATE VIEW owner_saved_view AS SELECT issue_id, assignee_hash FROM issue;");
+        var store = new SqliteStore(pipeline.DatabasePath);
+
+        await Assert.That(async () => await store.QueryViewsAsync<string>("SELECT assignee_hash FROM owner_saved_view;"))
+            .Throws<InvalidOperationException>().WithMessageContaining("reads only the metric views");
+    }
+
     private static void AddSprintAndIssue(FakeJira jira)
     {
         jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
