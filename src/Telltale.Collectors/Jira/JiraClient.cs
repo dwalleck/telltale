@@ -1,0 +1,98 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Telltale.Core;
+
+namespace Telltale.Collectors.Jira;
+
+/// <summary>
+/// Raw HTTP calls to one Jira Cloud site with basic authentication (ADR-0004: no Jira SDK).
+/// The handler is injected, so production uses the system proxy and certificate store and tests use a stub.
+/// </summary>
+internal sealed class JiraClient : IDisposable
+{
+    private readonly HttpClient _http;
+
+    public JiraClient(HttpMessageHandler handler, Uri siteUrl, string email, string apiToken)
+    {
+        _http = new HttpClient(handler, disposeHandler: false) { BaseAddress = siteUrl };
+
+        // Jira sends no authentication challenge, so the header goes on every request.
+        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{email}:{apiToken}")));
+        _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+    }
+
+    /// <summary>GET a path relative to the site, e.g. <c>rest/api/3/status</c>.</summary>
+    public Task<JsonDocument> GetAsync(string relativeUrl, CancellationToken cancellationToken) =>
+        SendAsync(HttpMethod.Get, relativeUrl, body: null, cancellationToken);
+
+    /// <summary>POST a JSON body to a path relative to the site.</summary>
+    public Task<JsonDocument> PostAsync(string relativeUrl, JsonObject body, CancellationToken cancellationToken) =>
+        SendAsync(HttpMethod.Post, relativeUrl, body, cancellationToken);
+
+    public void Dispose() => _http.Dispose();
+
+    /// <summary>
+    /// Sends one request and reads the JSON answer. Every way this can fail for reasons outside the
+    /// tool becomes a <see cref="UserFacingException"/> that names the request and never quotes the
+    /// response, which can hold issue or person data.
+    /// </summary>
+    private async Task<JsonDocument> SendAsync(HttpMethod method, string relativeUrl, JsonObject? body, CancellationToken cancellationToken)
+    {
+        var call = $"{method} {relativeUrl}";
+        using var request = new HttpRequestMessage(method, relativeUrl);
+        if (body is not null)
+        {
+            request.Content = JsonContent.Create(body);
+        }
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await _http.SendAsync(request, cancellationToken);
+        }
+        catch (HttpRequestException exception)
+        {
+            // DNS, connection, proxy tunnel and TLS failures. The category is enough; the message can name hosts.
+            var reason = exception.HttpRequestError == HttpRequestError.Unknown ? "the connection failed" : exception.HttpRequestError.ToString();
+            throw new UserFacingException(
+                $"Could not reach Jira ({call}): {reason}. On the corporate network this usually means the proxy or the certificate: "
+                + "check that the system proxy is set and that the corporate root certificate is trusted.",
+                exception);
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Not the user's Ctrl+C: HttpClient's own timeout.
+            throw new UserFacingException($"Jira did not answer {call} in time.", exception);
+        }
+
+        using (response)
+        {
+            if (response.StatusCode == HttpStatusCode.ProxyAuthenticationRequired)
+            {
+                throw new UserFacingException(
+                    $"The proxy asked for authentication (407) on {call}, so the request never reached Jira. "
+                    + "Check the system proxy settings and that this account may use the proxy.");
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new UserFacingException($"Jira answered {(int)response.StatusCode} ({response.StatusCode}) to {call}.");
+            }
+
+            try
+            {
+                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            }
+            catch (JsonException exception)
+            {
+                throw new UserFacingException($"The answer to {call} was not JSON. A proxy or sign-in page may have been served in place of Jira's answer.", exception);
+            }
+        }
+    }
+}

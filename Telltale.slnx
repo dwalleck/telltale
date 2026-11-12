@@ -1,8 +1,13 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Telltale.Cli/Telltale.Cli.csproj" />
+    <Project Path="src/Telltale.Collectors/Telltale.Collectors.csproj" />
     <Project Path="src/Telltale.Core/Telltale.Core.csproj" />
+    <Project Path="src/Telltale.Reporting/Telltale.Reporting.csproj" />
+    <Project Path="src/Telltale.Storage.Sqlite/Telltale.Storage.Sqlite.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Telltale.Core.Tests/Telltale.Core.Tests.csproj" />
+    <Project Path="tests/Telltale.Pipeline.Tests/Telltale.Pipeline.Tests.csproj" />
   </Folder>
 </Solution>
