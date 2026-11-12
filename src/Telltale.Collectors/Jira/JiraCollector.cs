@@ -127,18 +127,24 @@ public sealed class JiraCollector
                 Optional(fields, _config.StoryPointFieldId)?.GetDouble(),
                 Optional(fields, "assignee") is { } assignee ? IdentityHash.Of(Text(assignee, "accountId"), salt) : null,
                 JiraTime.Parse(fields.GetProperty("updated")),
-                Optional(fields, _config.SprintFieldId) is { } sprints ? SprintIds(sprints) : null);
+                Optional(fields, _config.SprintFieldId) is { } sprints ? SprintIds(sprints) : "");
         })];
 
     /// <summary>
     /// The Sprint field's value as the comma-separated IDs a Sprint change carries. The field is an array with
-    /// one object per sprint; only the IDs are kept. An empty array is no sprint.
+    /// one object per sprint; only the IDs are kept. An issue in no sprint (no value, or an empty array) gives
+    /// an empty text, never null: null is kept for issues stored before the field was fetched.
     /// </summary>
-    private static string? SprintIds(JsonElement sprints)
-    {
-        var ids = sprints.EnumerateArray().Select(sprint => sprint.GetProperty("id").GetInt64().ToString(CultureInfo.InvariantCulture)).ToList();
-        return ids.Count == 0 ? null : string.Join(",", ids);
-    }
+    private static string SprintIds(JsonElement sprints) =>
+        string.Join(",", sprints.EnumerateArray().Select(sprint => sprint.GetProperty("id").GetInt64().ToString(CultureInfo.InvariantCulture)));
+
+    /// <summary>
+    /// True when a Sprint change's value is what the Sprint field's history holds: nothing, or sprint IDs
+    /// (digits) separated by commas. Anything else means the configured field is another field, whose
+    /// history may hold account IDs or free text.
+    /// </summary>
+    private static bool IsSprintIdList(string? value) =>
+        value is null || value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).All(id => id.All(char.IsAsciiDigit));
 
     private async Task<List<RawChange>> FetchChangesAsync(JiraClient jira, List<RawIssue> issues, CancellationToken cancellationToken)
     {
@@ -184,10 +190,22 @@ public sealed class JiraCollector
                         _ => null,
                     };
 
-                    if (field is not null)
+                    if (field is null)
                     {
-                        changes.Add(new RawChange(historyId, issueId, at, field, Optional(item, "from")?.GetString(), Optional(item, "to")?.GetString()));
+                        continue;
                     }
+
+                    var from = Optional(item, "from")?.GetString();
+                    var to = Optional(item, "to")?.GetString();
+
+                    // Checked before anything is kept, and the message quotes no value.
+                    if (field == ChangeFields.Sprint && !(IsSprintIdList(from) && IsSprintIdList(to)))
+                    {
+                        throw new UserFacingException(
+                            "The history of the field named by jira.sprintFieldId in the configuration file holds values that are not sprint IDs, so it is not the Sprint field. Nothing was stored.");
+                    }
+
+                    changes.Add(new RawChange(historyId, issueId, at, field, from, to));
                 }
             }
         }

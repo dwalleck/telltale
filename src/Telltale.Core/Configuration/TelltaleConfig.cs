@@ -12,9 +12,10 @@ public sealed record TelltaleConfig
 
     /// <summary>
     /// The role of each workflow status by status ID: "not started", "work", "blocked" or "done".
-    /// The order the statuses are listed in is board order: reports list statuses in it.
+    /// The order the statuses are listed in is board order: reports list statuses in it. The type keeps
+    /// that order by contract, which a plain dictionary does not.
     /// </summary>
-    public required IReadOnlyDictionary<string, string> StatusRoles { get; init; }
+    public required OrderedDictionary<string, string> StatusRoles { get; init; }
 
     /// <summary>The team's time zone as an IANA ID, e.g. "America/Chicago".</summary>
     public required string TimeZone { get; init; }

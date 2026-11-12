@@ -1,5 +1,8 @@
 using System.Text.Json.Nodes;
+using Telltale.Core;
 using Telltale.Pipeline.Tests.Harness;
+using Telltale.Reporting;
+using Telltale.Storage.Sqlite;
 using TUnit.Assertions.Enums;
 using static Telltale.Pipeline.Tests.Harness.TeamTime;
 
@@ -256,6 +259,114 @@ public class TimeInStatusTableTests
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid: jira.sprintFieldId must not be empty.");
         await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
+    }
+
+    [Test]
+    [Arguments("status")]
+    [Arguments("Sprint")]
+    [Arguments("customfield_")]
+    [Arguments("customfield_10020 ")]
+    public async Task A_sprint_field_id_that_is_not_a_custom_field_id_is_refused(string fieldId)
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Config["jira"]!["sprintFieldId"] = fieldId;
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid: jira.sprintFieldId must be a custom field ID such as customfield_10020.");
+        await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
+    }
+
+    [Test]
+    public async Task A_sprint_field_id_equal_to_the_story_point_field_id_is_refused()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Config["jira"]!["sprintFieldId"] = FakeJira.StoryPointFieldId;
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).Contains("telltale.json is not valid: jira.sprintFieldId and jira.storyPointFieldId name the same field.");
+        await Assert.That(pipeline.Jira.Handler.Requests).IsEmpty();
+    }
+
+    [Test]
+    public async Task History_of_the_configured_sprint_field_that_does_not_hold_sprint_ids_stops_the_run_and_stores_nothing_of_it()
+    {
+        // sprintFieldId mistyped as a user picker: its history holds account IDs, which must never be stored.
+        const string userPickerFieldId = "customfield_10099";
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Config["jira"]!["sprintFieldId"] = userPickerFieldId;
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development)
+            .AddHistory(Local(2026, 1, 7, 9), userPickerFieldId, "Fake Reviewer", People.One.AccountId, People.One.DisplayName, People.Two.AccountId, People.Two.DisplayName);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "The history of the field named by jira.sprintFieldId in the configuration file holds values that are not sprint IDs, so it is not the Sprint field. Nothing was stored.\n");
+        var files = await pipeline.ReadAllFilesAsync();
+        await Assert.That(files.Keys).Contains("store.db");
+        var found = pipeline.Jira.ForbiddenText.Where(text => files.Values.Any(content => content.Contains(text, StringComparison.Ordinal))).ToList();
+        await Assert.That(found).IsEmpty();
+    }
+
+    [Test]
+    public async Task An_issue_stored_before_the_sprint_field_was_kept_stops_derive_with_a_message_to_backfill()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+
+        // FAKE-1 is in no sprint, which is known and stops nothing.
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development);
+        await Assert.That(await pipeline.RunAsync("run", "--sprint", "41")).IsEqualTo(0);
+
+        // A row as an earlier version of the tool left it: no Sprint field value was ever fetched for it,
+        // and Jira no longer returns the issue, so the sync does not fill it in.
+        await pipeline.ExecuteAsync(
+            $"INSERT INTO issue (issue_id, issue_key, issue_type_id, created, status_id, updated) VALUES ('900900', 'FAKE-900', '{FakeJira.IssueTypeStoryId}', '2026-01-02T15:00:00.000Z', '{Workflow.Development.Id}', '2026-01-02T15:00:00.000Z');");
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "1 issue in the store was fetched before the Sprint field was kept, so the sprints it belonged to are unknown. Run a backfill to fetch it again. No figures were derived.\n");
+    }
+
+    [Test]
+    public async Task A_status_name_with_a_table_separator_stays_inside_its_cell()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.RenameStatus(Workflow.Development, "Fake Dev | Build");
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41)
+            .Moved(Local(2026, 1, 7, 9), Workflow.Done);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(
+            new[] { @"| Fake Dev \| Build | 1 | 2.0 |" }, CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task A_report_from_derived_data_built_before_the_time_in_status_view_existed_says_to_rebuild_it()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprints(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 2, 9), createdIn: Workflow.Development).InSprints(41);
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        // The store as an earlier version of the tool derived it: no time in status view.
+        await pipeline.ExecuteAsync("DROP VIEW time_in_status_per_sprint;");
+        var store = new SqliteStore(pipeline.DatabasePath);
+
+        await Assert.That(async () => await SprintReport.RenderAsync(store, "41", TimeZoneInfo.FindSystemTimeZoneById(ZoneId)))
+            .Throws<UserFacingException>()
+            .WithMessage("The store's derived data has no time in status figures: it was built by an earlier version of this tool. Rebuild the derived data, then report again.");
     }
 
     [Test]

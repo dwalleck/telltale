@@ -10,13 +10,23 @@ namespace Telltale.Core.Derive;
 /// configured board, status roles and business calendar, and the as-of time, so changing a definition means rerunning it (ADR-0002).
 /// </summary>
 /// <remarks>
-/// Throws <see cref="UserFacingException"/> when an issue has been in a status that has no configured role, or when
-/// a closed sprint of the board has neither a completion time nor a planned end.
+/// Throws <see cref="UserFacingException"/> when an issue has been in a status that has no configured role, when
+/// a closed sprint of the board has neither a completion time nor a planned end, or when an issue was stored
+/// before its Sprint field was fetched.
 /// </remarks>
 public static class Derivation
 {
     public static DerivedData Derive(RawData raw, long boardId, StatusRoles roles, BusinessCalendar calendar, DateTimeOffset asOf)
     {
+        // Unknown is not "in no sprint": deriving anyway would leave these issues out of every sprint's time in status.
+        var sprintsUnknown = raw.Issues.Count(issue => issue.SprintIds is null);
+        if (sprintsUnknown > 0)
+        {
+            throw new UserFacingException(sprintsUnknown == 1
+                ? "1 issue in the store was fetched before the Sprint field was kept, so the sprints it belonged to are unknown. Run a backfill to fetch it again. No figures were derived."
+                : $"{sprintsUnknown} issues in the store were fetched before the Sprint field was kept, so the sprints they belonged to are unknown. Run a backfill to fetch them again. No figures were derived.");
+        }
+
         var sprintChanges = raw.Changes
             .Where(change => change.Field == ChangeFields.Sprint)
             .ToLookup(change => change.IssueId, change => SprintChange.FromRaw(change.HistoryId, change.At, change.From, change.To));
@@ -53,9 +63,8 @@ public static class Derivation
             var membership = SprintMembership.Build(issue.Created, SprintMembership.ParseSprintIds(issue.SprintIds), sprintChanges[issue.IssueId]);
             memberships.AddRange(membership.Intervals.Select(interval => new IssueMembershipInterval(issue.IssueId, interval.SprintId, interval.Start, interval.End)));
 
-            // Time in status exists only for sprints that count (the windows above) and that the issue was ever in.
-            var everIn = membership.Intervals.Select(interval => interval.SprintId).ToHashSet(StringComparer.Ordinal);
-            foreach (var window in windows.Where(window => everIn.Contains(window.SprintId)))
+            // Only sprints that count (the windows above) have time in status. A sprint the issue was never in gives nothing.
+            foreach (var window in windows)
             {
                 sprintStatusTimes.AddRange(TimeInStatus.ForSprint(window, timeline.Intervals, membership.Intervals, calendar, asOf)
                     .OrderBy(pair => pair.Key, StringComparer.Ordinal)

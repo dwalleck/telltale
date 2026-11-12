@@ -3,7 +3,8 @@ namespace Telltale.Core.Storage;
 /// <summary>
 /// The fields kept from a Jira issue (ADR-0002): no summary, description or comment, and the
 /// assignee only as a salted hash (ADR-0003). <see cref="SprintIds"/> is what the Sprint field lists now:
-/// comma-separated sprint IDs, the form a Sprint change has, or null when the issue is in no sprint.
+/// comma-separated sprint IDs, the form a Sprint change has, and empty when the issue is in no sprint. It is
+/// null only for an issue stored before the field was fetched, whose sprints are therefore unknown.
 /// </summary>
 public sealed record RawIssue(
     string IssueId,
