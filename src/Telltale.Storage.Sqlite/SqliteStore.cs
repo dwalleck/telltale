@@ -1,6 +1,7 @@
 using System.Data.Common;
 using Dapper;
 using Microsoft.Data.Sqlite;
+using SQLitePCL;
 using Telltale.Core.Storage;
 
 namespace Telltale.Storage.Sqlite;
@@ -49,7 +50,7 @@ public sealed class SqliteStore : ITelltaleStore
             ForeignKeys = true,
         }.ToString();
 
-        // Queries over the metric views cannot write, whatever SQL they are given.
+        // Queries over the metric views cannot write to the file, whatever SQL they are given.
         _readOnlyConnectionString = new SqliteConnectionStringBuilder(_connectionString) { Mode = SqliteOpenMode.ReadOnly }.ToString();
     }
 
@@ -283,7 +284,68 @@ public sealed class SqliteStore : ITelltaleStore
     public async Task<IReadOnlyList<T>> QueryViewsAsync<T>(string sql, object? parameters = null, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(_readOnlyConnectionString, cancellationToken);
-        return (await connection.QueryAsync<T>(new CommandDefinition(sql, parameters, cancellationToken: cancellationToken))).AsList();
+
+        // The query runs against copies of the metric views' rows in the connection's temporary schema, and from
+        // here on the connection may read nothing else. So the views' own rules (the minimum group size above all,
+        // ADR-0003) are applied before the query sees a row, whatever SQL it is given. An unqualified view name
+        // finds the copy first.
+        var views = await CopyMetricViewsAsync(connection, cancellationToken);
+        var rc = raw.sqlite3_set_authorizer(connection.Handle, MetricViewsOnly, views);
+        if (rc != raw.SQLITE_OK)
+        {
+            throw new InvalidOperationException($"SQLite did not accept the guard that limits a query to the metric views (result code {rc}), so the query was not run.");
+        }
+
+        try
+        {
+            return (await connection.QueryAsync<T>(new CommandDefinition(sql, parameters, cancellationToken: cancellationToken))).AsList();
+        }
+        catch (SqliteException exception) when (exception.SqliteErrorCode == raw.SQLITE_AUTH)
+        {
+            throw new InvalidOperationException(
+                $"This query reads only the metric views ({string.Join(", ", views.Order(StringComparer.Ordinal))}), and it asked for something else: {exception.Message}",
+                exception);
+        }
+    }
+
+    /// <summary>The metric views: what the scripts under <c>Sql/Views</c> create. Each script is named for its view.</summary>
+    private static readonly IReadOnlyList<string> MetricViews = [.. Scripts.InFolder("Views").Select(script => Path.GetFileNameWithoutExtension(script.Name))];
+
+    /// <summary>
+    /// Copies each metric view's rows into a temporary table of the same name and returns the names copied.
+    /// A view the database does not have (derived data from an earlier version) is left out, so a query
+    /// that names it fails as it would without the copy.
+    /// </summary>
+    private static async Task<HashSet<string>> CopyMetricViewsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var present = (await connection.QueryAsync<string>(Command(cancellationToken, "SELECT name FROM sqlite_master WHERE type = 'view';"))).ToHashSet(StringComparer.Ordinal);
+        var views = MetricViews.Where(present.Contains).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var view in views)
+        {
+            await connection.ExecuteAsync(Command(cancellationToken, $"CREATE TEMP TABLE {Quoted(view)} AS SELECT * FROM main.{Quoted(view)};"));
+        }
+
+        return views;
+    }
+
+    /// <summary>
+    /// SQLite's authorizer for a query over the metric views. It allows a SELECT, the functions it calls and
+    /// reads of the temporary schema, which holds the copies and nothing else. Every other action is denied:
+    /// a read of a raw or derived table or of the schema, a write, a PRAGMA, an ATTACH.
+    /// </summary>
+    private static int MetricViewsOnly(object userData, int action, string? first, string? second, string? database, string? accessor)
+    {
+        var allowed = action switch
+        {
+            raw.SQLITE_SELECT or raw.SQLITE_FUNCTION => true,
+
+            // A read that names no column (COUNT(*), EXISTS) comes without a schema name. The table's name
+            // decides then: the metric views' names are all it may be.
+            raw.SQLITE_READ => database == "temp" || (string.IsNullOrEmpty(second) && first is not null && ((HashSet<string>)userData).Contains(first)),
+            _ => false,
+        };
+
+        return allowed ? raw.SQLITE_OK : raw.SQLITE_DENY;
     }
 
     /// <summary>
@@ -346,7 +408,7 @@ public sealed class SqliteStore : ITelltaleStore
 
     private static string Quoted(string identifier) => $"\"{identifier.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
 
-    private static async Task<DbConnection> OpenAsync(string connectionString, CancellationToken cancellationToken)
+    private static async Task<SqliteConnection> OpenAsync(string connectionString, CancellationToken cancellationToken)
     {
         var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync(cancellationToken);

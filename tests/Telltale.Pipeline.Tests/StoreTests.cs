@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Telltale.Pipeline.Tests.Harness;
 using Telltale.Storage.Sqlite;
 using static Telltale.Pipeline.Tests.Harness.TeamTime;
@@ -21,7 +20,7 @@ public class StoreTests
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
         var rows = await pipeline.QueryAsync<(string SprintId, long DeliveredCount)>("SELECT sprint_id, delivered_count FROM owner_saved_view;");
-        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 1L) });
+        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 5L) });
     }
 
     [Test]
@@ -32,16 +31,57 @@ public class StoreTests
         await pipeline.RunAsync("run", "--sprint", "41");
         var store = new SqliteStore(pipeline.DatabasePath);
 
-        await Assert.That(async () => await store.QueryViewsAsync<long>("DELETE FROM issue_cycle RETURNING 1;")).Throws<SqliteException>().WithMessageContaining("readonly");
+        await Assert.That(async () => await store.QueryViewsAsync<long>("DELETE FROM issue_cycle RETURNING 1;")).Throws<InvalidOperationException>().WithMessageContaining("reads only the metric views");
 
         var rows = await pipeline.QueryAsync<(string SprintId, long DeliveredCount)>("SELECT sprint_id, delivered_count FROM delivered_per_sprint;");
-        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 1L) });
+        await Assert.That(rows).IsEquivalentTo(new[] { ("41", 5L) });
+    }
+
+    [Test]
+    [Arguments("SELECT assignee_hash FROM issue;")]
+    [Arguments("SELECT COUNT(*) FROM issue;")]
+    [Arguments("SELECT issue_id FROM issue_cycle WHERE delivery_sprint_id = '41';")]
+    [Arguments("SELECT d.sprint_id FROM delivered_per_sprint d JOIN sprint_status_time t ON t.sprint_id = d.sprint_id;")]
+    [Arguments("SELECT sprint_id FROM delivered_per_sprint WHERE EXISTS (SELECT 1 FROM issue);")]
+    [Arguments("WITH delivered_per_sprint AS (SELECT assignee_hash FROM issue) SELECT * FROM delivered_per_sprint;")]
+    [Arguments("SELECT name FROM sqlite_master;")]
+    [Arguments("SELECT name FROM pragma_table_info('issue');")]
+    public async Task A_query_over_the_views_cannot_read_a_raw_or_derived_table(string sql)
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        await pipeline.RunAsync("run", "--sprint", "41");
+        var store = new SqliteStore(pipeline.DatabasePath);
+
+        await Assert.That(async () => await store.QueryViewsAsync<string>(sql))
+            .Throws<InvalidOperationException>().WithMessageContaining("reads only the metric views");
+    }
+
+    [Test]
+    public async Task A_query_over_the_views_reads_every_metric_view()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        await pipeline.RunAsync("run", "--sprint", "41");
+        var store = new SqliteStore(pipeline.DatabasePath);
+
+        var rows = await store.QueryViewsAsync<long>(
+            """
+            SELECT (SELECT COUNT(*) FROM delivered_per_sprint WHERE sprint_id = @sprintId)
+                 + (SELECT COUNT(*) FROM cycle_time_per_sprint_and_bucket c WHERE c.sprint_id = @sprintId)
+                 + (SELECT COUNT(t.status_id) FROM time_in_status_per_sprint t WHERE t.sprint_id = @sprintId);
+            """,
+            new { sprintId = "41" });
+
+        // One sprint, one point bucket, and the two statuses the issues spent business time in.
+        await Assert.That(rows).IsEquivalentTo(new[] { 4L });
     }
 
     private static void AddSprintAndIssue(FakeJira jira)
     {
         jira.AddSprint(41, "Fake Sprint 41", Local(2026, 1, 5, 9), plannedEnd: Local(2026, 1, 19, 9), completed: Local(2026, 1, 19, 10));
-        jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
+        jira.ServeEachIssueOncePer(People.Team);
+        jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).InSprints(41)
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
             .Moved(Local(2026, 1, 9, 15), Workflow.Done);
     }

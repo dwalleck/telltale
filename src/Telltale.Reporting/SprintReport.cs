@@ -12,6 +12,12 @@ namespace Telltale.Reporting;
 /// </summary>
 public static class SprintReport
 {
+    /// <summary>
+    /// What a cell says when the view withholds its figure (ADR-0003). A withheld figure is null in the view,
+    /// and a null never prints as a blank or a zero.
+    /// </summary>
+    private const string Suppressed = "suppressed";
+
     /// <summary>The report's file name for a sprint: reports are named by sprint ID.</summary>
     public static string FileName(string sprintId) => $"sprint-{sprintId}.md";
 
@@ -86,7 +92,7 @@ public static class SprintReport
     }
 
     private static void AppendDeliveredCount(StringBuilder report, DeliveredRow sprint) =>
-        report.Append("Delivered issues: ").Append(sprint.DeliveredCount.ToString(CultureInfo.InvariantCulture)).Append('\n');
+        report.Append("Delivered issues: ").Append(sprint.DeliveredCount?.ToString(CultureInfo.InvariantCulture) ?? Suppressed).Append('\n');
 
     /// <summary>The cycle time table: one row per point bucket, smallest estimate first and unestimated issues last.</summary>
     private static void AppendCycleTime(StringBuilder report, IReadOnlyList<CycleTimeRow> buckets)
@@ -129,7 +135,7 @@ public static class SprintReport
             // A status name is Jira's text: a "|" in it would otherwise end the cell.
             report.Append("| ").Append(row.StatusName.Replace("|", "\\|", StringComparison.Ordinal))
                 .Append(" | ").Append(row.IssueCount.ToString(CultureInfo.InvariantCulture))
-                .Append(" | ").Append(row.MedianBusinessDays.ToString("0.0", CultureInfo.InvariantCulture))
+                .Append(" | ").Append(row.MedianBusinessDays?.ToString("0.0", CultureInfo.InvariantCulture) ?? Suppressed)
                 .Append(" |\n");
         }
     }
@@ -141,8 +147,8 @@ public static class SprintReport
     private static string BucketLabel(double? pointBucket) =>
         pointBucket?.ToString("R", CultureInfo.InvariantCulture) ?? "unestimated";
 
-    /// <summary>A duration in days to one decimal place, e.g. 2.5.</summary>
-    private static string Days(double days) => days.ToString("F1", CultureInfo.InvariantCulture);
+    /// <summary>A duration in days to one decimal place, e.g. 2.5, or <see cref="Suppressed"/>.</summary>
+    private static string Days(double? days) => days?.ToString("F1", CultureInfo.InvariantCulture) ?? Suppressed;
 
     /// <summary>A stored time as a date in the team's zone, e.g. 2026-01-05.</summary>
     private static string LocalDate(string storedUtc, TimeZoneInfo teamTimeZone)
@@ -155,7 +161,7 @@ public static class SprintReport
     {
         public string StatusName { get; init; } = "";
         public long IssueCount { get; init; }
-        public double MedianBusinessDays { get; init; }
+        public double? MedianBusinessDays { get; init; }
     }
 
     private sealed class DeliveredRow
@@ -164,16 +170,16 @@ public static class SprintReport
         public string Started { get; init; } = "";
         public string? PlannedEnd { get; init; }
         public string? Completed { get; init; }
-        public long DeliveredCount { get; init; }
+        public long? DeliveredCount { get; init; }
     }
 
     private sealed class CycleTimeRow
     {
         public double? PointBucket { get; init; }
         public long IssueCount { get; init; }
-        public double MedianBusinessDays { get; init; }
-        public double P85BusinessDays { get; init; }
-        public double MedianCalendarDays { get; init; }
-        public double P85CalendarDays { get; init; }
+        public double? MedianBusinessDays { get; init; }
+        public double? P85BusinessDays { get; init; }
+        public double? MedianCalendarDays { get; init; }
+        public double? P85CalendarDays { get; init; }
     }
 }

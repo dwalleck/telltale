@@ -193,6 +193,7 @@ public sealed class FakeJira
     private readonly List<FakeSprint> _sprints = [];
     private readonly List<FakeIssue> _issues = [];
     private readonly Dictionary<string, string> _statusNames = Workflow.BoardOrder.ToDictionary(status => status.Id, status => status.DefaultName);
+    private List<FakePerson>? _servedOncePer;
     private int _nextIssueId = 900001;
     private int _nextHistoryId = 200001;
 
@@ -212,6 +213,37 @@ public sealed class FakeJira
 
     /// <summary>Which of the two documented response shapes to serve.</summary>
     public JiraShapes Shapes { get; set; } = JiraShapes.AsSchemas;
+
+    /// <summary>
+    /// Serves every issue once per person from now on: copies alike in everything but ID, key and assignee
+    /// (an issue's own <see cref="FakeIssue.AssignedTo"/> is not used). A figure is shown only for a team of
+    /// five with three assignees behind the figure (ADR-0003), so a test about any other rule calls this with
+    /// <see cref="People.Team"/> and expects every count multiplied by the number of people. Medians and P85
+    /// stay what they are for the issues the test added, because every value is repeated equally often.
+    /// </summary>
+    public void ServeEachIssueOncePer(IReadOnlyList<FakePerson> people)
+    {
+        lock (_gate)
+        {
+            _servedOncePer = [.. people];
+        }
+    }
+
+    /// <summary>The issues as the site serves them: each one as it is, or once per person (<see cref="ServeEachIssueOncePer"/>).</summary>
+    private List<ServedIssue> Served()
+    {
+        lock (_gate)
+        {
+            return _servedOncePer is null
+                ? [.. _issues.Select(issue => new ServedIssue(issue, issue.Id, issue.Key, issue.Assignee, HistorySuffix: ""))]
+                : [.. _issues.SelectMany(issue => _servedOncePer.Select((person, copy) => copy == 0
+                    ? new ServedIssue(issue, issue.Id, issue.Key, person, HistorySuffix: "")
+                    : new ServedIssue(issue, $"{issue.Id}{copy:00}", $"{ProjectKey}-{issue.Id}{copy:00}", person, $"{copy:00}")))];
+        }
+    }
+
+    /// <summary>One issue of a response: a <see cref="FakeIssue"/> under the ID, key and assignee it is served with.</summary>
+    private sealed record ServedIssue(FakeIssue Issue, string Id, string Key, FakePerson? Assignee, string HistorySuffix);
 
     public IReadOnlyList<FakeIssue> Issues
     {
@@ -280,6 +312,20 @@ public sealed class FakeJira
             var issue = new FakeIssue(this, (_nextIssueId++).ToString(CultureInfo.InvariantCulture), key, created, createdIn ?? Workflow.New);
             _issues.Add(issue);
             return issue;
+        }
+    }
+
+    /// <summary>
+    /// Gives the sprints a team of five without delivering anything: one issue per person of
+    /// <see cref="People.Team"/>, listed in the sprints since 2 January 2026 and left in New. A delivered count is
+    /// shown only for a sprint with five distinct assignees (ADR-0003), so a test about delivered counts calls
+    /// this and keeps its own counts. The five issues do show in New in the sprints' time in status.
+    /// </summary>
+    public void AddIdleTeam(params long[] sprintIds)
+    {
+        foreach (var (person, number) in People.Team.Select((person, index) => (person, index + 1)))
+        {
+            AddIssue($"{ProjectKey}-{9000 + number}", TeamTime.Local(2026, 1, 2, 9)).AssignedTo(person).InSprints(sprintIds);
         }
     }
 
@@ -369,14 +415,15 @@ public sealed class FakeJira
     private JsonObject Search()
     {
         var issues = new JsonArray();
-        foreach (var issue in Issues.OrderBy(issue => issue.Updated))
+        foreach (var served in Served().OrderBy(served => served.Issue.Updated))
         {
+            var issue = served.Issue;
             issues.Add(new JsonObject
             {
                 ["expand"] = "",
-                ["id"] = issue.Id,
-                ["key"] = issue.Key,
-                ["self"] = $"{SiteUrl}rest/api/3/issue/{issue.Id}",
+                ["id"] = served.Id,
+                ["key"] = served.Key,
+                ["self"] = $"{SiteUrl}rest/api/3/issue/{served.Id}",
                 ["fields"] = new JsonObject
                 {
                     ["summary"] = issue.Summary,
@@ -384,7 +431,7 @@ public sealed class FakeJira
                     ["issuetype"] = IssueTypeDetails(issue.Type),
                     ["status"] = StatusDetails(issue.Status),
                     ["resolution"] = issue.ResolutionId is null ? null : new JsonObject { ["id"] = issue.ResolutionId, ["name"] = "Fake Resolution", ["description"] = ResolutionDescription },
-                    ["assignee"] = issue.Assignee is null ? null : UserDetails(issue.Assignee),
+                    ["assignee"] = served.Assignee is null ? null : UserDetails(served.Assignee),
                     ["created"] = PlatformTime(issue.Created),
                     ["updated"] = PlatformTime(issue.Updated),
                     [SprintFieldId] = SprintField(issue),
@@ -434,14 +481,14 @@ public sealed class FakeJira
             : null;
 
         var logs = new JsonArray();
-        foreach (var issue in Issues.Where(issue => asked.Contains(issue.Id) || asked.Contains(issue.Key)))
+        foreach (var served in Served().Where(served => asked.Contains(served.Id) || asked.Contains(served.Key)))
         {
             var histories = new JsonArray();
-            foreach (var history in issue.Histories.Where(history => fieldIds is null || fieldIds.Contains(history.FieldId)))
+            foreach (var history in served.Issue.Histories.Where(history => fieldIds is null || fieldIds.Contains(history.FieldId)))
             {
                 histories.Add(new JsonObject
                 {
-                    ["id"] = history.Id,
+                    ["id"] = history.Id + served.HistorySuffix,
                     ["author"] = UserDetails(history.Author),
                     ["created"] = Shapes == JiraShapes.AsExamples ? history.At.ToUnixTimeMilliseconds() : PlatformTime(history.At),
                     ["items"] = new JsonArray(new JsonObject
@@ -459,7 +506,7 @@ public sealed class FakeJira
 
             if (histories.Count > 0)
             {
-                logs.Add(new JsonObject { ["issueId"] = issue.Id, ["changeHistories"] = histories });
+                logs.Add(new JsonObject { ["issueId"] = served.Id, ["changeHistories"] = histories });
             }
         }
 

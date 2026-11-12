@@ -18,6 +18,7 @@ public class RealDeliveriesTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41);
         pipeline.Config["abandonedResolutionIds"] = new JsonArray(ResolutionWontDo);
         FinishedInSprint(pipeline.Jira, "FAKE-1").Resolved(ResolutionFinished);
         FinishedInSprint(pipeline.Jira, "FAKE-2").Resolved(ResolutionWontDo);
@@ -35,6 +36,7 @@ public class RealDeliveriesTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41);
         pipeline.Config["abandonedResolutionIds"] = new JsonArray(ResolutionWontDo);
         FinishedInSprint(pipeline.Jira, "FAKE-1").Resolved(ResolutionFinished);
         FinishedInSprint(pipeline.Jira, "FAKE-2").Resolved(ResolutionDuplicate);
@@ -57,6 +59,7 @@ public class RealDeliveriesTests
         // The same Jira every time; only the configuration file differs.
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41);
         pipeline.Config["abandonedResolutionIds"] = new JsonArray([.. abandoned.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(id => (JsonNode)id)]);
         FinishedInSprint(pipeline.Jira, "FAKE-1").Resolved(ResolutionFinished);
         FinishedInSprint(pipeline.Jira, "FAKE-2").Resolved(ResolutionWontDo);
@@ -112,6 +115,7 @@ public class RealDeliveriesTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41);
         pipeline.Config["abandonedResolutionIds"] = new JsonArray($" {ResolutionWontDo}  ");
         FinishedInSprint(pipeline.Jira, "FAKE-1").Resolved(ResolutionFinished);
         FinishedInSprint(pipeline.Jira, "FAKE-2").Resolved(ResolutionWontDo);
@@ -155,9 +159,11 @@ public class RealDeliveriesTests
         // The same story on two sites. The second site also has an epic and a sub-task, both finished in the sprint.
         await using var storyOnly = new PipelineHarness();
         AddSprint(storyOnly.Jira);
+        storyOnly.Jira.AddIdleTeam(41);
         FinishedInSprint(storyOnly.Jira, "FAKE-1").AssignedTo(People.One);
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41);
         FinishedInSprint(pipeline.Jira, "FAKE-1").AssignedTo(People.One);
         FinishedInSprint(pipeline.Jira, "FAKE-2").OfType(FakeIssueType.Epic).AssignedTo(People.Two);
         FinishedInSprint(pipeline.Jira, "FAKE-3").OfType(FakeIssueType.SubTask).AssignedTo(People.Three);
@@ -185,6 +191,7 @@ public class RealDeliveriesTests
         // Either sign is enough on its own (the flag even without a level), and a level above epics is a container too.
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41);
         FinishedInSprint(pipeline.Jira, "FAKE-1");
         FinishedInSprint(pipeline.Jira, "FAKE-2").OfType(new FakeIssueType("800009", "Fake Odd Type", subtask, hierarchyLevel));
 
@@ -227,6 +234,7 @@ public class RealDeliveriesTests
         AddSprint(pipeline.Jira);
         FinishedInSprint(pipeline.Jira, "FAKE-1");
         var converted = FinishedInSprint(pipeline.Jira, "FAKE-2");
+        pipeline.Jira.AddIdleTeam(41);
         await pipeline.RunAsync("run", "--sprint", "41");
         var before = await DeliveredPerSprintAsync(pipeline);
         converted.OfType(new FakeIssueType("800009", "Fake Converted Type", subtask, hierarchyLevel));
@@ -240,7 +248,7 @@ public class RealDeliveriesTests
         await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 1\n");
 
         // Its raw rows are gone, the issue and its history; the other issue keeps both of its changes.
-        var issueKeys = await pipeline.QueryAsync<string>("SELECT issue_key FROM issue ORDER BY issue_key;");
+        var issueKeys = await pipeline.QueryAsync<string>("SELECT issue_key FROM issue WHERE issue_key IN ('FAKE-1', 'FAKE-2');");
         await Assert.That(issueKeys).IsEquivalentTo(new[] { "FAKE-1" }, CollectionOrdering.Matching);
         var changes = await pipeline.QueryAsync<(string IssueId, long Changes)>("SELECT issue_id, COUNT(*) FROM change GROUP BY issue_id ORDER BY issue_id;");
         await Assert.That(changes).IsEquivalentTo(new[] { (pipeline.Jira.Issues[0].Id, 2L) }, CollectionOrdering.Matching);
@@ -264,7 +272,11 @@ public class RealDeliveriesTests
 
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(await DeliveredPerSprintAsync(pipeline)).IsEquivalentTo(new[] { ("41", 1L) }, CollectionOrdering.Matching);
+
+        // The answer above holds one story and nobody's name, so the sprint's figures are withheld. The story
+        // is still counted: a withheld row keeps its issue count.
+        var counted = await pipeline.QueryAsync<long>("SELECT issue_count FROM cycle_time_per_sprint_and_bucket WHERE sprint_id = '41';");
+        await Assert.That(counted).IsEquivalentTo(new[] { 1L });
     }
 
     [Test]
@@ -272,6 +284,7 @@ public class RealDeliveriesTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41);
         FinishedInSprint(pipeline.Jira, "FAKE-1");
         FinishedInSprint(pipeline.Jira, "FAKE-2").OfType(new FakeIssueType("800004", "Fake Bug", Subtask: false, HierarchyLevel: 0));
 

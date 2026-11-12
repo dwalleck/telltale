@@ -22,8 +22,10 @@ public interface ITelltaleStore
     Task ReplaceDerivedAsync(DerivedData derived, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Runs a query over metric views. <typeparamref name="T"/> is a class with <c>init</c> properties
+    /// Runs a query over metric views, and only over them: a query that reads a raw or derived table, or
+    /// anything else in the store, throws <see cref="InvalidOperationException"/>. <typeparamref name="T"/> is a class with <c>init</c> properties
     /// named like the columns (<c>delivered_count</c> maps to <c>DeliveredCount</c>); counts are <c>long</c>.
+    /// A figure a view withholds (ADR-0003) is null, so map figures to nullable properties.
     /// </summary>
     Task<IReadOnlyList<T>> QueryViewsAsync<T>(string sql, object? parameters = null, CancellationToken cancellationToken = default);
 }

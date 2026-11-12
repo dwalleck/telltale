@@ -263,6 +263,7 @@ public class ConfigurationAndSecretsTests
     {
         await using var pipeline = new PipelineHarness();
         AddOneSprint(pipeline.Jira);
+        pipeline.Jira.AddIdleTeam(41);
         pipeline.Config["statusRoles"]!.AsObject().Remove(Workflow.Blocked.Id);
         pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9))
             .Moved(Local(2026, 1, 7, 9), Workflow.Development)
