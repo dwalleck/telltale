@@ -47,6 +47,12 @@ internal sealed class JiraClient : IDisposable
     public Task<JsonDocument> PostAsync(string relativeUrl, JsonObject body, CancellationToken cancellationToken) =>
         SendAsync(HttpMethod.Post, relativeUrl, body, cancellationToken);
 
+    /// <summary>
+    /// The status of the last answer that was an error from Jira itself, or null when there has been none.
+    /// A proxy's 407 is not one: that request never reached Jira.
+    /// </summary>
+    public HttpStatusCode? LastRefusal { get; private set; }
+
     public void Dispose() => _http.Dispose();
 
     /// <summary>
@@ -123,6 +129,7 @@ internal sealed class JiraClient : IDisposable
 
             if (!response.IsSuccessStatusCode)
             {
+                LastRefusal = response.StatusCode;
                 throw new UserFacingException($"Jira answered {(int)response.StatusCode} ({response.StatusCode}) to {call}.");
             }
 

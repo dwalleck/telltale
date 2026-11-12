@@ -184,7 +184,7 @@ internal sealed class PipelineSteps : IDisposable
         }
     }
 
-    private static StatusRoles ReadStatusRoles(TelltaleConfig config, string path)
+    internal static StatusRoles ReadStatusRoles(TelltaleConfig config, string path)
     {
         try
         {
@@ -207,7 +207,7 @@ internal sealed class PipelineSteps : IDisposable
     /// name, a stray character, an empty entry) is refused: it could match no issue, and the abandoned work it
     /// was meant to exclude would count as delivered.
     /// </summary>
-    private static HashSet<string> ReadAbandonedResolutionIds(TelltaleConfig config, string path)
+    internal static HashSet<string> ReadAbandonedResolutionIds(TelltaleConfig config, string path)
     {
         // The element type says "not null", but JSON can still carry a null entry.
         var ids = config.AbandonedResolutionIds.Select(id => id?.Trim() ?? "").ToHashSet(StringComparer.Ordinal);
@@ -220,7 +220,7 @@ internal sealed class PipelineSteps : IDisposable
         return ids;
     }
 
-    private static TimeZoneInfo ReadTimeZone(TelltaleConfig config, string path)
+    internal static TimeZoneInfo ReadTimeZone(TelltaleConfig config, string path)
     {
         try
         {
