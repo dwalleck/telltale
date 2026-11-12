@@ -147,6 +147,38 @@ public class JiraFailureTests
     }
 
     [Test]
+    [Arguments("sprintFieldId", "jira.sprintFieldId in the configuration file names a field Jira does not list, so every issue would read as in no sprint. ")]
+    [Arguments("storyPointFieldId", "jira.storyPointFieldId in the configuration file names a field Jira does not list, so every issue would read as unestimated. ")]
+    public async Task A_configured_field_id_that_jira_does_not_list_stops_the_collection_naming_the_setting(string setting, string finding)
+    {
+        // Final review C2: Jira leaves a field it does not know out of the answer, which reads the same as
+        // an empty one. The fake does the same: the search carries the fields it has, under their own IDs.
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        pipeline.Config["jira"]![setting] = "customfield_10099";
+
+        var exit = await pipeline.RunAsync("backfill");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            finding + "Correct the setting (discover finds the field) and run again. Nothing was stored.\n");
+        await Assert.That(pipeline.Jira.Handler.Requests.Count(request => request.Path == "/rest/api/3/search/jql")).IsEqualTo(0);
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM issue;")).IsEquivalentTo(new[] { 0L });
+    }
+
+    [Test]
+    public async Task The_field_list_is_asked_for_once_in_a_collection()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprintAndIssue(pipeline.Jira);
+        pipeline.Jira.SearchPageSize = 1;
+
+        await pipeline.RunAllAsync(["backfill"]);
+
+        await Assert.That(pipeline.Jira.Handler.Requests.Count(request => request.Path == "/rest/api/3/field")).IsEqualTo(1);
+    }
+
+    [Test]
     public async Task An_issue_search_that_gives_a_new_token_and_a_full_page_without_end_stops_at_a_page_limit()
     {
         // B15 of the final review: a new token and a page that is not empty every time passes the other two

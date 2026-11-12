@@ -391,7 +391,7 @@ public class TimeInStatusTableTests
     public async Task History_of_the_configured_sprint_field_that_does_not_hold_sprint_ids_stops_the_run_and_stores_nothing_of_it()
     {
         // sprintFieldId mistyped as a user picker: its history holds account IDs, which must never be stored.
-        const string userPickerFieldId = "customfield_10099";
+        const string userPickerFieldId = FakeJira.OtherFieldId;
         await using var pipeline = new PipelineHarness();
         AddTwoSprints(pipeline.Jira);
         pipeline.Config["jira"]!["sprintFieldId"] = userPickerFieldId;

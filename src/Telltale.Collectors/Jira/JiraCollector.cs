@@ -109,6 +109,7 @@ public sealed class JiraCollector
         using var jira = new JiraClient(_handler, _config.SiteUrl, _secrets.Require(SecretName.JiraEmail), _secrets.Require(SecretName.JiraApiToken), _clock, _notices);
 
         var statuses = await FetchStatusesAsync(jira, cancellationToken);
+        await RequireConfiguredFieldsAsync(jira, cancellationToken);
         var sprints = await FetchSprintsAsync(jira, cancellationToken);
         var since = mode == CollectionMode.Incremental ? watermark?.UpdatedThrough : null;
         var (issues, outOfScopeIssueIds) = await FetchIssuesAsync(jira, salt, UpdatedSince(since), cancellationToken);
@@ -191,6 +192,26 @@ public sealed class JiraCollector
             Text(status, "id"),
             Text(status, "name"),
             Text(status.GetProperty("statusCategory"), "key")))]);
+    }
+
+    /// <summary>
+    /// Stops when Jira's field list does not hold the Sprint field or the story point field the configuration
+    /// names. Jira leaves a field it does not know out of every answer, and an absent field reads the same as
+    /// an empty one: with a wrong ID every issue would be "in no sprint" or "unestimated", without a sign.
+    /// Asked once per collection, before anything is fetched with the IDs. The field list's shape is the one
+    /// <see cref="JiraDiscovery"/> reads, from Atlassian's documentation; a real site confirms it (ticket 13).
+    /// </summary>
+    private async Task RequireConfiguredFieldsAsync(JiraClient jira, CancellationToken cancellationToken)
+    {
+        using var document = await jira.GetAsync("rest/api/3/field", cancellationToken);
+        var listed = Read("field list", () => document.RootElement.EnumerateArray().Select(field => Text(field, "id")).ToHashSet(StringComparer.Ordinal));
+        var finding = !listed.Contains(_config.SprintFieldId) ? "jira.sprintFieldId in the configuration file names a field Jira does not list, so every issue would read as in no sprint."
+            : !listed.Contains(_config.StoryPointFieldId) ? "jira.storyPointFieldId in the configuration file names a field Jira does not list, so every issue would read as unestimated."
+            : null;
+        if (finding is not null)
+        {
+            throw new UserFacingException($"{finding} Correct the setting (discover finds the field) and run again. Nothing was stored.");
+        }
     }
 
     /// <summary>

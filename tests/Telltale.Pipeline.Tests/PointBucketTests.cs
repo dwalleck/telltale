@@ -178,7 +178,7 @@ public class PointBucketTests
         // storyPointFieldId mistyped as another field: its history holds account IDs, names or option IDs, which
         // must never be stored. A user picker, a text field, a select list (a numeric option ID beside its name),
         // two numbers that disagree, a negative number, and a number written with a decimal comma.
-        const string otherFieldId = "customfield_10099";
+        const string otherFieldId = FakeJira.OtherFieldId;
         await using var pipeline = new PipelineHarness();
         AddSprint(pipeline.Jira);
         pipeline.Config["jira"]!["storyPointFieldId"] = otherFieldId;
