@@ -145,8 +145,8 @@ public class BriefVisitCountTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint41WithItsTeam(pipeline.Jira);
-        CaughtUp(pipeline.Jira, "FAKE-1", People.One);
-        CaughtUp(pipeline.Jira, "FAKE-2", People.Two);
+        Scenarios.CaughtUp(pipeline.Jira, "FAKE-1", People.One);
+        Scenarios.CaughtUp(pipeline.Jira, "FAKE-2", People.Two);
         pipeline.Config["briefVisitThresholds"] = new JsonObject { [Workflow.Development.Id] = 5 };
 
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
@@ -182,7 +182,7 @@ public class BriefVisitCountTests
     {
         await using var pipeline = new PipelineHarness();
         AddSprint41WithItsTeam(pipeline.Jira);
-        CaughtUp(pipeline.Jira, "FAKE-1", People.One);
+        Scenarios.CaughtUp(pipeline.Jira, "FAKE-1", People.One);
         pipeline.Config["briefVisitThresholds"] = new JsonObject { [Workflow.Development.Id] = 5 };
 
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
@@ -266,8 +266,30 @@ public class BriefVisitCountTests
         await Assert.That(reportWithout).EndsWith("\n- Issues delivered between sprints, in the whole store: suppressed\n");
         await Assert.That(await QueryAsync(without, ViewSql)).IsEqualTo(ViewHead);
 
-        // With the setting: the same report with one line more, and the console said the same.
-        await Assert.That(await with.ReadReportAsync(41)).IsEqualTo(reportWithout + "- Fake Development: 4 issues had a visit shorter than 5 minutes\n");
+        // With the setting: the same report with one line more, and the console said the same. The method note
+        // differs in the two places that are about brief visits (ticket 05): its sentence on the footer's two
+        // counts says they are the two of the whole store, and it ends with one paragraph on brief visits.
+        var reportWith = await with.ReadReportAsync(41);
+        const string TheParagraphStartsWith = "- A brief visit is ";
+        const string TheLastParagraphBefore = "- Work that has since been removed from Jira stays in the figures until the next backfill.\n";
+        const string TheFootersTwoCounts = " The footer's two counts";
+        const string OfTheWholeStore = " of the whole store";
+
+        // The paragraph is one line, the method note's last: right after the paragraph that was the last, and
+        // right before the footer. Nothing like it is anywhere else.
+        var paragraphAt = reportWith.IndexOf(TheLastParagraphBefore, StringComparison.Ordinal) + TheLastParagraphBefore.Length;
+        var paragraphEnd = reportWith.IndexOf('\n', paragraphAt) + 1;
+        await Assert.That(reportWith[paragraphAt..]).StartsWith(TheParagraphStartsWith);
+        await Assert.That(reportWith[paragraphEnd..]).StartsWith("\n---\n");
+        var withoutTheParagraph = reportWith[..paragraphAt] + reportWith[paragraphEnd..];
+        await Assert.That(withoutTheParagraph).DoesNotContain("brief visit");
+
+        // The phrase is in the one sentence on the footer's two counts, and nowhere else.
+        var phraseAt = withoutTheParagraph.IndexOf(TheFootersTwoCounts + OfTheWholeStore + " read ", StringComparison.Ordinal) + TheFootersTwoCounts.Length;
+        await Assert.That(phraseAt).IsGreaterThan(TheFootersTwoCounts.Length);
+        var withoutThePhrase = withoutTheParagraph.Remove(phraseAt, OfTheWholeStore.Length);
+        await Assert.That(withoutThePhrase).DoesNotContain(TheFootersTwoCounts + OfTheWholeStore);
+        await Assert.That(withoutThePhrase).IsEqualTo(reportWithout + "- Fake Development: 4 issues had a visit shorter than 5 minutes\n");
         await Assert.That(with.Error.ToString()).IsEqualTo(without.Error.ToString());
         await Assert.That(without.Error.ToString()).Contains("Changelog anomalies: 1 across 1 issue");
 
@@ -294,24 +316,24 @@ public class BriefVisitCountTests
         jira.AddIdleTeam(Local(2026, 1, 2, 9), 41);
     }
 
-    /// <summary>Four issues <see cref="CaughtUp"/>, one for each of four people: FAKE-1 to FAKE-4.</summary>
+    /// <summary>Four issues <see cref="Scenarios.CaughtUp"/>, one for each of four people: FAKE-1 to FAKE-4.</summary>
     private static void AddFourCaughtUpIssuesOfFourPeople(FakeJira jira)
     {
         foreach (var (person, number) in People.Team.Take(4).Select((person, index) => (person, index + 1)))
         {
-            CaughtUp(jira, $"FAKE-{number}", person);
+            Scenarios.CaughtUp(jira, $"FAKE-{number}", person);
         }
     }
 
     /// <summary>
-    /// A Development row of seven issues and five assignees: four issues <see cref="CaughtUp"/>, two each for
+    /// A Development row of seven issues and five assignees: four issues <see cref="Scenarios.CaughtUp"/>, two each for
     /// two people, and three more people's issues that did two days in Development.
     /// </summary>
     private static void AddFourCaughtUpIssuesOfTwoPeopleInARowOfFive(FakeJira jira)
     {
         foreach (var (person, number) in new[] { (People.One, 1), (People.Two, 2), (People.One, 3), (People.Two, 4) })
         {
-            CaughtUp(jira, $"FAKE-{number}", person);
+            Scenarios.CaughtUp(jira, $"FAKE-{number}", person);
         }
 
         foreach (var (person, number) in People.Team.Skip(2).Select((person, index) => (person, index + 11)))
@@ -329,18 +351,4 @@ public class BriefVisitCountTests
     /// <summary>The store's content (<see cref="PipelineHarness.ReadStoreContentAsync"/>) as one block per table or view, by its name; a block starts with the name.</summary>
     private static Dictionary<string, string> BlocksOf(string storeContent) =>
         ("\n" + storeContent).Split("\n## ", StringSplitOptions.RemoveEmptyEntries).ToDictionary(block => block[..block.IndexOf('\n')], block => block + "\n", StringComparer.Ordinal);
-
-    /// <summary>
-    /// An issue of sprint 41 that was caught up in one go: in New (a not started status) until Wednesday
-    /// 7 January 10:00, then moved to Development and, twenty seconds later, to Review, where it stayed for two
-    /// days before it was done. So its one visit to Development lasted twenty seconds.
-    /// </summary>
-    private static FakeIssue CaughtUp(FakeJira jira, string key, FakePerson assignee)
-    {
-        var caughtUp = Local(2026, 1, 7, 10);
-        return jira.AddIssue(key, Local(2026, 1, 5, 9)).AssignedTo(assignee).InSprints(41)
-            .Moved(caughtUp, Workflow.Development)
-            .Moved(caughtUp.AddSeconds(20), Workflow.Review)
-            .Moved(Local(2026, 1, 9, 10), Workflow.Done);
-    }
 }

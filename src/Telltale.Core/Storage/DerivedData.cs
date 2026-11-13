@@ -149,6 +149,9 @@ public sealed record DerivedSource(
     long MinimumAssigneesBehindAFigure,
     string BriefVisitThresholds)
 {
+    /// <summary>Whether at least one status is listed in <see cref="BriefVisitThresholds"/>, so that the rebuild looked for brief visits.</summary>
+    public bool BriefVisitsChecked => BriefVisitThresholds != BriefVisitThresholdsOf(new Dictionary<string, double>());
+
     /// <summary><see cref="BriefVisitThresholds"/> for thresholds in minutes by status ID: the form the store keeps and the view reads.</summary>
     public static string BriefVisitThresholdsOf(IReadOnlyDictionary<string, double> minutesByStatusId) =>
         System.Text.Json.JsonSerializer.Serialize(new SortedDictionary<string, double>(minutesByStatusId.ToDictionary(), StringComparer.Ordinal));
