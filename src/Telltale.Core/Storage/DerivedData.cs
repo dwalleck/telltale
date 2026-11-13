@@ -149,12 +149,31 @@ public sealed record DerivedSource(
     long MinimumAssigneesBehindAFigure,
     string BriefVisitThresholds)
 {
-    /// <summary>Whether at least one status is listed in <see cref="BriefVisitThresholds"/>, so that the rebuild looked for brief visits.</summary>
-    public bool BriefVisitsChecked => BriefVisitThresholds != BriefVisitThresholdsOf(new Dictionary<string, double>());
+    /// <summary><see cref="BriefVisitThresholds"/> when no status is checked. The one place that spells it.</summary>
+    public const string NoBriefVisitThresholds = "{}";
 
-    /// <summary><see cref="BriefVisitThresholds"/> for thresholds in minutes by status ID: the form the store keeps and the view reads.</summary>
-    public static string BriefVisitThresholdsOf(IReadOnlyDictionary<string, double> minutesByStatusId) =>
-        System.Text.Json.JsonSerializer.Serialize(new SortedDictionary<string, double>(minutesByStatusId.ToDictionary(), StringComparer.Ordinal));
+    /// <summary>Whether at least one status is listed in <see cref="BriefVisitThresholds"/>, so that the rebuild looked for brief visits.</summary>
+    public bool BriefVisitsChecked => BriefVisitThresholds != NoBriefVisitThresholds;
+
+    /// <summary>
+    /// <see cref="BriefVisitThresholds"/> for the thresholds derive applies, by status ID: the form the store
+    /// keeps and the view reads, with each threshold in minutes.
+    /// </summary>
+    public static string BriefVisitThresholdsOf(IReadOnlyDictionary<string, TimeSpan> thresholds)
+    {
+        if (thresholds.Count == 0)
+        {
+            return NoBriefVisitThresholds;
+        }
+
+        var minutes = new SortedDictionary<string, double>(StringComparer.Ordinal);
+        foreach (var (statusId, threshold) in thresholds)
+        {
+            minutes.Add(statusId, threshold.TotalMinutes);
+        }
+
+        return System.Text.Json.JsonSerializer.Serialize(minutes);
+    }
 
     /// <summary><see cref="BaselineSprintIds"/> for a list of sprint IDs: the form the store keeps and the views read.</summary>
     public static string BaselineSprintIdsOf(IEnumerable<string> sprintIds) =>

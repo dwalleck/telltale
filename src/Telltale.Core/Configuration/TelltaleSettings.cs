@@ -38,14 +38,19 @@ public sealed record TelltaleSettings
     /// <summary>The threshold of every status checked for brief visits (GLOSSARY: Brief visit), by status ID. Empty when nothing is checked.</summary>
     public required IReadOnlyDictionary<string, TimeSpan> BriefVisitThresholds { get; init; }
 
-    /// <summary>The settings as a rebuild records them, apart from the raw data's digest: see <see cref="DerivedFrom"/>.</summary>
-    private DerivedSource Recorded { get; init; } = new("", "", "", "", "", "", MinimumGroupSize.Default.Team, MinimumGroupSize.Default.AssigneesBehindAFigure, "{}");
+    /// <summary>
+    /// The settings as a rebuild records them, apart from the raw data's digest and the brief visit thresholds,
+    /// which <see cref="DerivedFrom"/> fills in: the thresholds are recorded from <see cref="BriefVisitThresholds"/>,
+    /// the ones derive applies, and are kept nowhere else.
+    /// </summary>
+    private DerivedSource Recorded { get; init; } = new("", "", "", "", "", "", MinimumGroupSize.Default.Team, MinimumGroupSize.Default.AssigneesBehindAFigure, DerivedSource.NoBriefVisitThresholds);
 
     /// <summary>Everything a rebuild is decided with besides the raw data and the as-of time.</summary>
     public DerivationSettings Derivation => new(new DeliveryRules(StatusRoles, AbandonedResolutionIds), new BusinessCalendar(TimeZone, Holidays)) { BriefVisitThresholds = BriefVisitThresholds };
 
     /// <summary>What a rebuild of raw data with the digest <paramref name="rawDigest"/> under these settings is built from.</summary>
-    public DerivedSource DerivedFrom(string rawDigest) => Recorded with { RawDigest = rawDigest };
+    public DerivedSource DerivedFrom(string rawDigest) =>
+        Recorded with { RawDigest = rawDigest, BriefVisitThresholds = DerivedSource.BriefVisitThresholdsOf(BriefVisitThresholds) };
 
     /// <summary>
     /// Checks every setting and throws <see cref="SettingRefusedException"/> for the first that is refused.
@@ -91,7 +96,7 @@ public sealed record TelltaleSettings
                 string.Join(",", abandonedResolutionIds.Order(StringComparer.Ordinal)),
                 minimumGroupSize.Team,
                 minimumGroupSize.AssigneesBehindAFigure,
-                DerivedSource.BriefVisitThresholdsOf(briefVisitThresholds.ToDictionary(listed => listed.Key, listed => listed.Value.TotalMinutes))),
+                DerivedSource.NoBriefVisitThresholds),
         };
     }
 
@@ -138,8 +143,9 @@ public sealed record TelltaleSettings
     /// Jira, and passes no roles when the file has none yet. Throws <see cref="SettingRefusedException"/>; no
     /// message repeats a status ID or a threshold (owner decision D43).
     /// </summary>
-    public static IReadOnlyDictionary<string, TimeSpan> CheckedBriefVisitThresholds(IReadOnlyDictionary<string, double> thresholds, StatusRoles? roles)
+    public static IReadOnlyDictionary<string, TimeSpan> CheckedBriefVisitThresholds(BriefVisitThresholdsInMinutes written, StatusRoles? roles)
     {
+        var thresholds = written.ByStatusId;
         if (roles is not null)
         {
             foreach (var statusId in thresholds.Keys)

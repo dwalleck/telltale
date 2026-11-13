@@ -162,7 +162,7 @@ public class StoreTests
         await pipeline.RunAllAsync(["backfill"]);
         var store = new SqliteStore(pipeline.DatabasePath);
 
-        await Assert.That(async () => await SprintReport.RenderAsync(store, "41", TimeZoneInfo.Utc, baselineSprintIds: [], new NumbersInForce(MinimumGroupSize.Default))).Throws<UserFacingException>().WithMessage(NoDerivedData);
+        await Assert.That(async () => await SprintReport.RenderAsync(store, "41", TimeZoneInfo.Utc, baselineSprintIds: [], HarnessSteps.RecordUnderTheDefaults)).Throws<UserFacingException>().WithMessage(NoDerivedData);
         await Assert.That(async () => await SprintReport.MostRecentlyCompletedSprintAsync(store)).Throws<UserFacingException>().WithMessage(NoDerivedData);
     }
 
@@ -178,7 +178,7 @@ public class StoreTests
         await pipeline.ExecuteAsync($"DROP VIEW {view};");
         var store = new SqliteStore(pipeline.DatabasePath);
 
-        await Assert.That(async () => await SprintReport.RenderAsync(store, "41", TimeZoneInfo.Utc, baselineSprintIds: [], new NumbersInForce(MinimumGroupSize.Default))).Throws<UserFacingException>().WithMessage($"The metric view {view} is not in the store. Run derive first.");
+        await Assert.That(async () => await SprintReport.RenderAsync(store, "41", TimeZoneInfo.Utc, baselineSprintIds: [], HarnessSteps.RecordUnderTheDefaults)).Throws<UserFacingException>().WithMessage($"The metric view {view} is not in the store. Run derive first.");
     }
 
     [Test]
@@ -192,7 +192,7 @@ public class StoreTests
         await File.WriteAllTextAsync(pipeline.DatabasePath, new string('x', 4096));
         var store = new SqliteStore(pipeline.DatabasePath);
 
-        await Assert.That(async () => await SprintReport.RenderAsync(store, "41", TimeZoneInfo.Utc, baselineSprintIds: [], new NumbersInForce(MinimumGroupSize.Default))).Throws<SqliteException>().WithMessageContaining("not a database");
+        await Assert.That(async () => await SprintReport.RenderAsync(store, "41", TimeZoneInfo.Utc, baselineSprintIds: [], HarnessSteps.RecordUnderTheDefaults)).Throws<SqliteException>().WithMessageContaining("not a database");
     }
 
     [Test]

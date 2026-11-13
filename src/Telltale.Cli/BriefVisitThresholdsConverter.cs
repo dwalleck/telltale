@@ -10,17 +10,18 @@ namespace Telltale.Cli;
 /// type gives the value's place in the file, which is the status ID it stands under, and no message may repeat
 /// a status ID: what was written there could be a secret pasted into the wrong place (owner decision D43). A
 /// <c>null</c> is refused, not read as the setting being left out. The rules on the statuses and on the
-/// numbers themselves are <see cref="TelltaleSettings.CheckedBriefVisitThresholds"/>'s. <see cref="ConfigFile"/>
-/// binds it to the one setting and to no type, so another setting of the same type is not read by it.
+/// numbers themselves are <see cref="TelltaleSettings.CheckedBriefVisitThresholds"/>'s. The setting has a type
+/// of its own, and <see cref="ConfigFile"/> registers this reader for that type, as it does
+/// <see cref="MinimumGroupSizeConverter"/>.
 /// </summary>
-internal sealed class BriefVisitThresholdsConverter : JsonConverter<IReadOnlyDictionary<string, double>>
+internal sealed class BriefVisitThresholdsConverter : JsonConverter<BriefVisitThresholdsInMinutes>
 {
     private const string Setting = "briefVisitThresholds";
 
     /// <summary>A <c>null</c> is refused here, not read as the setting being left out.</summary>
     public override bool HandleNull => true;
 
-    public override IReadOnlyDictionary<string, double> Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    public override BriefVisitThresholdsInMinutes Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         if (reader.TokenType != JsonTokenType.StartObject)
         {
@@ -46,10 +47,10 @@ internal sealed class BriefVisitThresholdsConverter : JsonConverter<IReadOnlyDic
             }
         }
 
-        return thresholds;
+        return new BriefVisitThresholdsInMinutes(thresholds);
     }
 
     /// <summary>Nothing writes the setting: <c>discover</c> carries over the text the file has, and no configuration is ever serialised.</summary>
-    public override void Write(Utf8JsonWriter writer, IReadOnlyDictionary<string, double> value, JsonSerializerOptions options) =>
+    public override void Write(Utf8JsonWriter writer, BriefVisitThresholdsInMinutes value, JsonSerializerOptions options) =>
         throw new NotSupportedException($"{Setting} is never written by the tool.");
 }

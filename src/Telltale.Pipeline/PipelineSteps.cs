@@ -243,10 +243,9 @@ public sealed class PipelineSteps
 
         BaselineSprintRules.RequireWithinWhatWasFetched(starts, _settings.BaselineSprintIds, completeFrom);
 
-        // The numbers the derived data was built under, from its record: read once, for the console and the report.
-        var numbers = NumbersInForce.Of(derivedFrom);
-        await NameWithheldBaselineSprintsAsync(numbers, cancellationToken);
-        var path = await SprintReport.WriteAsync(_store, sprint, _settings.TimeZone, [.. _settings.BaselineSprintIds.Order(StringComparer.Ordinal)], numbers, _environment.ReportDirectory, cancellationToken);
+        // What the derived data was built under, from its record: read once, for the console and the report.
+        await NameWithheldBaselineSprintsAsync(NumbersInForce.Of(derivedFrom), cancellationToken);
+        var path = await SprintReport.WriteAsync(_store, sprint, _settings.TimeZone, [.. _settings.BaselineSprintIds.Order(StringComparer.Ordinal)], derivedFrom, _environment.ReportDirectory, cancellationToken);
         await _environment.Out.WriteLineAsync($"Wrote {path}");
     }
 

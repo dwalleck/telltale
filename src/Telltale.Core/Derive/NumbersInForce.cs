@@ -9,8 +9,7 @@ namespace Telltale.Core.Derive;
 /// decision D67). The report and the console take them from the record of the rebuild (<see cref="Of"/>), which
 /// is where the metric views read them from, and never from the configuration: a sentence then describes the
 /// figures beside it. Which of the two checks applies, and whether a number is one assignee or several, is
-/// decided here and nowhere else. The same record says whether brief visits were looked for
-/// (<see cref="BriefVisitsChecked"/>), and the report takes that from here too, for the same reason.
+/// decided here and nowhere else.
 /// </summary>
 public sealed class NumbersInForce(MinimumGroupSize numbers)
 {
@@ -27,14 +26,6 @@ public sealed class NumbersInForce(MinimumGroupSize numbers)
 
     /// <summary>Whether the check on the assignees behind a figure applies.</summary>
     public bool FigureCheck => BehindAFigure > 0;
-
-    /// <summary>
-    /// Whether the derived data was built with at least one status listed under <c>briefVisitThresholds</c>
-    /// (GLOSSARY: Brief visit), which is when the metric view <c>brief_visits_per_sprint</c> can have rows.
-    /// Only <see cref="Of"/> sets it, from the record the view reads: numbers that come from anywhere else
-    /// describe no derived data, and so no brief visits.
-    /// </summary>
-    public bool BriefVisitsChecked { get; private init; }
 
     /// <summary>Whether these are the default numbers, under which every sentence is what it was before the numbers became a setting.</summary>
     public bool AreTheDefault => numbers == MinimumGroupSize.Default;
@@ -59,10 +50,7 @@ public sealed class NumbersInForce(MinimumGroupSize numbers)
     /// metric view <c>minimum_group_size</c>, and through it every other view, reads from the same record.
     /// </summary>
     public static NumbersInForce Of(DerivedSource derivedFrom) =>
-        new(new MinimumGroupSize { Team = checked((int)derivedFrom.MinimumTeam), AssigneesBehindAFigure = checked((int)derivedFrom.MinimumAssigneesBehindAFigure) })
-        {
-            BriefVisitsChecked = derivedFrom.BriefVisitsChecked,
-        };
+        new(new MinimumGroupSize { Team = checked((int)derivedFrom.MinimumTeam), AssigneesBehindAFigure = checked((int)derivedFrom.MinimumAssigneesBehindAFigure) });
 
     /// <summary>A number as a sentence writes it: in words up to twelve ("five"), in digits above.</summary>
     public static string Number(int number) =>

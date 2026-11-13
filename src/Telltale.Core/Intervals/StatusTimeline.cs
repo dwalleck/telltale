@@ -21,6 +21,19 @@ public sealed record StatusEntry(string StatusId, DateTimeOffset At)
     /// time it is treated as made at and not its own date (a changelog anomaly).
     /// </summary>
     public bool MovedToCreation { get; init; }
+
+    /// <summary>
+    /// True when the transition names a from-status that is not the status the timeline was in (a changelog
+    /// anomaly): a change before it is missing, so nothing says when the issue left that status.
+    /// </summary>
+    public bool FromAnotherStatus { get; init; }
+
+    /// <summary>
+    /// True when the transition is one of the two changelog anomalies a single change can be
+    /// (<see cref="MovedToCreation"/>, <see cref="FromAnotherStatus"/>): <see cref="At"/> is then not known to
+    /// be the moment the issue left the status before and entered this one.
+    /// </summary>
+    public bool IsAnomaly => MovedToCreation || FromAnotherStatus;
 }
 
 /// <summary>
@@ -51,9 +64,10 @@ public sealed record StatusTimeline(IReadOnlyList<StatusInterval> Intervals, IRe
 
         foreach (var change in ordered)
         {
-            if (change.FromStatusId is { } from && from != current)
+            var fromAnotherStatus = change.FromStatusId is { } from && from != current;
+            if (fromAnotherStatus)
             {
-                anomalies.Add($"History {change.HistoryId}: moved from '{from}' but the timeline was in '{current}'.");
+                anomalies.Add($"History {change.HistoryId}: moved from '{change.FromStatusId}' but the timeline was in '{current}'.");
             }
 
             var at = change.At;
@@ -69,7 +83,7 @@ public sealed record StatusTimeline(IReadOnlyList<StatusInterval> Intervals, IRe
                 intervals.Add(new StatusInterval(current, start, at));
             }
 
-            entries.Add(new StatusEntry(change.ToStatusId, at) { HistoryId = change.HistoryId, MovedToCreation = movedToCreation });
+            entries.Add(new StatusEntry(change.ToStatusId, at) { HistoryId = change.HistoryId, MovedToCreation = movedToCreation, FromAnotherStatus = fromAnotherStatus });
             current = change.ToStatusId;
             start = at;
         }

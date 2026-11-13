@@ -20,3 +20,4 @@ Claim (B4): a footer count needs three distinct assignees among the issues it co
 - Verified 2026-11-12 at cf5da5b: red, 2 failed of 20 (Pipeline, filter /*/*/MethodNoteAndFooterTests/*); restored.
 - Verified 2026-11-12 at bc92ab3: red, 2 failed of 20 (Pipeline, filter /*/*/MethodNoteAndFooterTests/*); restored.
 - Verified 2026-11-13 at b49bfeb: red, 2 failed of 20 (Pipeline, filter /*/*/MethodNoteAndFooterTests/*); restored.
+- Verified 2026-11-13 at 788e289: red, 2 failed of 20 (Pipeline, filter /*/*/MethodNoteAndFooterTests/*); restored.

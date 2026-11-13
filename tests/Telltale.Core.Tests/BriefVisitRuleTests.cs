@@ -42,7 +42,7 @@ public class BriefVisitRuleTests
         var entered = Local(2026, 11, 3, 10);
         var left = entered + FiveMinutes + TimeSpan.FromTicks(ticksPastTheThreshold);
 
-        var brief = BriefVisits.IsBrief(new StatusInterval(Development, entered, left), FiveMinutes);
+        var brief = BriefVisits.IsBrief(new Stay(Development, entered, left), FiveMinutes);
 
         await Assert.That(brief).IsEqualTo(expected);
     }
@@ -52,7 +52,7 @@ public class BriefVisitRuleTests
     {
         var instant = Local(2026, 11, 3, 10);
 
-        var brief = BriefVisits.IsBrief(new StatusInterval(Development, instant, instant), TimeSpan.FromTicks(1));
+        var brief = BriefVisits.IsBrief(new Stay(Development, instant, instant), TimeSpan.FromTicks(1));
 
         await Assert.That(brief).IsTrue();
     }
@@ -62,7 +62,7 @@ public class BriefVisitRuleTests
     {
         // Sunday 8 March 2026: at 02:00 the team's clocks go to 03:00. From 01:30 to 03:30 on the wall is two
         // hours, and one hour between the two instants.
-        var stay = new StatusInterval(Development, Local(2026, 3, 8, 1, 30), Local(2026, 3, 8, 3, 30));
+        var stay = new Stay(Development, Local(2026, 3, 8, 1, 30), Local(2026, 3, 8, 3, 30));
 
         await Assert.That(BriefVisits.IsBrief(stay, TimeSpan.FromMinutes(61))).IsTrue();
         await Assert.That(BriefVisits.IsBrief(stay, TimeSpan.FromMinutes(60))).IsFalse();
@@ -73,7 +73,7 @@ public class BriefVisitRuleTests
     {
         // Sunday 1 November 2026: at 02:00 the team's clocks go back to 01:00. From 00:30 to 02:30 on the wall
         // is two hours, and three hours between the two instants.
-        var stay = new StatusInterval(Development, Local(2026, 11, 1, 0, 30), Local(2026, 11, 1, 2, 30));
+        var stay = new Stay(Development, Local(2026, 11, 1, 0, 30), Local(2026, 11, 1, 2, 30));
 
         await Assert.That(BriefVisits.IsBrief(stay, TimeSpan.FromMinutes(180))).IsFalse();
         await Assert.That(BriefVisits.IsBrief(stay, TimeSpan.FromMinutes(181))).IsTrue();
@@ -93,9 +93,9 @@ public class BriefVisitRuleTests
 
         await Assert.That(stays).IsEquivalentTo(new[]
         {
-            new StatusInterval(New, Created, caughtUp),
-            new StatusInterval(Development, caughtUp, caughtUp),
-            new StatusInterval(Review, caughtUp, null),
+            new Stay(New, Created, caughtUp),
+            new Stay(Development, caughtUp, caughtUp),
+            new Stay(Review, caughtUp, null),
         }, CollectionOrdering.Matching);
     }
 
@@ -110,8 +110,8 @@ public class BriefVisitRuleTests
 
         await Assert.That(stays).IsEquivalentTo(new[]
         {
-            new StatusInterval(New, Created, entered),
-            new StatusInterval(Development, entered, null),
+            new Stay(New, Created, entered),
+            new Stay(Development, entered, null),
         }, CollectionOrdering.Matching);
         await Assert.That(statuses).IsEmpty();
     }
@@ -134,9 +134,9 @@ public class BriefVisitRuleTests
 
         await Assert.That(stays).IsEquivalentTo(new[]
         {
-            new StatusInterval(New, Created, entered),
-            new StatusInterval(Development, entered, left),
-            new StatusInterval(Review, left, null),
+            new Stay(New, Created, entered),
+            new Stay(Development, entered, left),
+            new Stay(Review, left, null),
         }, CollectionOrdering.Matching);
     }
 
@@ -155,8 +155,8 @@ public class BriefVisitRuleTests
 
         await Assert.That(stays).IsEquivalentTo(new[]
         {
-            new StatusInterval(New, Created, entered),
-            new StatusInterval(Development, entered, null),
+            new Stay(New, Created, entered),
+            new Stay(Development, entered, null),
         }, CollectionOrdering.Matching);
     }
 
@@ -170,7 +170,14 @@ public class BriefVisitRuleTests
 
         var stays = BriefVisits.Stays(timeline);
 
-        await Assert.That(stays).IsEquivalentTo(new[] { new StatusInterval(Development, Created, null) });
+        // Both stays are bounded by the moved change, and say so (decision bv-D15): the one of no length is
+        // listed and is not a brief visit under any threshold.
+        await Assert.That(stays).IsEquivalentTo(new[]
+        {
+            new Stay(New, Created, Created) { BoundedByAnAnomaly = true },
+            new Stay(Development, Created, null) { BoundedByAnAnomaly = true },
+        }, CollectionOrdering.Matching);
+        await Assert.That(BriefVisits.IsBrief(stays[0], TimeSpan.MaxValue)).IsFalse();
         await Assert.That(timeline.Anomalies).HasSingleItem();
     }
 
@@ -184,8 +191,8 @@ public class BriefVisitRuleTests
 
         await Assert.That(stays).IsEquivalentTo(new[]
         {
-            new StatusInterval(New, Created, Created),
-            new StatusInterval(Development, Created, null),
+            new Stay(New, Created, Created),
+            new Stay(Development, Created, null),
         }, CollectionOrdering.Matching);
         await Assert.That(timeline.Anomalies).IsEmpty();
     }
@@ -238,7 +245,7 @@ public class BriefVisitRuleTests
     }
 
     /// <summary>The stays of an issue created in New and moved to Development and on to Review at <paramref name="instant"/>, where it still is.</summary>
-    private static IEnumerable<StatusInterval> ThroughDevelopmentAt(DateTimeOffset instant) =>
+    private static IEnumerable<Stay> ThroughDevelopmentAt(DateTimeOffset instant) =>
         BriefVisits.Stays(StatusTimeline.Build(Created, Review,
         [
             new StatusChange("1", instant, New, Development),

@@ -25,7 +25,9 @@ namespace Telltale.Storage.Sqlite;
 /// fetched in their place, so a row for something that has left Jira does not stay. Statuses are only ever added and updated.</item>
 /// <item><c>Sql/Derived</c>: derived tables, and internal views over them that no query may read (they apply no
 /// minimum group size). Every rebuild drops what the last one created and runs every script, so a
-/// changed definition needs no migration (ADR-0002). A script only creates; it never drops.</item>
+/// changed definition needs no migration (ADR-0002). A script only creates; it never drops.
+/// The order the scripts of a folder run in means nothing, and no script's name is chosen for it: see
+/// <see cref="ReplaceDerivedAsync"/>.</item>
 /// <item><c>Sql/Views</c>: metric views, the only thing Reporting and ad hoc SQL read. Rebuilt the same way, after the
 /// derived tables. A group-size guard belongs inside its view (ADR-0003).</item>
 /// <item>Tables and views the scripts create are recorded in <c>derived_object</c>, with their kind: <c>table</c>,
@@ -365,6 +367,14 @@ public sealed class SqliteStore : ITelltaleStore
         await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM derived_object;", transaction: transaction));
         var before = (await connection.QueryAsync<string>(Command(cancellationToken, AllTablesAndViews, transaction: transaction))).ToHashSet(StringComparer.Ordinal);
 
+        // The order of the scripts, stated here once. Every Derived script runs before the tables are filled,
+        // and every Views script after: that much is fixed, because what a Derived script creates is internal
+        // and what a Views script creates is a metric view (below). Within a folder the scripts run in the order
+        // of their names, and that order means nothing: a script only creates, and SQLite looks up the tables
+        // and views a view names when the view is read, not when it is created. So a view may read one that a
+        // later script creates, in its own folder (duration_figures reads duration_sample, which reads
+        // time_in_status_issue) or in the other (duration_sample reads the metric view baseline_sprint).
+        // Nothing is read through a view until the transaction has created them all.
         foreach (var (_, sql) in Scripts.InFolder("Derived"))
         {
             await connection.ExecuteAsync(Command(cancellationToken, sql, transaction: transaction));

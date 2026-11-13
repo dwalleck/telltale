@@ -26,7 +26,7 @@ public class BriefVisitsTests
     {
         var entered = Local(2026, 11, 3, 10);
 
-        var brief = BriefVisits.IsBrief(new StatusInterval(Development, entered, entered.AddSeconds(20)), FiveMinutes);
+        var brief = BriefVisits.IsBrief(new Stay(Development, entered, entered.AddSeconds(20)), FiveMinutes);
 
         await Assert.That(brief).IsTrue();
     }
@@ -36,7 +36,7 @@ public class BriefVisitsTests
     {
         var entered = Local(2026, 11, 3, 9);
 
-        var brief = BriefVisits.IsBrief(new StatusInterval(Development, entered, Local(2026, 11, 3, 17)), FiveMinutes);
+        var brief = BriefVisits.IsBrief(new Stay(Development, entered, Local(2026, 11, 3, 17)), FiveMinutes);
 
         await Assert.That(brief).IsFalse();
     }
@@ -44,7 +44,7 @@ public class BriefVisitsTests
     [Test]
     public async Task A_stay_the_issue_is_still_in_is_not_a_visit_however_short_it_is_so_far()
     {
-        var brief = BriefVisits.IsBrief(new StatusInterval(Development, AsOf.AddSeconds(-20), End: null), FiveMinutes);
+        var brief = BriefVisits.IsBrief(new Stay(Development, AsOf.AddSeconds(-20), End: null), FiveMinutes);
 
         await Assert.That(brief).IsFalse();
     }
@@ -54,7 +54,7 @@ public class BriefVisitsTests
     {
         // Committed until Tuesday 10:00, then Development for twenty seconds, then Review, where it stays for a day.
         var caughtUp = Local(2026, 11, 3, 10);
-        StatusInterval[] history =
+        Stay[] history =
         [
             new(Committed, Local(2026, 10, 30, 9), caughtUp),
             new(Development, caughtUp, caughtUp.AddSeconds(20)),
@@ -72,7 +72,7 @@ public class BriefVisitsTests
     public async Task A_brief_visit_to_a_status_that_is_not_listed_counts_for_nothing()
     {
         var caughtUp = Local(2026, 11, 3, 10);
-        StatusInterval[] history =
+        Stay[] history =
         [
             new(Committed, Local(2026, 10, 30, 9), caughtUp),
             new(Development, caughtUp, caughtUp.AddSeconds(20)),
@@ -90,7 +90,7 @@ public class BriefVisitsTests
     {
         // Twenty seconds in Development on the Friday before the sprint, then back in it for the sprint's first week.
         var friday = Local(2026, 10, 30, 9);
-        StatusInterval[] history =
+        Stay[] history =
         [
             new(Development, friday, friday.AddSeconds(20)),
             new(Committed, friday.AddSeconds(20), Local(2026, 11, 2, 9)),
@@ -109,7 +109,7 @@ public class BriefVisitsTests
     {
         // The catch-up is on Tuesday; the issue joins the sprint on Wednesday, in Review.
         var caughtUp = Local(2026, 11, 3, 10);
-        StatusInterval[] history =
+        Stay[] history =
         [
             new(Committed, Local(2026, 10, 30, 9), caughtUp),
             new(Development, caughtUp, caughtUp.AddSeconds(20)),
