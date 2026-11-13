@@ -33,6 +33,11 @@ public class BriefVisitSmallGroupTests
     private const string ReviewWithheld = "- Fake Review: issues with a visit shorter than 2 minutes: suppressed";
     private const string ReviewOfThree = "- Fake Review: 3 issues had a visit shorter than 2 minutes";
 
+    /// <summary>The two listed statuses' IDs, for the rows <c>query</c> prints.</summary>
+    private static readonly string DevelopmentId = Workflow.Development.Id;
+
+    private static readonly string ReviewId = Workflow.Review.Id;
+
     /// <summary>The count and the flag of a withheld row, as <c>query</c> prints them.</summary>
     private const string Withheld = "NULL | 1";
 
@@ -77,22 +82,23 @@ public class BriefVisitSmallGroupTests
         // Five stores whose Development count in sprint 41 is withheld: nobody had a brief visit; one issue of
         // one person; two issues of two people; four issues of two people; two people's and an unassigned one.
         // Around it are figures a reader could try to subtract from: the row's issue count, a shown count for
-        // Review in the same sprint, and a shown count for Development in sprint 42.
+        // Review in the same sprint, and a shown count for Development in sprint 42. Then two stores whose
+        // count is shown: three issues of three people, and every issue of the row but one person's.
+        // What this test claims is that a withheld count cannot be recovered. It does not claim that nothing
+        // can be computed from a shown one: the row's issue count less a shown count is the number of issues
+        // with no brief visit, whoever is behind them, and the owner accepted that on 2026-11-13 (the count
+        // is not withheld for it; the decision is recorded in docs/decisions.md). The last store pins it.
         string[] withheld = ["", "1", "1,3", "1,2,3,4", "1,3,8"];
         var read = new List<(string Reports, string Views, string Attempts)>();
-        foreach (var briefVisits in withheld.Append("1,3,5"))
+        foreach (var briefVisits in withheld.Append("1,3,5").Append("1,2,3,4,5,6,8"))
         {
             await using var pipeline = new PipelineHarness();
             AddStore(pipeline, Numbers(briefVisits));
             await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"], ["report", "--sprint", "42"]);
 
-            // Everything query may read: each metric view whole, found in the store so that a view added later is read too.
-            var views = await pipeline.QueryAsync<string>("SELECT name FROM derived_object WHERE kind = 'view' ORDER BY name;");
-            await Assert.That(views).Contains("brief_visits_per_sprint");
-            await Assert.That(views).Contains("time_in_status_per_sprint");
             read.Add((
                 await pipeline.ReadReportAsync(41) + await pipeline.ReadReportAsync(42),
-                await QueryAsync(pipeline, [.. views.Select(view => $"SELECT * FROM {view};")]),
+                await QueryEveryMetricViewAsync(pipeline),
                 await QueryAsync(
                     pipeline,
                     ViewSql,
@@ -103,14 +109,14 @@ public class BriefVisitSmallGroupTests
 
         // What the first store gives: the withheld count is null beside the shown ones, and no sum or
         // remainder holds it.
-        const string DevelopmentRowWithheld = "| 41 | 600004 | Fake Development | 4 | 5 | NULL | 1 |\n";
+        var developmentRowWithheld = $"| 41 | {DevelopmentId} | Fake Development | 4 | 5 | NULL | 1 |\n";
         await Assert.That(read[0].Attempts).IsEqualTo(
             ViewHead
-            + DevelopmentRowWithheld
-            + """
-            | 41 | 600005 | Fake Review | 5 | 2 | 3 | 0 |
-            | 42 | 600004 | Fake Development | 4 | 5 | 3 | 0 |
-            | 42 | 600005 | Fake Review | 5 | 2 | NULL | 1 |
+            + developmentRowWithheld
+            + $"""
+            | 41 | {ReviewId} | Fake Review | 5 | 2 | 3 | 0 |
+            | 42 | {DevelopmentId} | Fake Development | 4 | 5 | 3 | 0 |
+            | 42 | {ReviewId} | Fake Review | 5 | 2 | NULL | 1 |
             | shown | counts | withheld |
             | --- | --- | --- |
             | 6 | 2 | 2 |
@@ -134,11 +140,34 @@ public class BriefVisitSmallGroupTests
         }
 
         // The comparison can fail: with three people behind the count, that one row differs and nothing else.
-        var shown = read[^1];
-        await Assert.That(read[0].Views).Contains(DevelopmentRowWithheld);
-        await Assert.That(shown.Views).IsEqualTo(read[0].Views.Replace(DevelopmentRowWithheld, "| 41 | 600004 | Fake Development | 4 | 5 | 3 | 0 |\n", StringComparison.Ordinal));
+        var shown = read[^2];
+        await Assert.That(read[0].Views).Contains(developmentRowWithheld);
+        await Assert.That(shown.Views).IsEqualTo(read[0].Views.Replace(developmentRowWithheld, $"| 41 | {DevelopmentId} | Fake Development | 4 | 5 | 3 | 0 |\n", StringComparison.Ordinal));
         await Assert.That(shown.Reports).IsEqualTo(
             read[0].Reports.Replace(DevelopmentWithheld + "\n" + ReviewOfThree, "- Fake Development: 3 issues had a visit shorter than 5 minutes\n" + ReviewOfThree, StringComparison.Ordinal));
+
+        // The accepted case: seven of the row's eight issues had a brief visit, four people and the
+        // unassigned issue behind them, so the count is shown. The remainder is 1, and the one issue without
+        // a brief visit is one person's. It is shown all the same.
+        await Assert.That(read[^1].Reports).Contains("\n- Fake Development: 7 issues had a visit shorter than 5 minutes\n" + ReviewOfThree + "\n");
+        await Assert.That(read[^1].Attempts).IsEqualTo(
+            ViewHead
+            + $"""
+            | 41 | {DevelopmentId} | Fake Development | 4 | 5 | 7 | 0 |
+            | 41 | {ReviewId} | Fake Review | 5 | 2 | 3 | 0 |
+            | 42 | {DevelopmentId} | Fake Development | 4 | 5 | 3 | 0 |
+            | 42 | {ReviewId} | Fake Review | 5 | 2 | NULL | 1 |
+            | shown | counts | withheld |
+            | --- | --- | --- |
+            | 13 | 3 | 1 |
+            | sprint_id | status_name | issue_count | remainder |
+            | --- | --- | --- | --- |
+            | 41 | Fake Development | 8 | 1 |
+            | 41 | Fake Review | 11 | 8 |
+            | 42 | Fake Development | 3 | 0 |
+            | 42 | Fake Review | 3 | NULL |
+
+            """.ReplaceLineEndings("\n"));
     }
 
     [Test]
@@ -204,8 +233,7 @@ public class BriefVisitSmallGroupTests
 
             pipeline.Config["briefVisitThresholds"] = new JsonObject { [Workflow.Development.Id] = 5 };
             await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
-            var views = await pipeline.QueryAsync<string>("SELECT name FROM derived_object WHERE kind = 'view' ORDER BY name;");
-            read.Add((await pipeline.ReadReportAsync(41), await QueryAsync(pipeline, [.. views.Select(view => $"SELECT * FROM {view};")])));
+            read.Add((await pipeline.ReadReportAsync(41), await QueryEveryMetricViewAsync(pipeline)));
         }
 
         // The delivered count and the cycle time table are withheld as they were before brief visits existed,
@@ -318,11 +346,11 @@ public class BriefVisitSmallGroupTests
             """.ReplaceLineEndings("\n"));
         await Assert.That(await QueryAsync(off, ViewSql)).IsEqualTo(
             ViewHead
-            + """
-            | 41 | 600004 | Fake Development | 4 | 5 | 2 | 0 |
-            | 41 | 600005 | Fake Review | 5 | 2 | 0 | 0 |
-            | 42 | 600004 | Fake Development | 4 | 5 | 1 | 0 |
-            | 42 | 600005 | Fake Review | 5 | 2 | 0 | 0 |
+            + $"""
+            | 41 | {DevelopmentId} | Fake Development | 4 | 5 | 2 | 0 |
+            | 41 | {ReviewId} | Fake Review | 5 | 2 | 0 | 0 |
+            | 42 | {DevelopmentId} | Fake Development | 4 | 5 | 1 | 0 |
+            | 42 | {ReviewId} | Fake Review | 5 | 2 | 0 | 0 |
 
             """.ReplaceLineEndings("\n"));
     }
@@ -343,7 +371,7 @@ public class BriefVisitSmallGroupTests
             $"""
             DROP VIEW brief_visits_per_sprint;
             CREATE VIEW brief_visits_per_sprint AS
-            SELECT '41' AS sprint_id, '600004' AS status_id, 'Fake Development' AS status_name, 4 AS board_position, 5.0 AS threshold_minutes,
+            SELECT '41' AS sprint_id, '{DevelopmentId}' AS status_id, 'Fake Development' AS status_name, 4 AS board_position, 5.0 AS threshold_minutes,
                    {count} AS brief_visit_issue_count, {suppressed} AS suppressed;
             """);
 
