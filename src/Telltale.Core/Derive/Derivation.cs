@@ -112,7 +112,7 @@ public static class Derivation
                     .Select(pair => new SprintStatusTime(issue.IssueId, window.SprintId, pair.Key, pair.Value.CalendarTime, pair.Value.BusinessTime, pair.Value.BusinessDays)));
 
                 // A brief visit is not a changelog anomaly: nothing here adds to the anomalies or to what derive logs.
-                briefVisits.AddRange(BriefVisits.During(countedTime, timeline.Intervals, settings.BriefVisitThresholds)
+                briefVisits.AddRange(BriefVisits.During(countedTime, BriefVisits.Stays(timeline), settings.BriefVisitThresholds)
                     .Order(StringComparer.Ordinal)
                     .Select(statusId => new SprintBriefVisit(issue.IssueId, window.SprintId, statusId)));
             }
