@@ -142,7 +142,7 @@ Metric views (the only thing Reporting and ad hoc SQL should read):
 - Cycle time per sprint and point bucket: issue count, median, P85, in business and calendar days.
 - Time in status per sprint and status: issue count and median. Done-role statuses are left out, and an issue counts only if it spent more than zero business days in the status (owner decisions D20, D21, 2026-11-12).
 - Baseline equivalents of the two above, pooled over the configured baseline sprints.
-- Each view row carries its distinct-assignee count check inside the view: when the sprint has fewer than five distinct assignees, or the row has fewer than three, the figures are null and a suppressed flag is set. Delivered count per sprint is subject to the five-person team check only.
+- Each view row carries its distinct-assignee count check inside the view: when the sprint has fewer than five distinct assignees, or the row has fewer than three, the figures are null and a suppressed flag is set. Delivered count per sprint is subject to the five-person team check and also needs at least three distinct assignees among the delivered issues (owner decision D49, 2026-11-12). When the delivered count is withheld for that reason, the per-bucket issue counts of that sprint's cycle time rows are null too, because they add up to it (owner decision D53, 2026-11-12).
 
 ### Metric rules
 
