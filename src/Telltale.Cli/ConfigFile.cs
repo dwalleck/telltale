@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Telltale.Core;
 using Telltale.Core.Configuration;
+using Telltale.Core.Workflow;
 
 namespace Telltale.Cli;
 
@@ -26,7 +27,8 @@ public static class ConfigFile
         AllowDuplicateProperties = false,
 
         // minimumGroupSize is read by hand, so that null, a quoted number or a missing number is refused by name.
-        Converters = { new MinimumGroupSizeConverter() },
+        // briefVisitThresholds is too, so that what is refused is named without the status ID it stands under.
+        Converters = { new MinimumGroupSizeConverter(), new BriefVisitThresholdsConverter() },
     };
 
     /// <summary>
@@ -49,6 +51,28 @@ public static class ConfigFile
             // A null in the file reaches the converter as the JSON null it is, and is refused there.
             var numbers = JsonSerializer.Deserialize<MinimumGroupSize>(written?.ToJsonString() ?? "null", Options);
             TelltaleSettings.CheckedMinimumGroupSize(numbers!);
+        }
+        catch (Exception exception) when (exception is JsonException or SettingRefusedException)
+        {
+            throw new UserFacingException($"The configuration file {path} is not valid: {exception.Message}", exception);
+        }
+    }
+
+    /// <summary>
+    /// Reads and checks the <c>briefVisitThresholds</c> that the file at <paramref name="path"/> holds as
+    /// <paramref name="written"/> (null for a JSON <c>null</c>), on its own: by the converter and the rule
+    /// <see cref="ReadAsync"/> applies to it, and with the same message. <paramref name="roles"/> are the file's
+    /// status roles, or null when it has none yet: then only the thresholds are checked, and the statuses wait
+    /// for the check of the text about to be written. <c>discover</c> asks this of an existing file before it
+    /// calls Jira (owner decision D70).
+    /// </summary>
+    internal static void RequireBriefVisitThresholds(JsonNode? written, StatusRoles? roles, string path)
+    {
+        try
+        {
+            // A null in the file reaches the converter as the JSON null it is, and is refused there.
+            var thresholds = JsonSerializer.Deserialize<IReadOnlyDictionary<string, double>>(written?.ToJsonString() ?? "null", Options);
+            TelltaleSettings.CheckedBriefVisitThresholds(thresholds!, roles);
         }
         catch (Exception exception) when (exception is JsonException or SettingRefusedException)
         {

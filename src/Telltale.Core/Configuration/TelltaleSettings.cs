@@ -62,6 +62,7 @@ public sealed record TelltaleSettings
         RequireNotNull(config.BaselineSprintIds, "baselineSprintIds");
         RequireNotNull(config.Holidays, "holidays");
         RequireNotNull(config.TimeZone, "timeZone");
+        RequireNotNull(config.BriefVisitThresholds, "briefVisitThresholds");
 
         var jira = CheckedJira(config.Jira);
         var roles = CheckedStatusRoles(config.StatusRoles, requireDone);
@@ -70,7 +71,7 @@ public sealed record TelltaleSettings
         var timeZone = SettingRules.FindTimeZone(config.TimeZone)
             ?? throw new SettingRefusedException($"timeZone: '{config.TimeZone}' is not a known IANA time zone ID.");
         var minimumGroupSize = CheckedMinimumGroupSize(config.MinimumGroupSize ?? MinimumGroupSize.Default);
-        var briefVisitThresholds = CheckedBriefVisitThresholds(config.BriefVisitThresholds);
+        var briefVisitThresholds = CheckedBriefVisitThresholds(config.BriefVisitThresholds, roles);
 
         return new TelltaleSettings
         {
@@ -80,7 +81,7 @@ public sealed record TelltaleSettings
             BaselineSprintIds = baselineSprintIds,
             TimeZone = timeZone,
             Holidays = config.Holidays,
-            BriefVisitThresholds = briefVisitThresholds.ToDictionary(listed => listed.Key, listed => TimeSpan.FromMinutes(listed.Value), StringComparer.Ordinal),
+            BriefVisitThresholds = briefVisitThresholds,
             Recorded = new DerivedSource(
                 RawDigest: "",
                 config.TimeZone,
@@ -90,7 +91,7 @@ public sealed record TelltaleSettings
                 string.Join(",", abandonedResolutionIds.Order(StringComparer.Ordinal)),
                 minimumGroupSize.Team,
                 minimumGroupSize.AssigneesBehindAFigure,
-                DerivedSource.BriefVisitThresholdsOf(briefVisitThresholds)),
+                DerivedSource.BriefVisitThresholdsOf(config.BriefVisitThresholds)),
         };
     }
 
@@ -123,12 +124,56 @@ public sealed record TelltaleSettings
         return minimumGroupSize;
     }
 
+    /// <summary>What is said of a threshold of <c>briefVisitThresholds</c> that is not a number above zero. The file's reader says it too, of a value that is not a number at all.</summary>
+    public const string BriefVisitThresholdRefused = "briefVisitThresholds: every threshold must be written as a number of minutes greater than zero, and one is not.";
+
     /// <summary>
-    /// <c>briefVisitThresholds</c>: status ID to threshold in minutes (owner decisions D58, D59). It checks
-    /// nothing yet and returns the setting as it was given: an unknown status, a done status, and a threshold
-    /// of zero or less all load. This is where those refusals go (ticket 04 of the brief status visits spec).
+    /// <c>briefVisitThresholds</c>: status ID to threshold in minutes (owner decisions D58, D59), as the length
+    /// of time each threshold is. Every status listed must have a role in <paramref name="roles"/>, and not the
+    /// done role: a done status has no time in status row, so its line could never appear. Every threshold must
+    /// be above zero, and a length of time the tool can hold that is not nothing: one too large would stop the
+    /// command, and under one below the smallest step of time no visit is brief while the report still prints
+    /// the number. Public for <c>discover</c>, which asks this of an existing file before it calls Jira, and
+    /// passes no roles when the file has none yet. Throws <see cref="SettingRefusedException"/>; no message
+    /// repeats a status ID or a threshold (owner decision D43).
     /// </summary>
-    private static IReadOnlyDictionary<string, double> CheckedBriefVisitThresholds(IReadOnlyDictionary<string, double> thresholds) => thresholds;
+    public static IReadOnlyDictionary<string, TimeSpan> CheckedBriefVisitThresholds(IReadOnlyDictionary<string, double> thresholds, StatusRoles? roles)
+    {
+        if (roles is not null && thresholds.Keys.Any(statusId => roles.RoleOf(statusId) is null))
+        {
+            throw new SettingRefusedException("briefVisitThresholds: every status listed must be a status in statusRoles, and one is not.");
+        }
+
+        if (roles is not null && thresholds.Keys.Any(roles.IsDone))
+        {
+            throw new SettingRefusedException("briefVisitThresholds: a status with the role done cannot be listed, and one is. A done status has no time in status row.");
+        }
+
+        return thresholds.ToDictionary(listed => listed.Key, listed => CheckedBriefVisitThreshold(listed.Value), StringComparer.Ordinal);
+    }
+
+    private static TimeSpan CheckedBriefVisitThreshold(double minutes)
+    {
+        // Written this way round so that a value that is not a number (built in code; JSON has none) is refused too.
+        if (!(minutes > 0))
+        {
+            throw new SettingRefusedException(BriefVisitThresholdRefused);
+        }
+
+        TimeSpan threshold;
+        try
+        {
+            threshold = TimeSpan.FromMinutes(minutes);
+        }
+        catch (OverflowException exception)
+        {
+            throw new SettingRefusedException("briefVisitThresholds: every threshold must be a length of time the tool can measure, and one is too large.", exception);
+        }
+
+        return threshold > TimeSpan.Zero
+            ? threshold
+            : throw new SettingRefusedException("briefVisitThresholds: every threshold must be a length of time the tool can measure, and one is too small: it rounds to no time at all.");
+    }
 
     private static JiraConfig CheckedJira(JiraConfig jira)
     {
