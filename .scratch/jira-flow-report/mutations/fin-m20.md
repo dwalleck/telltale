@@ -6,7 +6,7 @@ filter: '/*/*/BaselineTests/*'
 file: src/Telltale.Pipeline/PipelineSteps.cs
 expectedMatches: 1
 find: |-
-          await NameWithheldBaselineSprintsAsync(numbers, cancellationToken);
+          await NameWithheldBaselineSprintsAsync(NumbersInForce.Of(derivedFrom), cancellationToken);
 replace: |-
           await Task.CompletedTask;
 ---
@@ -18,3 +18,4 @@ Claim (review round 4, finding 27): report names a baseline sprint whose deliver
 - Verified 2026-11-13 at d534f7f: red, 2 failed of 41 (Pipeline, filter /*/*/BaselineTests/*); restored.
 - Re-pointed 2026-11-13 in the final fix pass of optional-suppression (finding R7): the report step now passes the numbers it read once, so its call differs from derive's and is the only match; the behaviour mutated is the same.
 - Verified 2026-11-13 at b49bfeb: red, 2 failed of 41 (Pipeline, filter /*/*/BaselineTests/*); restored.
+- Re-pointed 2026-11-13 in the final fix pass of brief-status-visits (finding R6): the report step hands the report the record and reads the numbers from it for the console; its call still differs from derive's and is the only match. The behaviour mutated is the same.)
