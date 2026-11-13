@@ -105,12 +105,14 @@ public static class Derivation
             var memberOf = membership.Intervals.Select(interval => interval.SprintId).ToHashSet(StringComparer.Ordinal);
             foreach (var window in windows.Where(counted => memberOf.Contains(counted.SprintId)))
             {
-                sprintStatusTimes.AddRange(TimeInStatus.ForSprint(window, timeline.Intervals, membership.Intervals, calendar, asOf)
+                // The time this sprint counts of this issue, worked out once for the time in status and the brief visits.
+                var countedTime = TimeInStatus.CountedTime(window, membership.Intervals, asOf);
+                sprintStatusTimes.AddRange(TimeInStatus.During(countedTime, timeline.Intervals, calendar, asOf)
                     .OrderBy(pair => pair.Key, StringComparer.Ordinal)
                     .Select(pair => new SprintStatusTime(issue.IssueId, window.SprintId, pair.Key, pair.Value.CalendarTime, pair.Value.BusinessTime, pair.Value.BusinessDays)));
 
                 // A brief visit is not a changelog anomaly: nothing here adds to the anomalies or to what derive logs.
-                briefVisits.AddRange(BriefVisits.ForSprint(window, timeline.Intervals, membership.Intervals, settings.BriefVisitThresholds, asOf)
+                briefVisits.AddRange(BriefVisits.During(countedTime, timeline.Intervals, settings.BriefVisitThresholds)
                     .Order(StringComparer.Ordinal)
                     .Select(statusId => new SprintBriefVisit(issue.IssueId, window.SprintId, statusId)));
             }

@@ -445,7 +445,7 @@ public class CycleTimeTests
         {
             AsOf = end,
             Anomalies = [],
-        }, new DerivedSource("synthetic-digest", ZoneId, Holidays: "", BaselineSprintIds: "[]", StatusRoles: "", AbandonedResolutionIds: "", MinimumTeam: 5, MinimumAssigneesBehindAFigure: 3));
+        }, new DerivedSource("synthetic-digest", ZoneId, Holidays: "", BaselineSprintIds: "[]", StatusRoles: "", AbandonedResolutionIds: "", MinimumTeam: 5, MinimumAssigneesBehindAFigure: 3, BriefVisitThresholds: "{}"));
 
         // Derive cannot make such a row (IssueCycle holds no sprint, cycle time or bucket for an issue that is
         // not delivered), so it is put in the table by hand.

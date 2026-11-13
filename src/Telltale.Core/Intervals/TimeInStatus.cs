@@ -40,15 +40,25 @@ public static class TimeInStatus
         IEnumerable<StatusInterval> statuses,
         IEnumerable<MembershipInterval> membership,
         BusinessCalendar calendar,
+        DateTimeOffset asOf) =>
+        During(CountedTime(sprint, membership, asOf), statuses, calendar, asOf);
+
+    /// <summary>
+    /// <see cref="ForSprint"/> for a caller that already holds the time the sprint counts
+    /// (<see cref="CountedTime"/>): how long the issue spent in each status during <paramref name="countedTime"/>.
+    /// </summary>
+    public static IReadOnlyDictionary<string, StatusDuration> During(
+        IReadOnlyList<Interval> countedTime,
+        IEnumerable<StatusInterval> statuses,
+        BusinessCalendar calendar,
         DateTimeOffset asOf)
     {
-        var slices = CountedTime(sprint, membership, asOf);
         var totals = new Dictionary<string, StatusDuration>(StringComparer.Ordinal);
 
         foreach (var status in statuses)
         {
             var span = status.Resolve(asOf);
-            foreach (var slice in slices)
+            foreach (var slice in countedTime)
             {
                 if (span.Intersect(slice) is { } part)
                 {
@@ -64,7 +74,7 @@ public static class TimeInStatus
     /// <summary>
     /// The time one issue's history counts toward one sprint: the periods it was a member of the sprint, clipped
     /// to the sprint's window. Stated once, for the time in status and for which brief visits count toward the
-    /// sprint (<see cref="BriefVisits.ForSprint"/>).
+    /// sprint (<see cref="BriefVisits.During"/>).
     /// </summary>
     public static IReadOnlyList<Interval> CountedTime(SprintWindow sprint, IEnumerable<MembershipInterval> membership, DateTimeOffset asOf)
     {

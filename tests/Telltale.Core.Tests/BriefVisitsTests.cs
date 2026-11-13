@@ -63,7 +63,7 @@ public class BriefVisitsTests
         ];
         var thresholds = new Dictionary<string, TimeSpan> { [Development] = FiveMinutes, [Review] = FiveMinutes };
 
-        var statuses = BriefVisits.ForSprint(Sprint41, history, MemberThroughout, thresholds, AsOf);
+        var statuses = BriefVisits.During(TimeInStatus.CountedTime(Sprint41, MemberThroughout, AsOf), history, thresholds);
 
         await Assert.That(statuses).IsEquivalentTo(new[] { Development });
     }
@@ -80,7 +80,7 @@ public class BriefVisitsTests
         ];
         var thresholds = new Dictionary<string, TimeSpan> { [Review] = FiveMinutes };
 
-        var statuses = BriefVisits.ForSprint(Sprint41, history, MemberThroughout, thresholds, AsOf);
+        var statuses = BriefVisits.During(TimeInStatus.CountedTime(Sprint41, MemberThroughout, AsOf), history, thresholds);
 
         await Assert.That(statuses).IsEmpty();
     }
@@ -99,7 +99,7 @@ public class BriefVisitsTests
         ];
         var thresholds = new Dictionary<string, TimeSpan> { [Development] = FiveMinutes };
 
-        var statuses = BriefVisits.ForSprint(Sprint41, history, MemberThroughout, thresholds, AsOf);
+        var statuses = BriefVisits.During(TimeInStatus.CountedTime(Sprint41, MemberThroughout, AsOf), history, thresholds);
 
         await Assert.That(statuses).IsEmpty();
     }
@@ -118,7 +118,7 @@ public class BriefVisitsTests
         MembershipInterval[] joinedOnWednesday = [new("41", Local(2026, 11, 4, 9), null)];
         var thresholds = new Dictionary<string, TimeSpan> { [Development] = FiveMinutes };
 
-        var statuses = BriefVisits.ForSprint(Sprint41, history, joinedOnWednesday, thresholds, AsOf);
+        var statuses = BriefVisits.During(TimeInStatus.CountedTime(Sprint41, joinedOnWednesday, AsOf), history, thresholds);
 
         await Assert.That(statuses).IsEmpty();
     }

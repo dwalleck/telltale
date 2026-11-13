@@ -16,25 +16,30 @@ public static class BriefVisits
         stay.End is { } left && left - stay.Start < threshold;
 
     /// <summary>
-    /// The statuses in which one issue has a brief visit that counts toward <paramref name="sprint"/>: a brief
-    /// visit to a status listed in <paramref name="thresholds"/> (status ID to threshold; a status not listed
-    /// is not checked, owner decision D58) that overlaps the time the sprint's time in status counts: inside
-    /// the sprint's window, while the issue was a member (<see cref="TimeInStatus.CountedTime"/>). A brief visit
-    /// made in an earlier sprint, or before the issue joined, does not count toward this one. Whether the issue
-    /// is in the status's time in status row for the sprint is not asked here: the metric view asks it.
+    /// The statuses in which one issue has a brief visit that counts toward a sprint: a brief visit to a status
+    /// listed in <paramref name="thresholds"/> (status ID to threshold; a status not listed is not checked,
+    /// owner decision D58) that overlaps <paramref name="countedTime"/>, the time the sprint's time in status
+    /// counts: inside the sprint's window, while the issue was a member (<see cref="TimeInStatus.CountedTime"/>).
+    /// A brief visit made in an earlier sprint, or before the issue joined, does not count toward this one.
+    /// Whether the issue is in the status's time in status row for the sprint is not asked here: the metric
+    /// view asks it. With no status listed nothing is looked at.
     /// </summary>
-    public static IReadOnlySet<string> ForSprint(
-        SprintWindow sprint,
+    public static IReadOnlySet<string> During(
+        IReadOnlyList<Interval> countedTime,
         IEnumerable<StatusInterval> statuses,
-        IEnumerable<MembershipInterval> membership,
-        IReadOnlyDictionary<string, TimeSpan> thresholds,
-        DateTimeOffset asOf)
+        IReadOnlyDictionary<string, TimeSpan> thresholds)
     {
-        var counted = TimeInStatus.CountedTime(sprint, membership, asOf);
+        if (thresholds.Count == 0)
+        {
+            return NoStatuses;
+        }
+
         return statuses
             .Where(stay => thresholds.TryGetValue(stay.StatusId, out var threshold) && IsBrief(stay, threshold))
-            .Where(stay => counted.Any(slice => stay.Resolve(asOf).Intersect(slice) is not null))
+            .Where(stay => stay.End is { } left && countedTime.Any(slice => slice.Intersect(new Interval(stay.Start, left)) is not null))
             .Select(stay => stay.StatusId)
             .ToHashSet(StringComparer.Ordinal);
     }
+
+    private static readonly IReadOnlySet<string> NoStatuses = new HashSet<string>();
 }

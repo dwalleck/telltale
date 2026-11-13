@@ -485,15 +485,9 @@ public sealed class SqliteStore : ITelltaleStore
 
         // Another version's table can lack a column read here, so its version is asked first.
         await RequireDerivedByThisVersionAsync(connection, cancellationToken);
-        var source = await connection.QuerySingleOrDefaultAsync<DerivedSource?>(Command(
+        return await connection.QuerySingleOrDefaultAsync<DerivedSource?>(Command(
             cancellationToken,
-            "SELECT raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure FROM run;"));
-
-        // The row is mapped through the record's constructor, which takes exactly the columns above. What the
-        // record holds besides is read on its own.
-        return source is null
-            ? null
-            : source with { BriefVisitThresholds = await connection.QuerySingleAsync<string>(Command(cancellationToken, "SELECT brief_visit_thresholds FROM run;")) };
+            "SELECT raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure, brief_visit_thresholds FROM run;"));
     }
 
     /// <summary>

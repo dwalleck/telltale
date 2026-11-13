@@ -80,7 +80,7 @@ public sealed record SprintStatusTime(string IssueId, string SprintId, string St
 
 /// <summary>
 /// One issue has at least one brief visit to one status that counts toward one sprint (GLOSSARY: Brief visit;
-/// <see cref="Intervals.BriefVisits.ForSprint"/>). It holds the three IDs and nothing else: no duration, no
+/// <see cref="Intervals.BriefVisits.During"/>). It holds the three IDs and nothing else: no duration, no
 /// time, no number of visits.
 /// </summary>
 public sealed record SprintBriefVisit(string IssueId, string SprintId, string StatusId);
@@ -137,6 +137,7 @@ public sealed record IssueAnomaly(string IssueId, ChangelogAnomalyKind Kind)
 /// <param name="AbandonedResolutionIds">The abandoned resolution IDs in order, separated by commas.</param>
 /// <param name="MinimumTeam">The minimum group size's team number (GLOSSARY: Minimum group size): the metric views read it from the rebuild's record and never from the configuration.</param>
 /// <param name="MinimumAssigneesBehindAFigure">The minimum group size's number of assignees behind a figure, read by the views in the same way.</param>
+/// <param name="BriefVisitThresholds">The brief visit thresholds (GLOSSARY: Brief visit) as a JSON object of status ID to minutes, the IDs in order, e.g. <c>{"10001":5,"10005":0.5}</c>; <c>{}</c> when no status is checked. The metric view <c>brief_visits_per_sprint</c> reads the listed statuses and their thresholds from the rebuild's record.</param>
 public sealed record DerivedSource(
     string RawDigest,
     string TimeZone,
@@ -145,15 +146,9 @@ public sealed record DerivedSource(
     string StatusRoles,
     string AbandonedResolutionIds,
     long MinimumTeam,
-    long MinimumAssigneesBehindAFigure)
+    long MinimumAssigneesBehindAFigure,
+    string BriefVisitThresholds)
 {
-    /// <summary>
-    /// The brief visit thresholds (GLOSSARY: Brief visit) as a JSON object of status ID to minutes, the IDs in
-    /// order, e.g. <c>{"10001":5,"10005":0.5}</c>; <c>{}</c> when no status is checked. The metric view
-    /// <c>brief_visits_per_sprint</c> reads the listed statuses and their thresholds from the rebuild's record.
-    /// </summary>
-    public string BriefVisitThresholds { get; init; } = "{}";
-
     /// <summary><see cref="BriefVisitThresholds"/> for thresholds in minutes by status ID: the form the store keeps and the view reads.</summary>
     public static string BriefVisitThresholdsOf(IReadOnlyDictionary<string, double> minutesByStatusId) =>
         System.Text.Json.JsonSerializer.Serialize(new SortedDictionary<string, double>(minutesByStatusId.ToDictionary(), StringComparer.Ordinal));

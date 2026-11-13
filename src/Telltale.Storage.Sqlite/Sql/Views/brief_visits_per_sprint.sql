@@ -1,9 +1,8 @@
 -- Brief visits (GLOSSARY: Brief visit; owner decisions D58 to D62). Per sprint and status listed in
 -- briefVisitThresholds that has a row in time_in_status_per_sprint: the status's threshold in minutes, and how
 -- many of the issues in that row have at least one brief visit to the status that counts toward the sprint
--- (brief_visit). An issue is in the row only if it spent business time in the status during the sprint (owner
--- decision D21, as time_in_status_per_sprint's status_time), so the count is never larger than the row's
--- issue_count. Order by board_position for board order. No figure of any other view is changed by this one.
+-- (brief_visit). Which issues are in the row is time_in_status_issue's to say, here as in
+-- time_in_status_per_sprint (owner decision D21), so the count is never larger than the row's issue_count. Order by board_position for board order. No figure of any other view is changed by this one.
 -- The listed statuses and their thresholds are the ones the rebuild recorded (run.brief_visit_thresholds):
 -- this view never reads the configuration. With no status listed it has no rows.
 -- Minimum group size (GLOSSARY, ADR-0003; the numbers are minimum_group_size's, the configured ones, five and
@@ -26,9 +25,8 @@ counted AS (
            COUNT(*) AS issues,
            COUNT(DISTINCT i.assignee_hash) AS assignees
     FROM brief_visit v
-    JOIN sprint_status_time t ON t.issue_id = v.issue_id AND t.sprint_id = v.sprint_id AND t.status_id = v.status_id
+    JOIN time_in_status_issue t ON t.issue_id = v.issue_id AND t.sprint_id = v.sprint_id AND t.status_id = v.status_id
     LEFT JOIN issue i ON i.issue_id = v.issue_id
-    WHERE t.business_days > 0
     GROUP BY v.sprint_id, v.status_id
 )
 SELECT r.sprint_id,

@@ -39,7 +39,7 @@ public sealed record TelltaleSettings
     public required IReadOnlyDictionary<string, TimeSpan> BriefVisitThresholds { get; init; }
 
     /// <summary>The settings as a rebuild records them, apart from the raw data's digest: see <see cref="DerivedFrom"/>.</summary>
-    private DerivedSource Recorded { get; init; } = new("", "", "", "", "", "", MinimumGroupSize.Default.Team, MinimumGroupSize.Default.AssigneesBehindAFigure);
+    private DerivedSource Recorded { get; init; } = new("", "", "", "", "", "", MinimumGroupSize.Default.Team, MinimumGroupSize.Default.AssigneesBehindAFigure, "{}");
 
     /// <summary>Everything a rebuild is decided with besides the raw data and the as-of time.</summary>
     public DerivationSettings Derivation => new(new DeliveryRules(StatusRoles, AbandonedResolutionIds), new BusinessCalendar(TimeZone, Holidays)) { BriefVisitThresholds = BriefVisitThresholds };
@@ -89,10 +89,8 @@ public sealed record TelltaleSettings
                 string.Join(",", config.StatusRoles.Select(status => $"{status.Key}={status.Value}")),
                 string.Join(",", abandonedResolutionIds.Order(StringComparer.Ordinal)),
                 minimumGroupSize.Team,
-                minimumGroupSize.AssigneesBehindAFigure)
-            {
-                BriefVisitThresholds = DerivedSource.BriefVisitThresholdsOf(briefVisitThresholds),
-            },
+                minimumGroupSize.AssigneesBehindAFigure,
+                DerivedSource.BriefVisitThresholdsOf(briefVisitThresholds)),
         };
     }
 
@@ -126,8 +124,9 @@ public sealed record TelltaleSettings
     }
 
     /// <summary>
-    /// <c>briefVisitThresholds</c>: status ID to threshold in minutes (owner decisions D58, D59). The one place
-    /// the setting is checked; what is refused of it is refused here.
+    /// <c>briefVisitThresholds</c>: status ID to threshold in minutes (owner decisions D58, D59). It checks
+    /// nothing yet and returns the setting as it was given: an unknown status, a done status, and a threshold
+    /// of zero or less all load. This is where those refusals go (ticket 04 of the brief status visits spec).
     /// </summary>
     private static IReadOnlyDictionary<string, double> CheckedBriefVisitThresholds(IReadOnlyDictionary<string, double> thresholds) => thresholds;
 
