@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Telltale.Core;
 using Telltale.Core.Configuration;
@@ -27,6 +28,13 @@ public static class ConfigFile
         // minimumGroupSize is read by hand, so that null, a quoted number or a missing number is refused by name.
         Converters = { new MinimumGroupSizeConverter() },
     };
+
+    /// <summary>
+    /// A setting as the file holds it, with the names the file is read by: what <c>discover</c> writes stays in
+    /// step with what the run reads.
+    /// </summary>
+    internal static JsonNode Written<T>(T setting)
+        where T : notnull => JsonSerializer.SerializeToNode(setting, Options)!;
 
     /// <summary>Reads the file and checks every setting. Throws <see cref="UserFacingException"/> naming the file and the setting that is refused.</summary>
     public static async Task<TelltaleSettings> LoadAsync(string path, CancellationToken cancellationToken = default)
