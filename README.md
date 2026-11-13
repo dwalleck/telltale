@@ -113,7 +113,7 @@ After that, `telltale run` is the only command needed day to day.
 
 ### `discover`
 
-Writes `config/telltale.json` from what the Jira site says about the board. The first run needs `--site-url`, `--board`, `--time-zone` and `--backfill-start`. Pass `--story-point-field` or `--sprint-field` when Jira lists none or several candidates.
+Writes `config/telltale.json` from what the Jira site says about the board. The first run needs `--site-url`, `--board`, `--time-zone` and `--backfill-start`. `--board` takes the board's numeric ID, the number after `/boards/` in its address, and `--time-zone` takes an IANA ID such as `America/Chicago`. Pass `--story-point-field` or `--sprint-field` when Jira lists none or several candidates.
 
 A rerun keeps what the file already says, and saves a backup of the file before rewriting it.
 
@@ -188,6 +188,34 @@ The main views are `delivered_per_sprint`, `cycle_time_per_sprint_and_bucket`, `
   "baselineSprintIds": ["41", "42", "43"]
 }
 ```
+
+### Setting formats
+
+| Setting | Format | Example |
+| --- | --- | --- |
+| `jira.siteUrl` | An absolute `https://` address. | `"https://example.atlassian.net/"` |
+| `jira.boardId` | A number, not quoted. It is the number in the board's address, after `/boards/` (or `rapidView=` on older pages). It is not the project key. | `42` |
+| `jira.projectKeys` | A list of project keys as strings. `discover` fills it in from the board. | `["PAY"]` |
+| `jira.sprintFieldId`, `jira.storyPointFieldId` | A Jira field ID as a string. | `"customfield_10020"` |
+| `jira.backfillStart` | A date as `"yyyy-MM-dd"`. | `"2026-07-01"` |
+| `statusRoles` | Status ID (a string of digits) to role: `"not started"`, `"work"`, `"blocked"` or `"done"`. | `"10001": "work"` |
+| `abandonedResolutionIds` | A list of resolution IDs, each a quoted string of digits. May be empty. | `["10004"]` |
+| `timeZone` | An IANA time zone ID of the form `Area/City`. | `"America/Chicago"` |
+| `holidays` | A list of dates, each as `"yyyy-MM-dd"`. May be empty. | `["2026-12-25"]` |
+| `baselineSprintIds` | A list of sprint IDs, each a quoted string of digits. Optional. | `["41", "42"]` |
+
+Things that are refused when the file is loaded, with a message that names the file:
+
+- **An ID written as a number** in `baselineSprintIds` or `abandonedResolutionIds` (`[41, 42]`), or `boardId` written as a string (`"42"`).
+- **A sprint's name** in place of its ID. The ID is the number in the sprint's address in Jira (`sprint=41`).
+- **A time zone abbreviation or offset**, such as `CST` or `UTC-6`. Neither carries the daylight-saving rules that business days depend on. US zones are `America/New_York`, `America/Chicago`, `America/Denver`, `America/Phoenix` and `America/Los_Angeles`.
+- **Any other date form**, such as `"11/26/2026"` or a date with a time.
+
+About `holidays`:
+
+- List one entry per day. There is no range form and no "every year" form, so list each year you need.
+- Cover the period of the baseline sprints as well as the current one; their cycle times are counted in business days too.
+- Weekends are already left out. When a holiday falls on a weekend and the company observes it on a weekday, list the weekday.
 
 ## Development
 
