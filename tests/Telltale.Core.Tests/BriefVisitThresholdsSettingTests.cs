@@ -30,10 +30,15 @@ public class BriefVisitThresholdsSettingTests
     [Arguments(0.05, "0.05")]
     [Arguments(0.29, "0.29")]
     [Arguments(7.3, "7.3")]
+    [Arguments(0.69, "0.69")]
+    [Arguments(1.13, "1.13")]
+    [Arguments(4.77, "4.77")]
     [Arguments(1440, "1440")]
     public async Task A_rebuild_records_a_threshold_as_the_owner_wrote_it(double minutes, string written)
     {
         // The record is what the view reads and the report prints, so this is how the footer states the threshold.
+        // 0.69, 1.13 and 4.77 minutes each fall a hair under a whole number of the tool's steps of time when
+        // multiplied out, so they show whether the length of time is taken to the nearest step or cut off.
         var recorded = TelltaleSettings.From(Config() with { BriefVisitThresholds = new Dictionary<string, double> { ["4"] = minutes } }).DerivedFrom("synthetic-digest");
 
         await Assert.That(recorded.BriefVisitThresholds).IsEqualTo($$"""{"4":{{written}}}""");
