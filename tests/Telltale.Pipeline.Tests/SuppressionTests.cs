@@ -195,7 +195,7 @@ public class SuppressionTests
             + "| Fake Development | 5 | 9.0 |\n"
             + MethodHeading);
         await Assert.That(report).Contains(
-            "the delivered count reads \"suppressed\" when fewer than three distinct assignees are among the delivered issues, and the cycle time table then reads \"suppressed\" as well, with no rows, because its rows and their counts would give the count back. "
+            "the delivered count reads \"suppressed\" when fewer than three distinct assignees are among the delivered issues, and the cycle time table then reads \"suppressed\" as well, with no rows, because the number of its rows and their counts (the delivered issues that have a cycle time) would each give a lower bound of the withheld count. "
             + "The time in status table of such a sprint keeps its counts: they count every issue that spent time in a status, delivered or not, so the count of a late status can be close to the withheld delivered count. ");
     }
 
@@ -414,15 +414,20 @@ public class SuppressionTests
         }
 
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
+        // For a sprint the views mark suppressed, each table's view has its one row with no bucket or status
+        // and no count; here that row still carries figures. Otherwise a row has a count and its own flag.
+        var (bucket, status, statusName, position, count) = sprintSuppressed == 1
+            ? ("NULL", "NULL", "NULL", "NULL", "NULL")
+            : ("3.0", "'600004'", "'Fake Development'", "4", "5");
         await pipeline.ExecuteAsync(
             $$"""
             DROP VIEW cycle_time_per_sprint_and_bucket;
             CREATE VIEW cycle_time_per_sprint_and_bucket AS
-            SELECT '41' AS sprint_id, 3.0 AS point_bucket, 5 AS issue_count, 2.0 AS median_business_days, 2.0 AS p85_business_days,
+            SELECT '41' AS sprint_id, {{bucket}} AS point_bucket, {{count}} AS issue_count, 2.0 AS median_business_days, 2.0 AS p85_business_days,
                    2.0 AS median_calendar_days, 2.0 AS p85_calendar_days, 1 AS suppressed;
             DROP VIEW time_in_status_per_sprint;
             CREATE VIEW time_in_status_per_sprint AS
-            SELECT '41' AS sprint_id, '600004' AS status_id, 'Fake Development' AS status_name, 4 AS board_position, 5 AS issue_count,
+            SELECT '41' AS sprint_id, {{status}} AS status_id, {{statusName}} AS status_name, {{position}} AS board_position, {{count}} AS issue_count,
                    2.0 AS median_business_days, 1 AS suppressed;
             DROP VIEW delivered_per_sprint;
             CREATE VIEW delivered_per_sprint AS

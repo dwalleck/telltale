@@ -1,7 +1,7 @@
 -- The per-sprint checks of the minimum group size (GLOSSARY, ADR-0003), each stated here once: one row per
 -- sprint that counts. Every metric view about a sprint joins this view and reads the flag that applies to it.
 --
--- suppressed is the team check: 1 when the sprint has fewer distinct assignees than a team
+-- team_suppressed is the team check: 1 when the sprint has fewer distinct assignees than a team
 -- (minimum_group_size.team, five). Such a sprint shows nothing: no delivered count, and one "suppressed" row
 -- in place of each table's rows (owner decisions D41, D45).
 --
@@ -13,6 +13,8 @@
 -- The time-in-status table does not read this flag (owner decision D55).
 --
 -- An issue counts toward its assignee at the time of the sync; an unassigned issue counts toward nobody.
+-- Every metric view about a sprint expands this view, the baseline views several times. That cost is accepted:
+-- the store is one team's board, and the checks staying inside the views is the design (ADR-0003).
 CREATE VIEW sprint_team AS
 WITH sprint_issue AS (
     -- Every issue of the sprint, not only the delivered ones (owner decision D6): an issue that spent time
@@ -36,6 +38,6 @@ counted AS (
     GROUP BY w.sprint_id
 )
 SELECT n.sprint_id,
-       CASE WHEN n.assignees >= g.team THEN 0 ELSE 1 END AS suppressed,
+       CASE WHEN n.assignees >= g.team THEN 0 ELSE 1 END AS team_suppressed,
        CASE WHEN n.assignees >= g.team AND n.delivering_assignees >= g.assignees_behind_a_figure THEN 0 ELSE 1 END AS delivered_suppressed
 FROM counted n, minimum_group_size g;

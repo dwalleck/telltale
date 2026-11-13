@@ -529,16 +529,22 @@ public class BaselineTests
         pipeline.Config["baselineSprintIds"] = new JsonArray("41", "42");
 
         var run = await pipeline.RunAsync("run", "--sprint", "42");
+        var consoleOfRun = pipeline.Error.ToString().ReplaceLineEndings("\n");
+        pipeline.Error.GetStringBuilder().Clear();
         await pipeline.RunAllAsync(["report", "--sprint", "41"]);
+        var consoleOfReport = pipeline.Error.ToString().ReplaceLineEndings("\n");
         pipeline.Out.GetStringBuilder().Clear();
         var query = await pipeline.RunAsync(
             "query",
             "SELECT (SELECT COUNT(*) FROM baseline_cycle_time_per_bucket) AS cycle_time_rows, (SELECT COUNT(*) FROM baseline_time_in_status) AS status_rows, "
             + "(SELECT group_concat(sprint_id || '=' || suppressed, ' ') FROM (SELECT sprint_id, suppressed FROM baseline_sprint ORDER BY sprint_id)) AS baseline_sprints;");
 
+        // The console names the sprint: once in a run (derive and report are one command), and again when
+        // report runs on its own (review round 4, finding 27).
+        const string Named = "Baseline sprint 41 has fewer than five assignees, or fewer than three among its delivered issues, so every baseline figure is withheld (baselineSprintIds in the configuration file).\n";
         await Assert.That(run).IsEqualTo(0);
-        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            "Baseline sprint 41 has fewer than five assignees, or fewer than three among its delivered issues, so every baseline figure is withheld (baselineSprintIds in the configuration file).\n");
+        await Assert.That(consoleOfRun).IsEqualTo(Named);
+        await Assert.That(consoleOfReport).IsEqualTo(Named);
 
         // Another sprint's report: every baseline cell, of a bucket sprint 41 has and of one it has not.
         var other = await pipeline.ReadReportAsync(42);
@@ -569,6 +575,37 @@ public class BaselineTests
             | 0 | 0 | 41=1 42=0 |
 
             """);
+    }
+
+    [Test]
+    public async Task Two_baseline_sprints_one_under_five_and_one_with_two_delivering_assignees_are_named_together_in_one_sentence()
+    {
+        // Review round 4, finding 33. Sprint 41 has four people; sprint 42 has six, two of whom delivered.
+        // Sprint 43 is the one reported: six people delivered in it.
+        await using var pipeline = new PipelineHarness(Local(2026, 2, 17, 12));
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
+        pipeline.Jira.AddSprint(43, "Fake Sprint 43", Local(2026, 2, 2, 9), plannedEnd: Local(2026, 2, 13, 17), completed: Local(2026, 2, 13, 17));
+        AddSprintFortyOneWithFourAssignees(pipeline.Jira);
+        Delivered(pipeline.Jira, 42, "FAKE-11", points: 3, People.One, days: 1);
+        Delivered(pipeline.Jira, 42, "FAKE-12", points: 3, People.Two, days: 2);
+        foreach (var (person, number) in People.Team.Append(People.Six).Select((person, index) => (person, index + 1)))
+        {
+            pipeline.Jira.AddIssue($"FAKE-2{number}", Local(2026, 1, 19, 9)).AssignedTo(person).InSprints(42);
+            pipeline.Jira.AddIssue($"FAKE-3{number}", Local(2026, 2, 2, 9)).AssignedTo(person).Estimated(3).InSprints(43)
+                .Moved(Local(2026, 2, 3, 9), Workflow.Development)
+                .Moved(Local(2026, 2, 5, 9), Workflow.Done);
+        }
+
+        pipeline.Config["baselineSprintIds"] = new JsonArray("42", "41");
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "43");
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Baseline sprints 41 and 42 each have fewer than five assignees, or fewer than three among their delivered issues, so every baseline figure is withheld (baselineSprintIds in the configuration file).\n");
+        var report = await pipeline.ReadReportAsync(43);
+        await Assert.That(report).Contains(CycleTimeHeader + "| 3 | 6 | 2.0 | 2.0 | 2.0 | 2.0 | suppressed | suppressed |\n");
+        await Assert.That(report).Contains("- Baseline sprints 41 and 42 each have their delivered count withheld, so every baseline figure in this report reads \"suppressed\".\n");
     }
 
     [Test]

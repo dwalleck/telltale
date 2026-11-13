@@ -10,8 +10,9 @@
 -- A sprint whose delivered count is withheld (sprint_team.delivered_suppressed: fewer than five assignees in
 -- the sprint, or fewer than three among its delivered issues) has no bucket rows at all: it has exactly one
 -- row, with no bucket, no count and suppressed = 1, whether or not anything was delivered in it. Bucket
--- counts add up to the withheld delivered count (D41), the number of bucket rows bounds it from below, and
--- which buckets have rows says what the sprint's few people worked on (D45, D54). In that row a null
+-- counts add up to the delivered issues that have a cycle time, and the number of bucket rows is at most
+-- that: both bound the withheld delivered count from below (D41, D54). And which buckets have rows says what
+-- the sprint's few people worked on (D45). In that row a null
 -- point_bucket does not mean unestimated. An issue counts toward its assignee at the time of the sync, and
 -- an unassigned issue toward nobody.
 CREATE VIEW cycle_time_per_sprint_and_bucket AS

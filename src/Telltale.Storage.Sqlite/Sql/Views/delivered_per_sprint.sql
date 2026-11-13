@@ -5,7 +5,7 @@
 -- Minimum group size (GLOSSARY, ADR-0003; owner decision D49): delivered_count is null and suppressed is 1
 -- when sprint_team says so (delivered_suppressed): the sprint has fewer than five distinct assignees, or
 -- fewer than three are among the delivered issues. team_suppressed is the team check alone
--- (sprint_team.suppressed): 1 for a sprint whose tables both show no rows.
+-- (sprint_team.team_suppressed): 1 for a sprint whose tables both show no rows.
 CREATE VIEW delivered_per_sprint AS
 SELECT w.sprint_id,
        s.name        AS sprint_name,
@@ -15,7 +15,7 @@ SELECT w.sprint_id,
        s.planned_end,
        CASE WHEN t.delivered_suppressed = 0 THEN COUNT(c.issue_id) END AS delivered_count,
        t.delivered_suppressed AS suppressed,
-       t.suppressed           AS team_suppressed
+       t.team_suppressed
 FROM sprint_window w
 JOIN sprint s ON s.sprint_id = w.sprint_id
 JOIN sprint_team t ON t.sprint_id = w.sprint_id

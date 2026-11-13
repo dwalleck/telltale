@@ -36,6 +36,7 @@ public sealed class PipelineSteps
     private readonly ITelltaleStore _store;
     private readonly CollectionSecrets? _secrets;
     private readonly Lazy<string?> _saltAtHand;
+    private bool _withheldBaselineSprintsNamed;
 
     /// <param name="environment">The outside world.</param>
     /// <param name="settings">The checked configuration.</param>
@@ -111,13 +112,7 @@ public sealed class PipelineSteps
             await _environment.Notices.WriteLineAsync($"{SprintWindows.ClosedWithoutAnEnd(sprintId)}: no delivery is counted in it, and it cannot be reported or be a baseline sprint.");
         }
 
-        // Owner decisions D50, D56: a baseline sprint whose delivered count is withheld stops nothing. The
-        // views withhold every baseline figure, and the console says which sprint is why.
-        var withheld = await _store.QueryViewsAsync<string>("SELECT sprint_id FROM baseline_sprint WHERE suppressed <> 0 ORDER BY sprint_id;", cancellationToken: cancellationToken);
-        if (withheld.Count > 0)
-        {
-            await _environment.Notices.WriteLineAsync(BaselineSprintRules.DeliveredCountWithheld(withheld));
-        }
+        await NameWithheldBaselineSprintsAsync(cancellationToken);
 
         if (derived.Anomalies.Count == 0)
         {
@@ -246,8 +241,29 @@ public sealed class PipelineSteps
         }
 
         BaselineSprintRules.RequireWithinWhatWasFetched(starts, _settings.BaselineSprintIds, completeFrom);
+        await NameWithheldBaselineSprintsAsync(cancellationToken);
         var path = await SprintReport.WriteAsync(_store, sprint, _settings.TimeZone, [.. _settings.BaselineSprintIds.Order(StringComparer.Ordinal)], _environment.ReportDirectory, cancellationToken);
         await _environment.Out.WriteLineAsync($"Wrote {path}");
+    }
+
+    /// <summary>
+    /// Owner decisions D50, D56: a baseline sprint whose delivered count is withheld stops nothing. The views
+    /// withhold every baseline figure, and the console says which sprint is why: when the derived data is
+    /// rebuilt, and when a report is written from it. Once for one pipeline, so a run says it once.
+    /// </summary>
+    private async Task NameWithheldBaselineSprintsAsync(CancellationToken cancellationToken)
+    {
+        if (_withheldBaselineSprintsNamed)
+        {
+            return;
+        }
+
+        _withheldBaselineSprintsNamed = true;
+        var withheld = await BaselineSprintRules.ReadWithheldAsync(_store, cancellationToken);
+        if (withheld.Count > 0)
+        {
+            await _environment.Notices.WriteLineAsync(BaselineSprintRules.WithheldOnTheConsole(withheld));
+        }
     }
 
     /// <summary>
