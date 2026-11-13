@@ -1,3 +1,4 @@
+using Telltale.Core.Configuration;
 using Telltale.Core.Storage;
 
 namespace Telltale.Core.Derive;
@@ -72,8 +73,8 @@ public static class BaselineSprintRules
     }
 
     /// <summary>
-    /// The baseline sprints whose delivered count is withheld (fewer than five distinct assignees, or fewer
-    /// than three among the delivered issues; owner decisions D50, D56), in order, read from the metric view
+    /// The baseline sprints whose delivered count is withheld (under the default numbers: fewer than five distinct
+    /// assignees, or fewer than three among the delivered issues; owner decisions D50, D56), in order, read from the metric view
     /// <c>baseline_sprint</c>. While there is one, the views withhold every baseline figure, and nothing stops:
     /// the console and the report name the sprints, with <see cref="WithheldOnTheConsole"/> and
     /// <see cref="WithheldInTheReport"/>. Neither says which of the two reasons applies.
@@ -81,10 +82,25 @@ public static class BaselineSprintRules
     public static Task<IReadOnlyList<string>> ReadWithheldAsync(ITelltaleStore store, CancellationToken cancellationToken = default) =>
         store.QueryViewsAsync<string>("SELECT sprint_id FROM baseline_sprint WHERE suppressed <> 0 ORDER BY sprint_id;", cancellationToken: cancellationToken);
 
-    /// <summary>The console's line about <paramref name="sprintIds"/>, the result of <see cref="ReadWithheldAsync"/> when it is not empty.</summary>
-    public static string WithheldOnTheConsole(IReadOnlyList<string> sprintIds) =>
-        $"{SprintsNamed(sprintIds)} {(sprintIds.Count == 1 ? "has" : "each have")} fewer than five assignees, or fewer than three among {(sprintIds.Count == 1 ? "its" : "their")} delivered issues, "
-        + "so every baseline figure is withheld (baselineSprintIds in the configuration file).";
+    /// <summary>
+    /// The console's line about <paramref name="sprintIds"/>, the result of <see cref="ReadWithheldAsync"/> when it
+    /// is not empty. It gives the numbers in force (<see cref="NumbersInForce.ReadAsync"/>; owner decision D67),
+    /// and of the two checks only those that apply: a number of zero turns its check off. With both off the
+    /// views withhold no baseline sprint; were one listed all the same, the line says what the view says.
+    /// </summary>
+    public static string WithheldOnTheConsole(IReadOnlyList<string> sprintIds, MinimumGroupSize numbers)
+    {
+        var one = sprintIds.Count == 1;
+        var (has, its) = (one ? "has" : "each have", one ? "its" : "their");
+        var why = numbers switch
+        {
+            { Team: 0, AssigneesBehindAFigure: 0 } => $"{has} {its} delivered count withheld",
+            { Team: 0 } => $"{has} fewer than {NumbersInForce.Assignees(numbers.AssigneesBehindAFigure)} among {its} delivered issues",
+            { AssigneesBehindAFigure: 0 } => $"{has} fewer than {NumbersInForce.Assignees(numbers.Team)}",
+            _ => $"{has} fewer than {NumbersInForce.Assignees(numbers.Team)}, or fewer than {NumbersInForce.Number(numbers.AssigneesBehindAFigure)} among {its} delivered issues",
+        };
+        return $"{SprintsNamed(sprintIds)} {why}, so every baseline figure is withheld (baselineSprintIds in the configuration file).";
+    }
 
     /// <summary>The method note's sentence about the same sprints.</summary>
     public static string WithheldInTheReport(IReadOnlyList<string> sprintIds) =>

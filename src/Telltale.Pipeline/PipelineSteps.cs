@@ -262,7 +262,7 @@ public sealed class PipelineSteps
         var withheld = await BaselineSprintRules.ReadWithheldAsync(_store, cancellationToken);
         if (withheld.Count > 0)
         {
-            await _environment.Notices.WriteLineAsync(BaselineSprintRules.WithheldOnTheConsole(withheld));
+            await _environment.Notices.WriteLineAsync(BaselineSprintRules.WithheldOnTheConsole(withheld, await NumbersInForce.ReadAsync(_store, cancellationToken)));
         }
     }
 
