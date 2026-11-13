@@ -9,13 +9,15 @@ The project owner (a senior .NET engineer) needs to justify AI plan upgrades to 
 ## Read in this order
 
 1. `GLOSSARY.md` — the project's language. Settled.
-2. `docs/adr/` — seven decisions with real trade-offs. Settled unless the owner reopens one.
+2. `docs/adr/` — eight decisions with real trade-offs. Settled unless the owner reopens one.
 3. `docs/context/pilot-plan.md` — the story, the metrics, the evaluation. The "why".
 4. `docs/context/system-design.md` — the working technical design and source-system details. The "how", including what is already built.
 5. `docs/context/confluence-page.md` — the report layout.
 6. `src/Telltale.Core` and `tests/Telltale.Core.Tests` — the code that exists.
 
 ## What is open
+
+**Update, Nov 13, 2026:** the minimum group size is a configuration setting, and it is built: `minimumGroupSize`, five and three by default, zero turning a check off. The spec is `.scratch/optional-suppression/spec.md`; the decision is ADR-0008, which amends ADR-0003.
 
 **Update, Nov 12, 2026:** the first spec is built and merged. The Jira path works end to end against synthetic fixtures: `discover`, `secrets set`, `backfill`, `sync`, `derive`, `report`, `run` and `query` (see `README.md`). The owner's decisions made while building it are in `docs/decisions.md`. The next step is ticket 13, the first run against the real Jira on the work laptop: `.scratch/jira-flow-report/issues/13-first-real-run-on-work-laptop.md`. Start there.
 

@@ -2,7 +2,7 @@
 
 Telltale is a .NET command-line tool that collects a team's delivery data into one local SQLite store and reports team-level flow metrics per sprint.
 
-It reports on the team's work, never on individuals. Person fields are hashed before they are stored, and a figure that covers too few people is withheld.
+It reports on the team's work, never on individuals. Person fields are hashed before they are stored, and by default a figure that covers too few people is withheld.
 
 ## Status
 
@@ -24,11 +24,14 @@ Time is counted in business days in the team's time zone, skipping weekends and 
 
 ## Privacy rules
 
-These are hard constraints of the design (see [ADR-0003](docs/adr/0003-pseudonymized-aggregates-only.md)):
+Reporting no per-person results is a hard constraint of the design. Withholding small groups is a default that the configuration file can change (see [ADR-0003](docs/adr/0003-pseudonymized-aggregates-only.md), and [ADR-0008](docs/adr/0008-minimum-group-size-is-a-configurable-default.md), which amends it):
 
-- **No per-person results.** Jira account IDs are hashed with a secret salt before storage. Names, emails and issue keys are not stored.
-- **Small groups are withheld.** A sprint needs a team of at least five, and a figure needs at least three distinct assignees behind it. Anything short of that reads `suppressed`.
-- **The rule lives in the database views.** `report` and `query` both read through them, so neither can show a withheld figure.
+- **No per-person results.** Jira account IDs are hashed with a secret salt before storage. Names, emails and issue keys are not stored. No setting changes this.
+- **Small groups are withheld by default.** A sprint needs a team of at least five, and a figure needs at least three distinct assignees behind it. Anything short of that reads `suppressed`.
+- **The two numbers are a setting.** `minimumGroupSize` in the configuration file sets other numbers. A number of zero turns its check off, and with both at zero nothing is withheld. See [Minimum group size](#minimum-group-size).
+- **With `assigneesBehindAFigure` at zero or one, a figure in a report can be the work of a single person.** The people are still not named, but anyone who knows who did the work can tell whose figure it is.
+- **A report written below the defaults says so.** When either number is below its default, a line under the report's heading gives the numbers in force, or says that small-group suppression is off. The method note of every report states the rule the report was written under.
+- **The rule lives in the database views.** `report` and `query` both read through them, so neither can show a figure that the numbers in force withhold.
 - **Opening the database file in another program bypasses the rule.** That program reads every table.
 
 ## Requirements
@@ -51,6 +54,16 @@ dotnet publish src/Telltale.Cli -c Release -o <install folder>
 That writes a `telltale` executable (`telltale.exe` on Windows) into the install folder. Add the folder to your `PATH`, or call the executable by its full path.
 
 To run from source without publishing, use `dotnet run --project src/Telltale.Cli -- <command>` in place of `telltale <command>`.
+
+### Upgrading
+
+A store written by a version from before the `minimumGroupSize` setting needs one `telltale derive` after upgrading, because the derived tables changed. Until then `report` and `query` stop with:
+
+```
+The derived data in the store was built by another version of this tool. Run derive first.
+```
+
+`derive` rebuilds the derived data from the raw data already in the store. It calls no Jira, and no `backfill` is needed. `telltale run` includes `derive`, so the next `run` does the same.
 
 ### Where files go
 
@@ -80,7 +93,7 @@ Run it from a working folder outside your clone of this repository, so the store
    telltale discover --site-url https://example.atlassian.net/ --board 42 --time-zone America/Chicago --backfill-start 2026-07-01
    ```
 
-3. **Review `config/telltale.json`.** Give every status a role (`not started`, `work`, `blocked` or `done`); at least one must be `done`. List the resolutions that mean an issue was abandoned, the company holidays, and the baseline sprint IDs.
+3. **Review `config/telltale.json`.** Give every status a role (`not started`, `work`, `blocked` or `done`); at least one must be `done`. List the resolutions that mean an issue was abandoned, the company holidays, and the baseline sprint IDs. `discover` wrote `minimumGroupSize` with its default numbers; leave it, or see [Minimum group size](#minimum-group-size).
 
 4. **Fetch the history.**
 
@@ -117,6 +130,8 @@ Writes `config/telltale.json` from what the Jira site says about the board. The 
 
 A rerun keeps what the file already says, and saves a backup of the file before rewriting it.
 
+A new file gets `minimumGroupSize` with five and three. A rerun never changes the setting: it keeps the numbers the file has, and does not add the setting to a file without it.
+
 ### `secrets set <jira-email|jira-api-token|hashing-salt>`
 
 Stores one secret in Windows Credential Manager. The value is asked for at a prompt, or piped in with `--stdin`; it is never taken as an argument.
@@ -138,11 +153,11 @@ Fetches what changed in Jira since the last `sync` or `backfill` and adds it to 
 
 ### `derive`
 
-Drops and rebuilds every derived table and view from the raw data: issue cycles, time in each status, sprint windows and the metric views. Run it after changing status roles, holidays, the time zone or the baseline sprint list.
+Drops and rebuilds every derived table and view from the raw data: issue cycles, time in each status, sprint windows and the metric views. Run it after changing `statusRoles`, `abandonedResolutionIds`, `holidays`, `timeZone`, `baselineSprintIds` or `minimumGroupSize`. It calls no Jira.
 
 ### `report [--sprint <id>]`
 
-Writes `reports/sprint-<id>.md` from the derived data. Without `--sprint` it reports on the most recently completed sprint. It refuses to run when the derived data is older than the raw data or was built under different settings, and says to run `derive`.
+Writes `reports/sprint-<id>.md` from the derived data. Without `--sprint` it reports on the most recently completed sprint. It refuses to run when the derived data is older than the raw data, was built under different settings or was built by another version of the tool, and says to run `derive`.
 
 ### `run [--sprint <id>]`
 
@@ -156,7 +171,7 @@ Runs one `SELECT` over the metric views and prints the rows as a markdown table.
 telltale query "SELECT * FROM delivered_per_sprint"
 ```
 
-The main views are `delivered_per_sprint`, `cycle_time_per_sprint_and_bucket`, `time_in_status_per_sprint`, `baseline_cycle_time_per_bucket`, `baseline_time_in_status` and `data_quality`.
+The main views are `delivered_per_sprint`, `cycle_time_per_sprint_and_bucket`, `time_in_status_per_sprint`, `baseline_cycle_time_per_bucket`, `baseline_time_in_status` and `data_quality`. `minimum_group_size` holds the two numbers the derived data was built under.
 
 ## Configuration file
 
@@ -185,7 +200,10 @@ The main views are `delivered_per_sprint`, `cycle_time_per_sprint_and_bucket`, `
   "holidays": ["2026-11-26", "2026-12-25"],
   // The earlier sprints to compare against. Choose them once and leave the list alone.
   // Optional; without it reports show no baseline.
-  "baselineSprintIds": ["41", "42", "43"]
+  "baselineSprintIds": ["41", "42", "43"],
+  // The smallest team a sprint needs, and the fewest distinct assignees a figure needs behind it.
+  // Zero turns that check off. Optional; without it the numbers are five and three.
+  "minimumGroupSize": { "team": 5, "assigneesBehindAFigure": 3 }
 }
 ```
 
@@ -203,6 +221,7 @@ The main views are `delivered_per_sprint`, `cycle_time_per_sprint_and_bucket`, `
 | `timeZone` | An IANA time zone ID of the form `Area/City`. | `"America/Chicago"` |
 | `holidays` | A list of dates, each as `"yyyy-MM-dd"`. May be empty. | `["2026-12-25"]` |
 | `baselineSprintIds` | A list of sprint IDs, each a quoted string of digits. Optional. | `["41", "42"]` |
+| `minimumGroupSize` | An object with the two numbers `team` and `assigneesBehindAFigure`. Each is a whole number of zero or more, written in plain digits, not quoted, with no fraction and no exponent, and no greater than 2,147,483,647. Optional; when it is present both numbers are required. | `{ "team": 5, "assigneesBehindAFigure": 3 }` |
 
 Things that are refused when the file is loaded, with a message that names the file:
 
@@ -210,12 +229,48 @@ Things that are refused when the file is loaded, with a message that names the f
 - **A sprint's name** in place of its ID. The ID is the number in the sprint's address in Jira (`sprint=41`).
 - **A time zone abbreviation or offset**, such as `CST` or `UTC-6`. Neither carries the daylight-saving rules that business days depend on. US zones are `America/New_York`, `America/Chicago`, `America/Denver`, `America/Phoenix` and `America/Los_Angeles`.
 - **Any other date form**, such as `"11/26/2026"` or a date with a time.
+- **A `minimumGroupSize` number that is not a whole number of zero or more in plain digits**: a negative number, a fraction (`2.5`, and `5.0` as well), an exponent (`1e1`), a number greater than 2,147,483,647, a quoted number (`"5"`), `null`, `true` or `false`. The message names the number, for example `minimumGroupSize.team must be written as a whole number of zero or more.`
+- **`minimumGroupSize` with one of its numbers missing, or written as anything but an object**, such as `null`, `false`, `0` or `"off"`. To turn the rule off, write both numbers as zero. For five and three, leave the setting out.
+- **Any other name inside `minimumGroupSize`**, including `team` with another capitalization: `minimumGroupSize.cohort is not a setting the tool knows.`
+- **A `minimumGroupSize` number written twice**: `minimumGroupSize.team is written twice.`
 
 About `holidays`:
 
 - List one entry per day. There is no range form and no "every year" form, so list each year you need.
 - Cover the period of the baseline sprints as well as the current one; their cycle times are counted in business days too.
 - Weekends are already left out. When a holiday falls on a weekend and the company observes it on a weekday, list the weekday.
+
+### Minimum group size
+
+`minimumGroupSize` holds the two numbers of the rule that withholds figures resting on few people:
+
+- `team`: the fewest distinct assignees a sprint needs. A sprint with fewer reads `suppressed` for its delivered count and both tables.
+- `assigneesBehindAFigure`: the fewest distinct assignees among the issues one figure is computed from. It governs two things:
+  - A row of either table with fewer assignees behind it keeps its issue count and reads `suppressed` for its figures.
+  - A sprint with fewer assignees among its delivered issues reads `suppressed` for its delivered count, and its cycle time table reads `suppressed` with no rows and no counts. Its time in status table keeps its rows.
+
+Without the setting the numbers are five and three, and writing five and three gives the same reports as leaving it out. The numbers apply to the baseline sprints and to the footer's two counts as well.
+
+To change the rule, write other numbers. Any two whole numbers from zero to 2,147,483,647 are accepted, above the defaults as well as below, and the number behind a figure may be greater than the team number.
+
+To turn one check off, write zero for it. With both at zero the rule is off and no report reads `suppressed` anywhere:
+
+```jsonc
+"minimumGroupSize": { "team": 0, "assigneesBehindAFigure": 0 }
+```
+
+One is not zero. With `assigneesBehindAFigure` at 1, a row made only of unassigned issues is still withheld, and so is a footer count with nobody behind it.
+
+After changing the setting, run `telltale derive`, or `telltale run`, which includes it. Until then `report` and `query` stop with `minimumGroupSize in the configuration file changed since the derived data was built. Run derive first.` No `backfill` is needed.
+
+What a report then shows:
+
+- **Either number below its default:** a line under the heading gives both numbers and says what that allows. With four and two the whole line is `Minimum group size in this report: a minimum team of four (below the default of five) and a minimum of two assignees behind a figure (below the default of three). A sprint whose team is smaller than the default allows is not withheld as a whole, and a figure may rest on the work of fewer people than the default allows.`
+- **Both numbers zero:** the line reads `Small-group suppression is off: a figure in this report may rest on the work of one or two people.`
+- **Both numbers at or above their defaults:** no line.
+- **In every case:** the method note describes the rule with the numbers in force, or says that small-group suppression is off.
+
+The setting changes only this rule. Person fields are still hashed before they are stored, and no report or view is grouped by person.
 
 ## Development
 
