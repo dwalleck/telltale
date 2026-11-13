@@ -29,6 +29,7 @@ Reporting no per-person results is a hard constraint of the design. Withholding 
 - **No per-person results.** Jira account IDs are hashed with a secret salt before storage. Names, emails and issue keys are not stored. No setting changes this.
 - **Small groups are withheld by default.** A sprint needs a team of at least five, and a figure needs at least three distinct assignees behind it. Anything short of that reads `suppressed`.
 - **The two numbers are a setting.** `minimumGroupSize` in the configuration file sets other numbers. A number of zero turns its check off, and with both at zero nothing is withheld. See [Minimum group size](#minimum-group-size).
+- **With `assigneesBehindAFigure` at zero or one, a figure in a report can be the work of a single person.** The people are still not named, but anyone who knows who did the work can tell whose figure it is.
 - **A report written below the defaults says so.** When either number is below its default, a line under the report's heading gives the numbers in force, or says that small-group suppression is off. The method note of every report states the rule the report was written under.
 - **The rule lives in the database views.** `report` and `query` both read through them, so neither can show a figure that the numbers in force withhold.
 - **Opening the database file in another program bypasses the rule.** That program reads every table.
@@ -62,7 +63,7 @@ A store written by a version from before the `minimumGroupSize` setting needs on
 The derived data in the store was built by another version of this tool. Run derive first.
 ```
 
-`derive` rebuilds the derived data from the raw data already in the store. It calls no Jira and needs no secrets, and no `backfill` is needed. `telltale run` includes `derive`, so the next `run` does the same.
+`derive` rebuilds the derived data from the raw data already in the store. It calls no Jira, and no `backfill` is needed. `telltale run` includes `derive`, so the next `run` does the same.
 
 ### Where files go
 
@@ -152,7 +153,7 @@ Fetches what changed in Jira since the last `sync` or `backfill` and adds it to 
 
 ### `derive`
 
-Drops and rebuilds every derived table and view from the raw data: issue cycles, time in each status, sprint windows and the metric views. Run it after changing status roles, holidays, the time zone, the baseline sprint list or the minimum group size. It calls no Jira and needs no secrets.
+Drops and rebuilds every derived table and view from the raw data: issue cycles, time in each status, sprint windows and the metric views. Run it after changing `statusRoles`, `abandonedResolutionIds`, `holidays`, `timeZone`, `baselineSprintIds` or `minimumGroupSize`. It calls no Jira.
 
 ### `report [--sprint <id>]`
 
@@ -220,7 +221,7 @@ The main views are `delivered_per_sprint`, `cycle_time_per_sprint_and_bucket`, `
 | `timeZone` | An IANA time zone ID of the form `Area/City`. | `"America/Chicago"` |
 | `holidays` | A list of dates, each as `"yyyy-MM-dd"`. May be empty. | `["2026-12-25"]` |
 | `baselineSprintIds` | A list of sprint IDs, each a quoted string of digits. Optional. | `["41", "42"]` |
-| `minimumGroupSize` | An object with the two numbers `team` and `assigneesBehindAFigure`, each a whole number of zero or more, not quoted. Optional; when it is present both numbers are required. | `{ "team": 5, "assigneesBehindAFigure": 3 }` |
+| `minimumGroupSize` | An object with the two numbers `team` and `assigneesBehindAFigure`. Each is a whole number of zero or more, written in plain digits, not quoted, with no fraction and no exponent, and no greater than 2,147,483,647. Optional; when it is present both numbers are required. | `{ "team": 5, "assigneesBehindAFigure": 3 }` |
 
 Things that are refused when the file is loaded, with a message that names the file:
 
@@ -228,8 +229,10 @@ Things that are refused when the file is loaded, with a message that names the f
 - **A sprint's name** in place of its ID. The ID is the number in the sprint's address in Jira (`sprint=41`).
 - **A time zone abbreviation or offset**, such as `CST` or `UTC-6`. Neither carries the daylight-saving rules that business days depend on. US zones are `America/New_York`, `America/Chicago`, `America/Denver`, `America/Phoenix` and `America/Los_Angeles`.
 - **Any other date form**, such as `"11/26/2026"` or a date with a time.
-- **A `minimumGroupSize` number that is not a whole number of zero or more**: a negative number, a fraction (`2.5`, and `5.0` as well), a quoted number (`"5"`), `null`, `true` or `false`. The message names the number, for example `minimumGroupSize.team must be written as a whole number of zero or more.`
+- **A `minimumGroupSize` number that is not a whole number of zero or more in plain digits**: a negative number, a fraction (`2.5`, and `5.0` as well), an exponent (`1e1`), a number greater than 2,147,483,647, a quoted number (`"5"`), `null`, `true` or `false`. The message names the number, for example `minimumGroupSize.team must be written as a whole number of zero or more.`
 - **`minimumGroupSize` with one of its numbers missing, or written as anything but an object**, such as `null`, `false`, `0` or `"off"`. To turn the rule off, write both numbers as zero. For five and three, leave the setting out.
+- **Any other name inside `minimumGroupSize`**, including `team` with another capitalization: `minimumGroupSize.cohort is not a setting the tool knows.`
+- **A `minimumGroupSize` number written twice**: `minimumGroupSize.team is written twice.`
 
 About `holidays`:
 
@@ -242,11 +245,13 @@ About `holidays`:
 `minimumGroupSize` holds the two numbers of the rule that withholds figures resting on few people:
 
 - `team`: the fewest distinct assignees a sprint needs. A sprint with fewer reads `suppressed` for its delivered count and both tables.
-- `assigneesBehindAFigure`: the fewest distinct assignees among the issues one figure is computed from. A row with fewer keeps its issue count and reads `suppressed` for its figures.
+- `assigneesBehindAFigure`: the fewest distinct assignees among the issues one figure is computed from. It governs two things:
+  - A row of either table with fewer assignees behind it keeps its issue count and reads `suppressed` for its figures.
+  - A sprint with fewer assignees among its delivered issues reads `suppressed` for its delivered count, and its cycle time table reads `suppressed` with no rows and no counts. Its time in status table keeps its rows.
 
 Without the setting the numbers are five and three, and writing five and three gives the same reports as leaving it out. The numbers apply to the baseline sprints and to the footer's two counts as well.
 
-To change the rule, write other numbers. Any two whole numbers of zero or more are accepted, above the defaults as well as below, and the number behind a figure may be greater than the team number.
+To change the rule, write other numbers. Any two whole numbers from zero to 2,147,483,647 are accepted, above the defaults as well as below, and the number behind a figure may be greater than the team number.
 
 To turn one check off, write zero for it. With both at zero the rule is off and no report reads `suppressed` anywhere:
 
@@ -260,7 +265,7 @@ After changing the setting, run `telltale derive`, or `telltale run`, which incl
 
 What a report then shows:
 
-- **Either number below its default:** a line under the heading gives both numbers and says what that allows, for example `Minimum group size in this report: a minimum team of four (below the default of five) and a minimum of two assignees behind a figure (below the default of three).`
+- **Either number below its default:** a line under the heading gives both numbers and says what that allows. With four and two the whole line is `Minimum group size in this report: a minimum team of four (below the default of five) and a minimum of two assignees behind a figure (below the default of three). A sprint whose team is smaller than the default allows is not withheld as a whole, and a figure may rest on the work of fewer people than the default allows.`
 - **Both numbers zero:** the line reads `Small-group suppression is off: a figure in this report may rest on the work of one or two people.`
 - **Both numbers at or above their defaults:** no line.
 - **In every case:** the method note describes the rule with the numbers in force, or says that small-group suppression is off.
