@@ -35,11 +35,14 @@ public sealed record TelltaleSettings
 
     public required IReadOnlyList<DateOnly> Holidays { get; init; }
 
+    /// <summary>The threshold of every status checked for brief visits (GLOSSARY: Brief visit), by status ID. Empty when nothing is checked.</summary>
+    public required IReadOnlyDictionary<string, TimeSpan> BriefVisitThresholds { get; init; }
+
     /// <summary>The settings as a rebuild records them, apart from the raw data's digest: see <see cref="DerivedFrom"/>.</summary>
     private DerivedSource Recorded { get; init; } = new("", "", "", "", "", "", MinimumGroupSize.Default.Team, MinimumGroupSize.Default.AssigneesBehindAFigure);
 
     /// <summary>Everything a rebuild is decided with besides the raw data and the as-of time.</summary>
-    public DerivationSettings Derivation => new(new DeliveryRules(StatusRoles, AbandonedResolutionIds), new BusinessCalendar(TimeZone, Holidays));
+    public DerivationSettings Derivation => new(new DeliveryRules(StatusRoles, AbandonedResolutionIds), new BusinessCalendar(TimeZone, Holidays)) { BriefVisitThresholds = BriefVisitThresholds };
 
     /// <summary>What a rebuild of raw data with the digest <paramref name="rawDigest"/> under these settings is built from.</summary>
     public DerivedSource DerivedFrom(string rawDigest) => Recorded with { RawDigest = rawDigest };
@@ -67,6 +70,7 @@ public sealed record TelltaleSettings
         var timeZone = SettingRules.FindTimeZone(config.TimeZone)
             ?? throw new SettingRefusedException($"timeZone: '{config.TimeZone}' is not a known IANA time zone ID.");
         var minimumGroupSize = CheckedMinimumGroupSize(config.MinimumGroupSize ?? MinimumGroupSize.Default);
+        var briefVisitThresholds = CheckedBriefVisitThresholds(config.BriefVisitThresholds);
 
         return new TelltaleSettings
         {
@@ -76,6 +80,7 @@ public sealed record TelltaleSettings
             BaselineSprintIds = baselineSprintIds,
             TimeZone = timeZone,
             Holidays = config.Holidays,
+            BriefVisitThresholds = briefVisitThresholds.ToDictionary(listed => listed.Key, listed => TimeSpan.FromMinutes(listed.Value), StringComparer.Ordinal),
             Recorded = new DerivedSource(
                 RawDigest: "",
                 config.TimeZone,
@@ -84,7 +89,10 @@ public sealed record TelltaleSettings
                 string.Join(",", config.StatusRoles.Select(status => $"{status.Key}={status.Value}")),
                 string.Join(",", abandonedResolutionIds.Order(StringComparer.Ordinal)),
                 minimumGroupSize.Team,
-                minimumGroupSize.AssigneesBehindAFigure),
+                minimumGroupSize.AssigneesBehindAFigure)
+            {
+                BriefVisitThresholds = DerivedSource.BriefVisitThresholdsOf(briefVisitThresholds),
+            },
         };
     }
 
@@ -116,6 +124,12 @@ public sealed record TelltaleSettings
 
         return minimumGroupSize;
     }
+
+    /// <summary>
+    /// <c>briefVisitThresholds</c>: status ID to threshold in minutes (owner decisions D58, D59). The one place
+    /// the setting is checked; what is refused of it is refused here.
+    /// </summary>
+    private static IReadOnlyDictionary<string, double> CheckedBriefVisitThresholds(IReadOnlyDictionary<string, double> thresholds) => thresholds;
 
     private static JiraConfig CheckedJira(JiraConfig jira)
     {

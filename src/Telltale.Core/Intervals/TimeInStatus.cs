@@ -42,15 +42,7 @@ public static class TimeInStatus
         BusinessCalendar calendar,
         DateTimeOffset asOf)
     {
-        var window = sprint.Resolve(asOf);
-
-        var slices = membership
-            .Where(m => m.SprintId == sprint.SprintId)
-            .Select(m => m.Resolve(asOf).Intersect(window))
-            .Where(slice => slice.HasValue)
-            .Select(slice => slice!.Value)
-            .ToList();
-
+        var slices = CountedTime(sprint, membership, asOf);
         var totals = new Dictionary<string, StatusDuration>(StringComparer.Ordinal);
 
         foreach (var status in statuses)
@@ -67,5 +59,20 @@ public static class TimeInStatus
         }
 
         return totals;
+    }
+
+    /// <summary>
+    /// The time one issue's history counts toward one sprint: the periods it was a member of the sprint, clipped
+    /// to the sprint's window. Stated once, for the time in status and for which brief visits count toward the
+    /// sprint (<see cref="BriefVisits.ForSprint"/>).
+    /// </summary>
+    public static IReadOnlyList<Interval> CountedTime(SprintWindow sprint, IEnumerable<MembershipInterval> membership, DateTimeOffset asOf)
+    {
+        var window = sprint.Resolve(asOf);
+        return [.. membership
+            .Where(m => m.SprintId == sprint.SprintId)
+            .Select(m => m.Resolve(asOf).Intersect(window))
+            .Where(slice => slice.HasValue)
+            .Select(slice => slice!.Value)];
     }
 }

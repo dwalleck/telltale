@@ -342,6 +342,13 @@ public sealed class PipelineSteps
             throw new UserFacingException("minimumGroupSize in the configuration file changed since the derived data was built. Run derive first.");
         }
 
+        // brief_visit and the view over it were built under the thresholds the last derive recorded. Deriving
+        // again is all it takes: the thresholds decide nothing about what is fetched.
+        if (derivedFrom.BriefVisitThresholds != current.BriefVisitThresholds)
+        {
+            throw new UserFacingException("briefVisitThresholds in the configuration file changed since the derived data was built. Run derive first.");
+        }
+
         // Each check above compares the fields it knows and says which setting changed. This one compares the
         // two records whole, so that a field added later and forgotten above still stops the command: the
         // message is less exact, and stale derived data is never passed off as current.

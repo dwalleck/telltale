@@ -83,6 +83,10 @@ public static class SprintReport
         var quality = await ReadDataQualityAsync(store, cancellationToken);
         AppendMethodNote(report, quality, numbers, baselineSprintIds, withheldBaselineSprints);
         AppendFooter(report, quality);
+        AppendBriefVisits(report, await store.QueryViewsAsync<BriefVisitsRow>(
+            "SELECT status_name, threshold_minutes, brief_visit_issue_count, suppressed FROM brief_visits_per_sprint WHERE sprint_id = @sprintId ORDER BY board_position;",
+            new { sprintId },
+            cancellationToken));
         return report.ToString();
     }
 
@@ -355,6 +359,29 @@ public static class SprintReport
     }
 
     /// <summary>
+    /// The footer's brief visit lines (GLOSSARY: Brief visit; owner decision D61), after its other lines: one
+    /// per row of the view, so one per listed status that has a row in the sprint's time in status table, in
+    /// board order. A line names the status and states its threshold. The view withholds a count as it does
+    /// every figure, and a count of nothing with it, so the two read alike.
+    /// </summary>
+    private static void AppendBriefVisits(StringBuilder report, IReadOnlyList<BriefVisitsRow> rows)
+    {
+        foreach (var row in rows)
+        {
+            var threshold = $"{row.ThresholdMinutes.ToString("R", CultureInfo.InvariantCulture)} {(row.ThresholdMinutes == 1 ? "minute" : "minutes")}";
+            report.Append("- ").Append(Markdown.Text(row.StatusName)).Append(": ");
+            if (row.Suppressed == 0 && row.BriefVisitIssueCount is { } issues)
+            {
+                report.Append(issues.ToString(CultureInfo.InvariantCulture)).Append(issues == 1 ? " issue" : " issues").Append(" had a visit shorter than ").Append(threshold).Append('\n');
+            }
+            else
+            {
+                report.Append("issues with a visit shorter than ").Append(threshold).Append(": ").Append(Suppressed).Append('\n');
+            }
+        }
+    }
+
+    /// <summary>
     /// The head of a table. Every table of the report has this layout: what a row is about in the first
     /// column, and figures in the others, aligned right.
     /// </summary>
@@ -440,6 +467,14 @@ public static class SprintReport
         public string TimeZone { get; init; } = "";
         public long? AnomalyIssueCount { get; init; }
         public long? DeliveredBetweenSprintsCount { get; init; }
+        public long Suppressed { get; init; } = 1;
+    }
+
+    private sealed class BriefVisitsRow
+    {
+        public string StatusName { get; init; } = "";
+        public double ThresholdMinutes { get; init; }
+        public long? BriefVisitIssueCount { get; init; }
         public long Suppressed { get; init; } = 1;
     }
 

@@ -79,6 +79,13 @@ public sealed record IssueMembershipInterval(string IssueId, string SprintId, Da
 public sealed record SprintStatusTime(string IssueId, string SprintId, string StatusId, TimeSpan CalendarTime, TimeSpan BusinessTime, double BusinessDays);
 
 /// <summary>
+/// One issue has at least one brief visit to one status that counts toward one sprint (GLOSSARY: Brief visit;
+/// <see cref="Intervals.BriefVisits.ForSprint"/>). It holds the three IDs and nothing else: no duration, no
+/// time, no number of visits.
+/// </summary>
+public sealed record SprintBriefVisit(string IssueId, string SprintId, string StatusId);
+
+/// <summary>
 /// A status the configuration gives a role, with its place in board order (the order the configuration
 /// lists the statuses in, from 1) and whether its role is done.
 /// </summary>
@@ -140,6 +147,17 @@ public sealed record DerivedSource(
     long MinimumTeam,
     long MinimumAssigneesBehindAFigure)
 {
+    /// <summary>
+    /// The brief visit thresholds (GLOSSARY: Brief visit) as a JSON object of status ID to minutes, the IDs in
+    /// order, e.g. <c>{"10001":5,"10005":0.5}</c>; <c>{}</c> when no status is checked. The metric view
+    /// <c>brief_visits_per_sprint</c> reads the listed statuses and their thresholds from the rebuild's record.
+    /// </summary>
+    public string BriefVisitThresholds { get; init; } = "{}";
+
+    /// <summary><see cref="BriefVisitThresholds"/> for thresholds in minutes by status ID: the form the store keeps and the view reads.</summary>
+    public static string BriefVisitThresholdsOf(IReadOnlyDictionary<string, double> minutesByStatusId) =>
+        System.Text.Json.JsonSerializer.Serialize(new SortedDictionary<string, double>(minutesByStatusId.ToDictionary(), StringComparer.Ordinal));
+
     /// <summary><see cref="BaselineSprintIds"/> for a list of sprint IDs: the form the store keeps and the views read.</summary>
     public static string BaselineSprintIdsOf(IEnumerable<string> sprintIds) =>
         System.Text.Json.JsonSerializer.Serialize(sprintIds.Order(StringComparer.Ordinal));
@@ -165,4 +183,7 @@ public sealed record DerivedData(
     /// time nor a planned end (owner decision D51). They are in no derived table; the run names them.
     /// </summary>
     public IReadOnlyList<string> ClosedSprintsWithoutAnEnd { get; init; } = [];
+
+    /// <summary>The brief visits counted toward a sprint: at most one per issue, sprint and status. Empty when no status is checked.</summary>
+    public IReadOnlyList<SprintBriefVisit> BriefVisits { get; init; } = [];
 }

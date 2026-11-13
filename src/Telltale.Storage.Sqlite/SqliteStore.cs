@@ -429,14 +429,22 @@ public sealed class SqliteStore : ITelltaleStore
             connection,
             transaction,
             """
-            INSERT INTO run (as_of, raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure, objects_version)
-            VALUES (@asOf, @rawDigest, @timeZone, @holidays, @baselineSprintIds, @statusRoles, @abandonedResolutionIds, @minimumTeam, @minimumAssigneesBehindAFigure, @objectsVersion);
+            INSERT INTO run (as_of, raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure, brief_visit_thresholds, objects_version)
+            VALUES (@asOf, @rawDigest, @timeZone, @holidays, @baselineSprintIds, @statusRoles, @abandonedResolutionIds, @minimumTeam, @minimumAssigneesBehindAFigure, @briefVisitThresholds, @objectsVersion);
             """,
-            ["@asOf", "@rawDigest", "@timeZone", "@holidays", "@baselineSprintIds", "@statusRoles", "@abandonedResolutionIds", "@minimumTeam", "@minimumAssigneesBehindAFigure", "@objectsVersion"],
+            ["@asOf", "@rawDigest", "@timeZone", "@holidays", "@baselineSprintIds", "@statusRoles", "@abandonedResolutionIds", "@minimumTeam", "@minimumAssigneesBehindAFigure", "@briefVisitThresholds", "@objectsVersion"],
             [[
                 StoredTime.ToStored(derived.AsOf), source.RawDigest, source.TimeZone, source.Holidays, source.BaselineSprintIds, source.StatusRoles, source.AbandonedResolutionIds,
-                source.MinimumTeam, source.MinimumAssigneesBehindAFigure, DerivedObjectsVersion,
+                source.MinimumTeam, source.MinimumAssigneesBehindAFigure, source.BriefVisitThresholds, DerivedObjectsVersion,
             ]],
+            cancellationToken);
+
+        await ExecuteForEachRowAsync(
+            connection,
+            transaction,
+            "INSERT INTO brief_visit (issue_id, sprint_id, status_id) VALUES (@issueId, @sprintId, @statusId);",
+            ["@issueId", "@sprintId", "@statusId"],
+            derived.BriefVisits.Select(visit => new object?[] { visit.IssueId, visit.SprintId, visit.StatusId }),
             cancellationToken);
 
         await ExecuteForEachRowAsync(
@@ -477,9 +485,15 @@ public sealed class SqliteStore : ITelltaleStore
 
         // Another version's table can lack a column read here, so its version is asked first.
         await RequireDerivedByThisVersionAsync(connection, cancellationToken);
-        return await connection.QuerySingleOrDefaultAsync<DerivedSource?>(Command(
+        var source = await connection.QuerySingleOrDefaultAsync<DerivedSource?>(Command(
             cancellationToken,
             "SELECT raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure FROM run;"));
+
+        // The row is mapped through the record's constructor, which takes exactly the columns above. What the
+        // record holds besides is read on its own.
+        return source is null
+            ? null
+            : source with { BriefVisitThresholds = await connection.QuerySingleAsync<string>(Command(cancellationToken, "SELECT brief_visit_thresholds FROM run;")) };
     }
 
     /// <summary>
