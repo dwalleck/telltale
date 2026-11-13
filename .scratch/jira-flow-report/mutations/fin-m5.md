@@ -21,3 +21,4 @@ Claim (C4, D48): report and query refuse a store filled under other collection s
 - Verified 2026-11-12 at cf5da5b: red, 7 failed of 55 (Pipeline, filter /*/*/(IncrementalSyncTests|QueryCommandTests)/*); restored.
 - Verified 2026-11-12 at bc92ab3: red, 7 failed of 55 (Pipeline, filter /*/*/(IncrementalSyncTests|QueryCommandTests)/*); restored.
 - Verified 2026-11-12 at 1830824: red, 7 failed of 55 (Pipeline, filter /*/*/(IncrementalSyncTests|QueryCommandTests)/*); restored.
+- Verified 2026-11-13 at d534f7f: red, 7 failed of 55 (Pipeline, filter /*/*/(IncrementalSyncTests|QueryCommandTests)/*); restored.

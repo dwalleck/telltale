@@ -17,3 +17,4 @@ Claim (owner decision D55): the time-in-status counts of a sprint whose delivere
 - Verified 2026-11-12 at cf5da5b: red, 1 failed of 17 (Pipeline, filter /*/*/SuppressionTests/*); restored.
 - Re-pointed 2026-11-12 by fin (final fix pass): sprint_team names its team check team_suppressed (review round 4, finding 28).
 - Verified 2026-11-12 at bc92ab3: red, 1 failed of 17 (Pipeline, filter /*/*/SuppressionTests/*); restored.
+- Verified 2026-11-13 at d534f7f: red, 1 failed of 17 (Pipeline, filter /*/*/SuppressionTests/*); restored.

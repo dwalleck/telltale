@@ -21,3 +21,4 @@ Claim (C4): derive refuses a store filled under another site, board, project lis
 - Verified 2026-11-12 at cf5da5b: red, 6 failed of 30 (Pipeline, filter /*/*/IncrementalSyncTests/*); restored.
 - Verified 2026-11-12 at bc92ab3: red, 6 failed of 30 (Pipeline, filter /*/*/IncrementalSyncTests/*); restored.
 - Verified 2026-11-12 at 1830824: red, 6 failed of 30 (Pipeline, filter /*/*/IncrementalSyncTests/*); restored.
+- Verified 2026-11-13 at d534f7f: red, 6 failed of 30 (Pipeline, filter /*/*/IncrementalSyncTests/*); restored.
