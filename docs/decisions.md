@@ -1,10 +1,10 @@
 # Owner decisions: the Jira flow report
 
-Code comments, tests, tickets and the spec cite the owner's decisions by number ("owner decision D49"). This is the list. D1 to D69 were made on 2026-11-12: D1 to D57 while the first spec was built, D64 to D69 afterwards, for the optional suppression spec (`.scratch/optional-suppression/spec.md`). Two things were decided on 2026-11-13, while that spec was built: D70, and the change to D66 that its row records. Each line gives the decision and where its full wording is; the tickets are in `.scratch/jira-flow-report/issues/`.
+Code comments, tests, tickets and the spec cite the owner's decisions by number ("owner decision D49"). This is the list. D1 to D69 were made on 2026-11-12: D1 to D57 while the first spec was built, and D58 to D69 afterwards, after the first run on real data: D58 to D63 for the brief status visits spec (`.scratch/brief-status-visits/spec.md`) and D64 to D69 for the optional suppression spec (`.scratch/optional-suppression/spec.md`). Two things were decided on 2026-11-13, while that spec was built: D70, and the change to D66 that its row records. Each line gives the decision and where its full wording is; the tickets are in `.scratch/jira-flow-report/issues/`.
 
 A decision that changes a metric definition is also in `GLOSSARY.md`, in a commit that gives the reason.
 
-Some numbers are missing because the decision was about the build run itself and nothing in the repository cites it (D1, D10, D11), because it was withdrawn (D46), or because it belongs to a spec that is not built yet (D58 to D63, the brief status visits spec, `.scratch/brief-status-visits/`).
+Some numbers are missing because the decision was about the build run itself and nothing in the repository cites it (D1, D10, D11), or because it was withdrawn (D46).
 
 ## Collection
 
@@ -72,6 +72,19 @@ D5 to D56 describe the rule with its default numbers, five and three. They apply
 | D67 | Every report's method note states the numbers in force. A report written with either number below its default also says so in a line under its heading. | optional suppression spec |
 | D68 | Hashing of person fields, the fields that are never stored, and the absence of any per-person view do not depend on the setting. | optional suppression spec, ADR-0008 |
 | D69 | `discover` writes the setting with five and three into a new configuration file and never changes it afterwards. | optional suppression spec |
+
+## Data quality
+
+D58 to D63 were made on 2026-11-12, after the first run on real data had shown issues passing through a work status in seconds. They add a count of how often that happens and change no existing figure. The rule is a description of data quality set with knowledge of results, not a success criterion. The term is the "Brief visit" entry of `GLOSSARY.md`; the owner confirmed four readings of these decisions on the same day, and they are in the spec.
+
+| # | Decision | Full wording |
+| --- | --- | --- |
+| D58 | The statuses to check and their thresholds are one optional configuration setting, `briefVisitThresholds`: a dictionary of status ID to threshold. A status not listed is not checked. | brief status visits spec |
+| D59 | A threshold is elapsed clock time in minutes, written as a number. It is not business time. | brief status visits spec |
+| D60 | A visit is one unbroken stay in a status, measured over the issue's whole history and not clipped to a sprint window or to sprint membership. A stay the issue is still in is not a visit for this rule. A visit is brief when it is shorter than the status's threshold. | brief status visits spec, `GLOSSARY.md` |
+| D61 | The report shows, per sprint and per listed status, the number of issues in that status's time in status row that have at least one brief visit. It is shown in the data quality footer. No existing figure changes. | brief status visits spec, `GLOSSARY.md` |
+| D62 | The count is withheld when the row's median is withheld, and also when fewer than three distinct assignees are behind the counted issues. | brief status visits spec, `GLOSSARY.md` |
+| D63 | There is no baseline count. A baseline sprint's counts are seen by reporting on that sprint. | brief status visits spec |
 
 ## Commands, configuration and secrets
 

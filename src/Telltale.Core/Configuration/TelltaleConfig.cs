@@ -46,6 +46,13 @@ public sealed record TelltaleConfig
     /// When it is present, both numbers are required.
     /// </summary>
     public MinimumGroupSize? MinimumGroupSize { get; init; }
+
+    /// <summary>
+    /// The statuses checked for brief visits (GLOSSARY: Brief visit), by status ID, each with its threshold: the
+    /// shortest believable stay in minutes of clock time, e.g. <c>{ "10001": 5 }</c> (owner decisions D58, D59).
+    /// A status not listed is not checked. The setting may be left out or empty: then nothing is checked.
+    /// </summary>
+    public IReadOnlyDictionary<string, double> BriefVisitThresholds { get; init; } = new Dictionary<string, double>();
 }
 
 /// <summary>Where the team's work lives in Jira.</summary>
