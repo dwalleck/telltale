@@ -6,22 +6,36 @@ Spec: `../spec.md` (owner decisions D59, D60, D61; the confirmed reading "Which 
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A stay just under the threshold counts; a stay exactly at the threshold does not; a stay just over does not
-- [ ] A stay whose start and end are the same instant counts
-- [ ] A stay the issue is still in is not counted, however short it is so far
-- [ ] An issue with two brief visits to one status is counted once for that status
-- [ ] An issue with brief visits to two listed statuses is counted once under each
-- [ ] A long stay cut to seconds by the sprint's start or end is not counted
-- [ ] A long stay cut to seconds by the issue joining or leaving the sprint is not counted
-- [ ] A stay that spans a weekend or a holiday and is longer than the threshold by the clock is not counted, however little business time it holds
-- [ ] A brief visit that falls entirely on a weekend, in an issue that is in the status's row through other time in the sprint, is handled as the overlap rule says, and a test states which way and why
-- [ ] A brief visit made in an earlier sprint does not count the issue in a later sprint where its stay was long
-- [ ] A brief visit to a status that is not listed gives no line and no row
-- [ ] Two listed statuses with different thresholds are each judged by their own
-- [ ] A fractional threshold (half a minute) is applied as written
-- [ ] A daylight-saving change inside a stay does not change its length: clock time is the difference between the two instants
-- [ ] The interval rule and the overlap rule are covered by pure-function tests; the cases above are also asserted through the report or `query`
-- [ ] If the overlap rule cannot be applied to a case as the spec words it, the case is reported as a decision needed and not settled in code
-- [ ] All fixtures are synthetic
+- [x] A stay just under the threshold counts; a stay exactly at the threshold does not; a stay just over does not
+- [x] A stay whose start and end are the same instant counts
+- [x] A stay the issue is still in is not counted, however short it is so far
+- [x] An issue with two brief visits to one status is counted once for that status
+- [x] An issue with brief visits to two listed statuses is counted once under each
+- [x] A long stay cut to seconds by the sprint's start or end is not counted
+- [x] A long stay cut to seconds by the issue joining or leaving the sprint is not counted
+- [x] A stay that spans a weekend or a holiday and is longer than the threshold by the clock is not counted, however little business time it holds
+- [x] A brief visit that falls entirely on a weekend, in an issue that is in the status's row through other time in the sprint, is handled as the overlap rule says, and a test states which way and why
+- [x] A brief visit made in an earlier sprint does not count the issue in a later sprint where its stay was long
+- [x] A brief visit to a status that is not listed gives no line and no row
+- [x] Two listed statuses with different thresholds are each judged by their own
+- [x] A fractional threshold (half a minute) is applied as written
+- [x] A daylight-saving change inside a stay does not change its length: clock time is the difference between the two instants
+- [x] The interval rule and the overlap rule are covered by pure-function tests; the cases above are also asserted through the report or `query`
+- [x] If the overlap rule cannot be applied to a case as the spec words it, the case is reported as a decision needed and not settled in code
+- [x] All fixtures are synthetic
+
+## Comments
+
+Resolved 2026-11-13. Merged into `spec/brief-status-visits` as 2c34234 (source `ticket/bv-02-which-visits-count` at a283916; commits 3930fa6, c206419, f1deab1, bfc9826, 29a659a, ac47ee0, 58e7a14, a283916), after ticket 04 (2bf4301). The merge had no conflict in the text. One record was changed inside the merge: 02-m7, see "Mutations".
+
+- Checks: the merged tree differs from the source tree, because it also holds ticket 04, so the full check ran at merge (record `merge-02-record.json` in the integration tree, base 95f0d38): Core 153 and Pipeline 893 passed, 0 failed, 0 skipped, 0 warnings, format, line endings and the SQL line endings pass. The implementer's own full check on a283916 (record `bv02-r1-record.json`, base c1d8b72) passed too.
+- Mutations: 11 new records under `.scratch/brief-status-visits/mutations/`, 02-m1 to 02-m11, all active and red (first red at c206419). They stand in for red-first runs: ticket 01 had built the rule, so most of this ticket's tests passed when first run. Re-pointed by the implementer after the review fixes, the mutation unchanged, each red: 02-m3 and 02-m9 (the stays line in `Derivation`), 02-m4, 02-m10 and 02-m11 (the overlap rule), at ac47ee0; jira-flow-report 03-m11, 03-m12 and 03-m17 (the `entries.Add` line in `StatusTimeline.Build` gained `MovedToCreation`), at 58e7a14. Rerun red at ac47ee0 because existing test bodies in their filter's class changed: 02-m1, 02-m8. Re-pointed by the merger, inside the merge commit: 02-m7 found the `TimeSpan.FromMinutes` line in `TelltaleSettings.cs`, which ticket 04 replaced; it now finds `? TimeSpan.FromTicks((long)Math.Round(steps))` in `CheckedBriefVisitThreshold` and replaces it with `? TimeSpan.FromMinutes(Math.Ceiling(minutes))`, the same mutation (a fractional threshold is rounded up to a whole minute). Rerun at merge, the records whose files the merge changed relative to the source, all red: 01-m10, 02-m7 (2 failed of 24), 04-m1 to 04-m8. 02-m7's verdict line is committed as 4aa518f (red at 2c34234, 2 of 24; it was 1 of 21 before, and both cases of the half-minute test fail now because the footer prints the threshold that is applied). `-ValidateOnly` passes for all three features at 4aa518f (30, 279 and 48 edits).
+- Review (root's `code-review`, nine findings, no CONFIRMED or PLAUSIBLE verdicts, so each has a disposition from root). Fixed here, each checked against the diff by the merger: F1 (a stay of no length that begins or ends with a change dated before the creation is left out of `BriefVisits.Stays`; `StatusEntry.MovedToCreation` records the move; core and pipeline tests), F2 (the test of the status an issue is in now asserts on the stays and uses an as-of time after the entry), F3 (consecutive entries in one status are one stay; tests for a change from a status to itself later and at the same instant, and the time in status row still shows the two days), F5 (the stays are read from the timeline's entries alone, in order, in one place), F6 with F8 (the overlap rule is one expression, `Overlaps`, and the end of a stay is asked about once), F7 (the stays are worked out once per issue in `Derivation`, and not at all when no status is listed), F9 (the glossary entry). No change: F4, by bv-D6; the test's comment says the owner decided it.
+- Decisions that touched the ticket (user, 2026-11-13). bv-D1: a zero-length stay counts, as story 20 says; such stays are found from the timeline's entries, and one counts when its instant falls inside the time the row counts and the issue is in the status's row through other time. bv-D5: a zero-length stay that exists only because a change dated before the issue's creation was moved to the creation time is not a visit; it stays a changelog anomaly. bv-D6: a zero-length stay on the instant a counted period starts counts, and one on the instant it ends does not; kept as built.
+- The implementer's readings from its second report, for the user: (1) bv-D5 is applied to a stay of no length that begins or ends with a change dated before creation; the decision's words cover the status the issue was created in, and the other case (a status entered by such a change and left by a change dated exactly at creation) is left out too, and has no test of its own; (2) a stay with length that begins with a change dated before creation is still judged from the creation time, as ticket 01 built it, so a status entered by such a change and left twenty seconds after creation is a brief visit; (3) the glossary entry gained the overlap wording ("overlapping the time the sprint counts of the issue") besides the three things F9 lists, because the edge rule cannot be stated without it.
+- Existing assertions changed: none. Both test files are new, and no existing test file is in the diff.
+- Merger's read of c1d8b72..a283916: `StatusTimeline.Intervals` is built by the same lines as before; `Build` gained one local and one member on the entry, and the anomalies are the same. `Derivation` passes the stays where it passed the intervals, to `BriefVisits.During` only, so no figure other than the brief visit count reads them; a pipeline test pins the time in status row beside the count. `IsBrief` is untouched. The glossary edit is the definition only: it names no type, table or method, and the commit message (ac47ee0) gives the reason and the date of the decisions. Fixtures are synthetic (`FAKE-1`, the harness's people, workflow and sprints). No project, package or toolkit file changed, and no stray file. `test-anti-patterns` on the new tests (36 methods: 15 core, 21 pipeline): no critical, high or medium finding; low, one: one assertion on a list of one stay does not ask for matching order, where its neighbours do.
+- The box on a case the overlap rule cannot be applied to is ticked on this footing: the implementer found none, and the one edge the spec does not word (an instant on an edge of the counted time) was reported and decided (bv-D6).
+- With the user, not settled by this merge: the three readings above.
