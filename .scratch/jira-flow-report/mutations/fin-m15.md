@@ -19,3 +19,4 @@ Claim (review finding 6): what an earlier version deleted is gone from the file 
 - Verified 2026-11-12 at bc92ab3: red, 1 failed of 7 (Pipeline, filter /*/*/PrivacyTests/*); restored.
 - Verified 2026-11-12 at 1830824: red, 1 failed of 7 (Pipeline, filter /*/*/PrivacyTests/*); restored.
 - Verified 2026-11-13 at d534f7f: red, 1 failed of 7 (Pipeline, filter /*/*/PrivacyTests/*); restored.
+- Verified 2026-11-13 at c7de38f: red, 1 failed of 7 (Pipeline, filter /*/*/PrivacyTests/*); restored.
