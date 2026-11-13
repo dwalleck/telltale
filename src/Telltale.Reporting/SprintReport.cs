@@ -46,12 +46,12 @@ public static class SprintReport
     /// </summary>
     public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, IReadOnlyList<string> baselineSprintIds, CancellationToken cancellationToken = default)
     {
-        // Owner decision D50: while a baseline sprint has a team smaller than five, every baseline figure is
+        // Owner decisions D50, D56: while a baseline sprint has its delivered count withheld, every baseline figure is
         // withheld. The baseline views have no rows then, so the cells are written from this list.
-        var smallBaselineSprints = baselineSprintIds.Count == 0
+        var withheldBaselineSprints = baselineSprintIds.Count == 0
             ? []
             : await store.QueryViewsAsync<string>("SELECT sprint_id FROM baseline_sprint WHERE suppressed <> 0 ORDER BY sprint_id;", cancellationToken: cancellationToken);
-        var baseline = baselineSprintIds.Count == 0 ? BaselineColumns.None : smallBaselineSprints.Count > 0 ? BaselineColumns.Withheld : BaselineColumns.Shown;
+        var baseline = baselineSprintIds.Count == 0 ? BaselineColumns.None : withheldBaselineSprints.Count > 0 ? BaselineColumns.Withheld : BaselineColumns.Shown;
         var rows = await store.QueryViewsAsync<DeliveredRow>(
             "SELECT sprint_name, started, ended, planned_end, delivered_count, suppressed, team_suppressed FROM delivered_per_sprint WHERE sprint_id = @sprintId;",
             new { sprintId },
@@ -79,7 +79,7 @@ public static class SprintReport
             cancellationToken));
         AppendTimeInStatus(report, sprint, baseline, await ReadTimeInStatusAsync(store, sprintId, cancellationToken));
         var quality = await ReadDataQualityAsync(store, cancellationToken);
-        AppendMethodNote(report, quality, baselineSprintIds, smallBaselineSprints);
+        AppendMethodNote(report, quality, baselineSprintIds, withheldBaselineSprints);
         AppendFooter(report, quality);
         return report.ToString();
     }
@@ -201,7 +201,7 @@ public static class SprintReport
     /// What the figures mean, with each rule as the glossary and the owner's decisions state it. The suppression
     /// rule is ADR-0003's for results grouped by issue attributes. The time zone is the one derive stored.
     /// </summary>
-    private static void AppendMethodNote(StringBuilder report, DataQualityRow quality, IReadOnlyList<string> baselineSprintIds, IReadOnlyList<string> smallBaselineSprints)
+    private static void AppendMethodNote(StringBuilder report, DataQualityRow quality, IReadOnlyList<string> baselineSprintIds, IReadOnlyList<string> withheldBaselineSprints)
     {
         report.Append("\n## Method\n\n")
             .Append("- Durations are in business days: days that are neither a weekend nor a company holiday, each counted in full (24 hours) in the team's time zone (").Append(quality.TimeZone).Append("). Calendar days are shown alongside: elapsed time divided by 24 hours.\n")
@@ -215,13 +215,13 @@ public static class SprintReport
         if (baselineSprintIds.Count > 0)
         {
             report.Append("- The baseline columns pool every issue of the baseline sprints, a list fixed in the configuration (sprints ").AppendJoin(", ", baselineSprintIds)
-                .Append("), each a completed sprint. A baseline figure reads \"suppressed\" when any baseline sprint has that row suppressed in its own report, so that a pooled figure cannot give back a withheld one. It reads \"none\" when no issue of the baseline sprints is in the row. When a baseline sprint has a team smaller than five, every baseline figure reads \"suppressed\".\n");
+                .Append("), each a completed sprint. A baseline figure reads \"suppressed\" when any baseline sprint has that row suppressed in its own report, so that a pooled figure cannot give back a withheld one. It reads \"none\" when no issue of the baseline sprints is in the row. Every baseline figure reads \"suppressed\" when a baseline sprint has its delivered count withheld: its team is smaller than five, or fewer than three distinct assignees are among its delivered issues.\n");
         }
 
-        if (smallBaselineSprints.Count > 0)
+        if (withheldBaselineSprints.Count > 0)
         {
-            report.Append("- ").Append(BaselineSprintRules.SprintsNamed(smallBaselineSprints)).Append(smallBaselineSprints.Count == 1 ? " has" : " each have")
-                .Append(" a team smaller than five, so every baseline figure in this report reads \"suppressed\".\n");
+            report.Append("- ").Append(BaselineSprintRules.SprintsNamed(withheldBaselineSprints)).Append(withheldBaselineSprints.Count == 1 ? " has its" : " each have their")
+                .Append(" delivered count withheld, so every baseline figure in this report reads \"suppressed\".\n");
         }
 
         report.Append("- An interval that is still open (an issue still in a status, a sprint not yet completed) ends at the as-of time below.\n")
@@ -293,7 +293,7 @@ public static class SprintReport
         /// <summary>Each cell is the baseline views' figure, "suppressed" or "none".</summary>
         Shown,
 
-        /// <summary>A baseline sprint has a team smaller than five: every cell reads "suppressed" (owner decision D50).</summary>
+        /// <summary>A baseline sprint has its delivered count withheld: every cell reads "suppressed" (owner decisions D50, D56).</summary>
         Withheld,
     }
 

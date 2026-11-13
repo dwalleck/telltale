@@ -4,8 +4,8 @@
 -- during a baseline sprint; done-role statuses are left out, as in time_in_status_per_sprint. No row when no
 -- baseline is configured. Order by board_position for board order.
 --
--- Minimum group size (GLOSSARY, ADR-0003; owner decisions D44, D50), as in baseline_cycle_time_per_bucket: no
--- row at all while a baseline sprint has fewer than five distinct assignees (baseline_sprint.suppressed); the
+-- Minimum group size (GLOSSARY, ADR-0003; owner decisions D44, D50, D56), as in baseline_cycle_time_per_bucket:
+-- no row at all while a baseline sprint has its delivered count withheld (baseline_sprint.suppressed); the
 -- median is null and suppressed is 1 when time_in_status_per_sprint has the status suppressed for any
 -- baseline sprint. The rule is in that view and is read here. A baseline sprint with no issue in the status
 -- does not suppress it. There is no issue count.

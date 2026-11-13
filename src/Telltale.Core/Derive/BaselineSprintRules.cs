@@ -72,11 +72,14 @@ public static class BaselineSprintRules
     }
 
     /// <summary>
-    /// What the console says when baseline sprints have fewer than five distinct assignees (owner decision
-    /// D50). Nothing stops: the views withhold every baseline figure, and this names the sprints and says so.
+    /// What the console says when baseline sprints have their delivered count withheld: fewer than five
+    /// distinct assignees, or fewer than three among the delivered issues (owner decisions D50, D56). Nothing
+    /// stops: the views withhold every baseline figure, and this names the sprints and says so. It does not
+    /// say which of the two it is, which the sprint's own report shows.
     /// </summary>
-    public static string ShortOfFiveAssignees(IReadOnlyList<string> sprintIds) =>
-        $"{SprintsNamed(sprintIds)} {(sprintIds.Count == 1 ? "has" : "each have")} fewer than five assignees, so every baseline figure is withheld (baselineSprintIds in the configuration file).";
+    public static string DeliveredCountWithheld(IReadOnlyList<string> sprintIds) =>
+        $"{SprintsNamed(sprintIds)} {(sprintIds.Count == 1 ? "has" : "each have")} fewer than five assignees, or fewer than three among {(sprintIds.Count == 1 ? "its" : "their")} delivered issues, "
+        + "so every baseline figure is withheld (baselineSprintIds in the configuration file).";
 
     /// <summary>"Baseline sprint 41", or "Baseline sprints 41, 42 and 43".</summary>
     public static string SprintsNamed(IReadOnlyList<string> sprintIds) => sprintIds.Count == 1

@@ -111,12 +111,12 @@ public sealed class PipelineSteps
             await _environment.Notices.WriteLineAsync($"{SprintWindows.ClosedWithoutAnEnd(sprintId)}: no delivery is counted in it, and it cannot be reported or be a baseline sprint.");
         }
 
-        // Owner decision D50: a baseline sprint short of five assignees stops nothing. The views withhold
-        // every baseline figure, and the console says which sprint is why.
-        var shortOfFive = await _store.QueryViewsAsync<string>("SELECT sprint_id FROM baseline_sprint WHERE suppressed <> 0 ORDER BY sprint_id;", cancellationToken: cancellationToken);
-        if (shortOfFive.Count > 0)
+        // Owner decisions D50, D56: a baseline sprint whose delivered count is withheld stops nothing. The
+        // views withhold every baseline figure, and the console says which sprint is why.
+        var withheld = await _store.QueryViewsAsync<string>("SELECT sprint_id FROM baseline_sprint WHERE suppressed <> 0 ORDER BY sprint_id;", cancellationToken: cancellationToken);
+        if (withheld.Count > 0)
         {
-            await _environment.Notices.WriteLineAsync(BaselineSprintRules.ShortOfFiveAssignees(shortOfFive));
+            await _environment.Notices.WriteLineAsync(BaselineSprintRules.DeliveredCountWithheld(withheld));
         }
 
         if (derived.Anomalies.Count == 0)

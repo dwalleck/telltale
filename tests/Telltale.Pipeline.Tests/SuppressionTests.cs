@@ -202,7 +202,7 @@ public class SuppressionTests
     [Test]
     public async Task A_bucket_short_of_three_assignees_keeps_its_count_in_a_sprint_whose_delivered_count_is_shown()
     {
-        // Owner decision D5 still holds where D53 does not apply: three people delivered, so the delivered
+        // Owner decision D5 still holds where D54 does not apply: three people delivered, so the delivered
         // count is shown, and the bucket with one assignee shows its count beside its withheld figures.
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.AddSprint41();
