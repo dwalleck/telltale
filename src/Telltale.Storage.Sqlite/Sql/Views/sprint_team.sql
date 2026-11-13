@@ -2,12 +2,12 @@
 -- sprint that counts. Every metric view about a sprint joins this view and reads the flag that applies to it.
 --
 -- team_suppressed is the team check: 1 when the sprint has fewer distinct assignees than a team
--- (minimum_group_size.team, five). Such a sprint shows nothing: no delivered count, and one "suppressed" row
+-- (minimum_group_size.team: the configured number, five by default). Such a sprint shows nothing: no delivered count, and one "suppressed" row
 -- in place of each table's rows (owner decisions D41, D45).
 --
 -- delivered_suppressed is the check of the sprint's delivered count (owner decision D49): 1 when the team
--- check fails, or fewer distinct assignees than a figure needs (minimum_group_size.assignees_behind_a_figure,
--- three) are among the issues delivered in the sprint. A sprint in which nothing was delivered has nobody
+-- check fails, or fewer distinct assignees than a figure needs (minimum_group_size.assignees_behind_a_figure:
+-- the configured number, three by default) are among the issues delivered in the sprint. A sprint in which nothing was delivered has nobody
 -- behind its count, so it is 1 there too. What gives a withheld delivered count back is withheld with it: the
 -- cycle time table's bucket rows, whose counts add up to it and whose number bounds it (owner decision D54).
 -- The time-in-status table does not read this flag (owner decision D55).

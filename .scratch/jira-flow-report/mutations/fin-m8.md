@@ -18,3 +18,5 @@ Claim (C14): each setting the store was filled from is kept in its own column.
 - Verified 2026-11-12 at a198e06: red, 29 failed of 30 (Pipeline, filter /*/*/IncrementalSyncTests/*); restored.
 - Verified 2026-11-12 at cf5da5b: red, 29 failed of 30 (Pipeline, filter /*/*/IncrementalSyncTests/*); restored.
 - Verified 2026-11-12 at bc92ab3: red, 29 failed of 30 (Pipeline, filter /*/*/IncrementalSyncTests/*); restored.
+- Verified 2026-11-12 at 1830824: red, 29 failed of 30 (Pipeline, filter /*/*/IncrementalSyncTests/*); restored.
+- Verified 2026-11-13 at d534f7f: red, 29 failed of 30 (Pipeline, filter /*/*/IncrementalSyncTests/*); restored.

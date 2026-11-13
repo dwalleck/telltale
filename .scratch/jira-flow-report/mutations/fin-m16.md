@@ -23,3 +23,4 @@ Claim (owner decision D54, replacing the row form of D53): a sprint with a team 
 - Verified 2026-11-12 at a198e06: red, 3 failed of 17 (Pipeline, filter /*/*/SuppressionTests/*); restored.
 - Verified 2026-11-12 at cf5da5b: red, 3 failed of 17 (Pipeline, filter /*/*/SuppressionTests/*); restored.
 - Verified 2026-11-12 at bc92ab3: red, 15 failed of 17 (Pipeline, filter /*/*/SuppressionTests/*); restored.
+- Verified 2026-11-13 at d534f7f: red, 15 failed of 17 (Pipeline, filter /*/*/SuppressionTests/*); restored.
