@@ -1,6 +1,6 @@
 # Telltale
 
-A .NET delivery metrics tool that collects delivery data from Jira, GitHub, local git clones and AI agent session logs into one SQLite store, and reports team-level metrics on flow, review load, seat value and quality. Its purpose is to support a pilot comparing structured AI use (the mattpocock/skills workflow) with ad hoc AI use, and to justify AI plan upgrades to leadership.
+A .NET delivery metrics tool that collects delivery data from Jira, GitHub, local git clones and AI agent session logs into one SQLite store, and reports team-level metrics on flow, review load, seat value and quality. Its purpose is to compare structured AI use (the mattpocock/skills workflow) with ad hoc AI use, and to justify AI plan upgrades to leadership.
 
 Start with `docs/context/handoff.md`: it explains where this project came from, what is decided, what is built, and what is still open.
 

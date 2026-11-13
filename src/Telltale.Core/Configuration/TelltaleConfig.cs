@@ -34,7 +34,7 @@ public sealed record TelltaleConfig
 
     /// <summary>
     /// The IDs of the sprints the baseline is drawn from (GLOSSARY: Baseline), e.g. <c>"41"</c>: a list fixed before
-    /// the pilot starts. Reports show baseline figures pooled over these sprints. The setting may be left out
+    /// the evaluation starts. Reports show baseline figures pooled over these sprints. The setting may be left out
     /// or empty: then there is no baseline, and reports show none.
     /// </summary>
     public IReadOnlyList<string> BaselineSprintIds { get; init; } = [];

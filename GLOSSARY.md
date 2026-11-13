@@ -47,11 +47,11 @@ _Avoid_: Size class, issue type
 ### AI use
 
 **Structured AI use**:
-Work on an issue where at least one agent session explicitly invoked a skill from the pilot workflow by name. A skill the agent activated on its own does not count.
+Work on an issue where at least one agent session explicitly invoked a skill from the structured workflow by name. A skill the agent activated on its own does not count.
 _Avoid_: AI-assisted (too vague), skills group (that is people, not work)
 
 **Ad hoc AI use**:
-Work on an issue where agent sessions occurred but none invoked a pilot workflow skill.
+Work on an issue where agent sessions occurred but none invoked a structured workflow skill.
 
 **Agent session**:
 One run of an AI coding agent, summarized without identity: times, branch, model, skills invoked, and tokens where the plan reports them.
@@ -95,7 +95,7 @@ One of the three metrics that carry the story to leadership: review rounds per p
 A metric that shows whether gains came at a cost: reopen rate, revert rate, rework, linked bugs, pull request size, reviews per active reviewer.
 
 **Baseline**:
-A person's or group's own measurements from before the pilot, used as their comparison point. It is drawn from a list of sprints fixed before the pilot starts.
+A person's or group's own measurements from before the evaluation, used as their comparison point. It is drawn from a list of sprints fixed before the evaluation starts.
 
 **Minimum group size**:
 The smallest number of people (five) a result grouped by people may cover. A result grouped by issue attributes (sprint, point bucket) instead needs a team of at least five and at least three distinct assignees behind it. The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in its window. A result that fails either check is suppressed: its figures are withheld. When the team check fails, its issue counts are withheld too, because they add up to the withheld delivered count, and the sprint's tables show no per-bucket or per-status rows at all; when only the three-assignee check fails, the issue count is still shown. An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. The delivered count of a sprint also needs at least three distinct assignees among the delivered issues; when it is withheld for that reason, the sprint's point buckets are not shown at all, because their issue counts and even the number of buckets bound it from below (they count the delivered issues that have a cycle time). The sprint's per-status issue counts stay: they count every issue that spent time in a status, delivered or not, so they can approximate the withheld count but do not give it. A baseline sprint must itself pass the team check and have its delivered count shown; if one does not, every baseline figure is withheld and the report names the sprint. A baseline figure pools every issue of the baseline sprints; it is shown only when the pooled group passes both checks and no baseline sprint has that row suppressed on its own, so that a pooled figure cannot give back a withheld one.
@@ -104,11 +104,11 @@ The smallest number of people (five) a result grouped by people may cover. A res
 One of the two consented, named individual exceptions to the minimum group size: the project owner and one mid-level developer, each on a Pro seat.
 
 **Volunteer cohort**:
-The pilot volunteers as a group, fewer than five, who consented to results being reported for the group as a whole and never per person.
-_Avoid_: Skills group, pilot group, treatment group
+The evaluation's volunteers as a group, fewer than five, who consented to results being reported for the group as a whole and never per person.
+_Avoid_: Skills group, treatment group
 
 **Replay benchmark**:
 Rerunning past issues from the commit before their merge, under controlled conditions (model tier × with/without skills), and scoring the results.
 
 **Success criteria**:
-The pass/fail thresholds for the pilot, written down and sent to leadership before the pilot starts.
+The pass/fail thresholds for the evaluation, written down and sent to leadership before the evaluation starts.

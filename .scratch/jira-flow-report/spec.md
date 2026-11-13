@@ -6,7 +6,7 @@ Terms in **bold** on first use are defined in `GLOSSARY.md`. Decisions reference
 
 ## Problem Statement
 
-The project owner has to show leadership whether structured AI use changes how the team delivers, and has nothing to show yet. The only code that exists is interval and business-day math with no data behind it. There is no way to pull the team's Jira history, no store, and no report. Until one path works end to end, nobody knows whether the corporate network, Jira's changelog API, the privacy rules and the metric definitions actually fit together, and the pilot's baseline cannot be measured before the pilot starts.
+The project owner has to show leadership whether structured AI use changes how the team delivers, and has nothing to show yet. The only code that exists is interval and business-day math with no data behind it. There is no way to pull the team's Jira history, no store, and no report. Until one path works end to end, nobody knows whether the corporate network, Jira's changelog API, the privacy rules and the metric definitions actually fit together, and the baseline cannot be measured before the evaluation starts.
 
 ## Solution
 

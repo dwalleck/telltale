@@ -117,7 +117,7 @@ From a local clone: reverts (PR titles / commit messages starting "Revert"), and
 
 The owner already has a session export script that participants will run; its output becomes the session summary format if it meets ADR-0005 and records the branch at session time and explicitly invoked skill names. The first ticket of the sessions spec brings its field list and one sanitized sample into the repo, and runs one throwaway Kiro session on the work laptop to check what is stored. Kiro (CLI 3.1.0) keeps sessions in `data.sqlite3` or under `~/.kiro/sessions` depending on the agent engine, does not store the git branch, has no confirmed stored record of skill invocations or per-session credits, and auto-deletes old sessions.
 
-As originally sketched: pilot participants run a small exporter that reads local Kiro session logs and writes versioned JSON summaries (`schemaVersion`) to a shared folder (OneDrive/Teams); the laptop imports them. Contents: session ID, start/end, branch, model, skills invoked, tokens where the plan reports them. No identity, prompts or code (ADR-0005). The shared folder is the permanent copy.
+As originally sketched: participants run a small exporter that reads local Kiro session logs and writes versioned JSON summaries (`schemaVersion`) to a shared folder (OneDrive/Teams); the laptop imports them. Contents: session ID, start/end, branch, model, skills invoked, tokens where the plan reports them. No identity, prompts or code (ADR-0005). The shared folder is the permanent copy.
 
 **Still unverified:** the stored session JSON, Windows paths, and whether model and credits can be read per session. All need a real session on the work laptop.
 

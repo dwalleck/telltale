@@ -697,7 +697,7 @@ public class DiscoverTests
     [Test]
     public async Task Discover_never_writes_the_baseline_sprints_and_a_rerun_keeps_the_ones_the_owner_pinned()
     {
-        // The baseline is the owner's to pin, once, before the pilot (GLOSSARY: Baseline). Discover proposes nothing for it.
+        // The baseline is the owner's to pin, once, before the evaluation (GLOSSARY: Baseline). Discover proposes nothing for it.
         await using var pipeline = new PipelineHarness();
         await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
         var first = await ReadWrittenConfigAsync(pipeline);
