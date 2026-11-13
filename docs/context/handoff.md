@@ -19,6 +19,8 @@ The project owner (a senior .NET engineer) needs to justify AI plan upgrades to 
 
 **Update, Nov 12, 2026:** the first spec is built and merged. The Jira path works end to end against synthetic fixtures: `discover`, `secrets set`, `backfill`, `sync`, `derive`, `report`, `run` and `query` (see `README.md`). The owner's decisions made while building it are in `docs/decisions.md`. The next step is ticket 13, the first run against the real Jira on the work laptop: `.scratch/jira-flow-report/issues/13-first-real-run-on-work-laptop.md`. Start there.
 
+**Status-duration quality investigation, Nov 12, 2026:** [Status-duration quality handoff](status-duration-quality-handoff.md) records the implemented total-business-days column, interpretation pitfalls found during local report investigation, evidence consistent with late Jira status updates, and the unresolved anomaly-detection and PR-based timing design. It contains no operational report values or company identifiers. Read it before changing duration eligibility or adding fallback measurements.
+
 **Update, Nov 11, 2026:** a grilling session settled the Scope, Definitions and Implementation items below; the answers are in `GLOSSARY.md`, ADR-0002, ADR-0003 and `system-design.md`. The first spec is the Jira path end to end. What remains open: the company facts (found by `discover` on the work laptop), the Kiro session details (first ticket of the sessions spec), the table schema (for the spec), and three owner tasks: the volunteers' consent to cohort reporting, the baseline sprint list, and the date the success criteria go to leadership.
 
 The original list, kept for the record:
