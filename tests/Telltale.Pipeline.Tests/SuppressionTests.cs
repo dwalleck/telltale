@@ -168,7 +168,7 @@ public class SuppressionTests
             | --- | --- | --- | --- | --- | --- | --- |
             | 41 | NULL | NULL | NULL | 1 | 1 | NULL |
 
-            """);
+            """.ReplaceLineEndings("\n"));
         var delivered = await pipeline.QueryAsync<(long? DeliveredCount, long Suppressed, long TeamSuppressed)>("SELECT delivered_count, suppressed, team_suppressed FROM delivered_per_sprint WHERE sprint_id = '41';");
         await Assert.That(delivered).IsEquivalentTo(new (long?, long, long)[] { (null, 1, 0) });
     }

@@ -6,16 +6,16 @@
 
 **Status:** ready-for-human
 
-- [ ] The .NET 11 SDK is installed on the work laptop, or the obstacle to installing it is recorded
-- [ ] All tests pass on the work laptop
-- [ ] `secrets set` stores the secrets in Credential Manager and the tool reads them back
-- [ ] `discover` reaches Jira through the corporate proxy and writes the configuration file
-- [ ] Confirmed or corrected: abandoned work is Done with a "Won't Do" resolution
-- [ ] Confirmed or corrected: the status roles (New, Approved, Committed not started; Development, Review, QE work; Blocked blocked; Done, Shipped done)
-- [ ] Confirmed or corrected: one Scrum board whose sprints do not overlap
-- [ ] Confirmed: which JQL search endpoint the site accepts
-- [ ] A backfill completes and a report is produced for the most recent completed sprint
-- [ ] Team time zone and company holiday list are entered in the configuration
+- [x] The .NET 11 SDK is installed on the work laptop, or the obstacle to installing it is recorded
+- [x] All tests pass on the work laptop
+- [x] `secrets set` stores the secrets in Credential Manager and the tool reads them back
+- [x] `discover` reaches Jira through the corporate proxy and writes the configuration file
+- [x] Confirmed or corrected: abandoned work is Done with a "Won't Do" resolution
+- [x] Confirmed or corrected: the status roles (New, Approved, Committed not started; Development, Review, QE work; Blocked blocked; Done, Shipped done)
+- [x] Confirmed or corrected: one Scrum board whose sprints do not overlap
+- [x] Confirmed: which JQL search endpoint the site accepts
+- [x] A backfill completes and a report is produced for the most recent completed sprint
+- [x] Team time zone and company holiday list are entered in the configuration
 
 ## Before you start
 
@@ -34,19 +34,19 @@ This section is for whoever picks the ticket up on the work laptop, including an
 
 **Checks.** `dotnet build` and `dotnet test` from the repository root are the whole check; the build treats warnings as errors. The build run used a toolkit and skills that are not in this repository (`.repo-toolkit.psd1` and `.scratch/jira-flow-report/mutations/` belong to it) and are not needed here.
 
-**Windows has never run this code.** Everything was built and tested on macOS. If tests fail on the laptop, the likely causes are file locking (the store's lock file, a database file still open when a test deletes it), path separators, line endings in compared text, and the tests that read the database file's bytes after a delete.
+**Windows acceptance:** the code was built and tested only on macOS before this ticket. The first Windows run found CRLF-sensitive expected strings in report/query tests; these are corrected and the suite passes (see Comments). File locking, path separators, and database-file cleanup remain useful diagnostic leads for future Windows failures.
 
 **Setup choices decided after this ticket was written:**
 
-- [ ] The hashing salt is created with `telltale secrets set hashing-salt --generate`, before the first backfill, and is not changed afterwards. Changing it needs `--replace` and a new backfill.
-- [ ] `backfillStart` is earlier than the start of the earliest baseline sprint. A report refuses a sprint that started before it.
-- [ ] Each baseline sprint has a team of at least five assignees and at least three distinct assignees among its delivered issues. One sprint that falls short withholds the whole baseline, and the report names it (D50, D56). Check the candidates with `telltale report --sprint <id>` before fixing the list: a sprint whose "Delivered issues" line reads `suppressed` cannot be a baseline sprint.
-- [ ] The baseline sprint list is fixed once and then left alone.
+- [x] The hashing salt is created with `telltale secrets set hashing-salt --generate`, before the first backfill, and is not changed afterwards. Changing it needs `--replace` and a new backfill.
+- [x] `backfillStart` is earlier than the start of the earliest baseline sprint. A report refuses a sprint that started before it.
+- [x] Each baseline sprint has a team of at least five assignees and at least three distinct assignees among its delivered issues. One sprint that falls short withholds the whole baseline, and the report names it (D50, D56). Check the candidates with `telltale report --sprint <id>` before fixing the list: a sprint whose "Delivered issues" line reads `suppressed` cannot be a baseline sprint.
+- [x] The baseline sprint list is fixed once and then left alone.
 - [ ] Every command but `backfill` refuses a store filled under other collection settings. After changing the board, the projects, a field ID or `backfillStart`, run `backfill`.
 
 ## Handed over by the resolved tickets
 
-Collected in the final fix pass (2026-11-12) from the comments of tickets 04, 09, 10, 11, 12 and 14 and from the final review, so that this ticket holds every "confirm on a real site or on Windows" item in one place. Nothing here ran against a real site or on Windows. Each item is confirmed, or corrected with a synthetic fixture that reproduces the difference.
+Collected in the final fix pass (2026-11-12) from the comments of tickets 04, 09, 10, 11, 12 and 14 and from the final review, so that this ticket holds every "confirm on a real site or on Windows" item in one place. At handover, none of these checks had run against a real site or on Windows. Checked items and Comments below record subsequent evidence; unchecked items remain unverified.
 
 Collection (tickets 09, 10, 14; final review C2, B15):
 
@@ -83,4 +83,28 @@ Secrets, on Windows only (ticket 12):
 
 The team (tickets 06, 07; owner decision D42):
 
-- [ ] Bot assignees: whether issues on the board are assigned to bot or duplicate accounts. Each counts as a person toward the minimum group size, and the method note says so.
+- [x] Bot assignees: whether issues on the board are assigned to bot or duplicate accounts. Each counts as a person toward the minimum group size, and the method note says so.
+
+## Comments
+
+### 2026-11-12 — First owner-assisted Windows run
+
+**Status remains `ready-for-human`.** The owner chose to commit the verified work and leave the unobserved edge-case checks above open. A successful report is not evidence that every Jira history or pagination assumption is correct.
+
+Agent-observed checks:
+
+- SDK `11.0.100` is installed under `C:\Program Files\dotnet`. The first `dotnet build` resolved a user-level dotnetup host with only an RC of .NET 11 and failed SDK resolution. Explicitly invoking the system host preserved `global.json` and built successfully with zero warnings and errors. No SDK installation or pin change was needed.
+- The initial Windows suite passed 765 tests and failed 11. Actual report/query text was already LF-normalized, but multiline expected C# strings inherited CRLF from the checkout. The fix normalizes those expected strings too, without changing expected content, suppression rules, production code, or metric definitions.
+- Using the system host, `dotnet test --project tests/Telltale.Pipeline.Tests/Telltale.Pipeline.Tests.csproj --treenode-filter '/*/*/QueryCommandTests/*'` passed all 25 tests after the first fix. The final `dotnet test` passed all 776 tests: 95 core and 681 pipeline, zero failures or skips.
+- A throwaway probe exercised the real `WindowsCredentialVault`/`advapi32` adapter with an invented value under an isolated, randomly named credential target. Missing-entry reads returned 1168; write and read-back succeeded. The probe deleted its credential and was removed. It never read or changed production credentials. Native memory zeroing/freeing was not instrumented, so the combined checklist item remains open. Error 1312 was not observed; this run did not establish behavior under a policy that rejects storage.
+
+Owner-confirmed checks, performed in a private PowerShell window with runtime files outside the clone:
+
+- Both Jira credentials and a generated hashing salt were stored through the CLI prompts. Discovery reached Jira and wrote the configuration, exercising credential read-back and the configured HTTPS path.
+- The described status roles and abandonment resolution were confirmed and configured, as were one non-overlapping Scrum board, the team calendar, and a backfill start preceding the intended baseline.
+- Backfill and the subsequent run produced a report. The collector uses `POST /rest/api/3/search/jql`; the successful collection confirms that endpoint is accepted.
+- The run emitted a Sprint-history consistency warning but still wrote the report. The warning means successive Sprint history values disagree, or the final history value disagrees with current membership. Its cause remains unverified; do not suppress it or invent a fixture without a structural reproduction. Keep any investigation and real identifiers on company systems.
+- All chosen baseline candidates passed the delivered-count suppression check. The owner fixed the baseline list and confirmed that `derive` and `report` succeeded afterwards.
+- The owner checked bot/duplicate-account assignees and acknowledged that each account counts toward group size.
+
+Still open: the unchecked handover probes, particularly filtered versus unfiltered old changelog coverage and the Sprint-history warning's cause. No real Jira identifiers, responses, configuration, database, report, or secret values are included in this record.

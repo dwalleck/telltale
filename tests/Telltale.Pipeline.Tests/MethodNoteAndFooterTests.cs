@@ -44,7 +44,7 @@ public class MethodNoteAndFooterTests
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
         await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith(
-            MethodNote
+            (MethodNote
             + """
 
               ---
@@ -53,7 +53,7 @@ public class MethodNoteAndFooterTests
               - Issues with changelog anomalies, in the whole store: suppressed
               - Issues delivered between sprints, in the whole store: 3
 
-              """);
+              """).ReplaceLineEndings("\n"));
     }
 
     [Test]
@@ -461,7 +461,7 @@ public class MethodNoteAndFooterTests
             - Issues with changelog anomalies, in the whole store: suppressed
             - Issues delivered between sprints, in the whole store: suppressed
 
-            """);
+            """.ReplaceLineEndings("\n"));
 
         var quality = await pipeline.QueryAsync<(long? Anomalies, long? BetweenSprints, long Suppressed)>(
             "SELECT anomaly_issue_count, delivered_between_sprints_count, suppressed FROM data_quality;");
@@ -497,7 +497,7 @@ public class MethodNoteAndFooterTests
             - Issues with changelog anomalies, in the whole store: {anomalies}
             - Issues delivered between sprints, in the whole store: {betweenSprints}
 
-            """);
+            """.ReplaceLineEndings("\n"));
     }
 
     [Test]

@@ -27,7 +27,7 @@ public class QueryCommandTests
             | 41 | Fake Sprint 41 | NULL | 1 |
             | 42 | Fake \*Sprint\* 42 | 5 | 0 |
 
-            """);
+            """.ReplaceLineEndings("\n"));
     }
 
     [Test]
@@ -49,7 +49,7 @@ public class QueryCommandTests
             | sprint_id | team_suppressed |
             | --- | --- |
 
-            """);
+            """.ReplaceLineEndings("\n"));
     }
 
     [Test]

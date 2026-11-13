@@ -8,7 +8,7 @@ It reports on the team's work, never on individuals. Person fields are hashed be
 
 The Jira path works end to end: collect a Scrum board, derive the metrics, write a sprint report. GitHub review metrics, AI agent session logs, quality measures and Confluence publishing are planned and not built.
 
-The tool has only been run against synthetic fixtures so far. The first run against a real Jira site is still to come.
+The first owner-assisted run on the managed Windows laptop produced a real Jira sprint report. The Windows test suite passes; detailed real-site edge-case checks remain open in [ticket 13](.scratch/jira-flow-report/issues/13-first-real-run-on-work-laptop.md).
 
 ## What a report shows
 
@@ -34,6 +34,7 @@ These are hard constraints of the design (see [ADR-0003](docs/adr/0003-pseudonym
 ## Requirements
 
 - .NET 11 SDK (`global.json` pins 11.0.100 or a later feature band).
+  If an installed release SDK is not found, check `where.exe dotnet`: a user-level toolchain can shadow the system installation. In PowerShell, use `& 'C:\Program Files\dotnet\dotnet.exe' build` (or `test`) when that is where the release SDK is installed; do not lower the repository's SDK pin.
 - A Jira Cloud site with a Scrum board, and an API token for an account that can read it.
 - Windows for real use: secrets are kept in Windows Credential Manager. On macOS and Linux the tool reads secrets from environment variables, which is meant for development only.
 
@@ -196,6 +197,8 @@ dotnet test
 ```
 
 Tests use TUnit and run against a fake Jira, so they need no network and no secrets. The build treats warnings as errors.
+
+Report and query assertions normalize both actual output and multiline expected strings to LF. C# raw strings otherwise inherit the checkout's line endings, so normalizing only the actual output makes a CRLF checkout fail despite matching content.
 
 | Project | Role |
 | --- | --- |

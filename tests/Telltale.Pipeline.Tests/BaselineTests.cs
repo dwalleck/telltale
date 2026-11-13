@@ -574,7 +574,7 @@ public class BaselineTests
             | --- | --- | --- |
             | 0 | 0 | 41=1 42=0 |
 
-            """);
+            """.ReplaceLineEndings("\n"));
     }
 
     [Test]
