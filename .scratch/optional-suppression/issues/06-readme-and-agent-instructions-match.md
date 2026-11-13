@@ -15,6 +15,7 @@ Spec: `../spec.md` ("Documents changed with the code"; user stories 13 and 38).
 - [ ] The README's list of what is refused at load includes the refused forms of the setting
 - [ ] The README says `derive` is needed after the setting changes
 - [ ] The README says an existing store needs one `derive` after upgrading to this version, because the derived tables changed, and that `derive` calls no Jira (owner, 2026-11-13)
+- [ ] The owner decisions list has D70 in its "Commands, configuration and secrets" section: `discover` keeps its rule of never writing a file `run` would refuse for `minimumGroupSize` too; a rerun on a file whose numbers the loader refuses stops and leaves the file untouched (owner, 2026-11-13). Its intro sentence on when decisions were made covers 2026-11-13
 - [ ] The pointer to the new ADR in ADR-0003 is on the first line under the title, not above it (owner, 2026-11-13). Nothing else in ADR-0003 changes
 - [ ] Each README claim about the setting was checked against the built tool, as the existing "Setting formats" claims were
 - [ ] The agent instructions describe the rule as built: reporting on the team and pseudonymization unchanged, the minimum group size a configurable default that the views enforce at whatever numbers are set. The "being made configurable" and "until that is built" wording is gone
