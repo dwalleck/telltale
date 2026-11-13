@@ -15,3 +15,4 @@ replace: |-
 
 Claim (review round 4, finding 27): report names a baseline sprint whose delivered count is withheld on the console, as derive does, and a run says it once. The two cases ran red first.
 - Verified 2026-11-12 at bc92ab3: red, 2 failed of 41 (Pipeline, filter /*/*/BaselineTests/*); restored.
+- Verified 2026-11-12 at 1830824: red, 2 failed of 41 (Pipeline, filter /*/*/BaselineTests/*); restored.
