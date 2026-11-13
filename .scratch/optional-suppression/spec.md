@@ -32,7 +32,7 @@ Only the minimum group size rule becomes optional. Person fields are still hashe
 4. As the owner of a deployment, I want to set the smallest team and the smallest number of assignees behind a figure separately, so that the rule fits the size of my team.
 5. As the owner of a deployment, I want to turn off one check and keep the other, by setting one number to zero.
 6. As the owner of a larger team, I want to raise either number above its default, so that the rule can be stricter than the default.
-7. As the owner of a deployment, I want the file refused when the assignees behind a figure exceed the team size, so that a pair of numbers that would withhold every figure is caught at load.
+7. As the owner of a deployment, I want any two whole numbers of zero or more accepted, including a number behind a figure that is larger than the team number, so that a workable pair is never refused.
 8. As the project owner, I want an existing configuration file without the setting to load and behave as before, so that upgrading the tool changes nothing until I edit the file.
 9. As the project owner, I want `discover` to leave the setting as I set it on a rerun, so that rewriting the file never turns suppression back on or off.
 10. As the project owner, I want the file refused when either number is negative, fractional, quoted or missing, with a message that names the file and the setting, so that a typo does not silently leave suppression in the wrong state.
@@ -89,7 +89,7 @@ The owner asked for suppression to be optional and kept for others, and for the 
 
 - **D64.** The minimum group size is one optional configuration setting, `minimumGroupSize`, with two whole numbers: `team` and `assigneesBehindAFigure`. Absent means five and three.
 - **D65.** A number of zero turns that check off. With both zero, no figure or count is withheld for the size of the group behind it. This covers every rule in the "Suppression" section of the decisions list and the data quality footer's counts.
-- **D66.** Every existing rule applies with the configured numbers in place of five and three. The rules themselves (what is withheld when a check fails) do not change. The file is refused when `assigneesBehindAFigure` is greater than `team` and `team` is not zero.
+- **D66.** Every existing rule applies with the configured numbers in place of five and three. The rules themselves (what is withheld when a check fails) do not change. Any two whole numbers of zero or more are accepted. (Changed by the owner on 2026-11-13: the spec first refused `assigneesBehindAFigure` greater than a non-zero `team`, on the ground that such a pair would withhold every figure. That was wrong: the team number is a minimum, so a larger sprint still shows a figure with enough assignees behind it.)
 - **D67.** Every report's method note states the numbers in force. A report written with either number below its default also says so in a line under its heading.
 - **D68.** Hashing of person fields, the fields that are never stored, and the absence of any per-person view do not depend on the setting.
 - **D69.** `discover` writes the setting with five and three into a new configuration file and never changes it afterwards.
@@ -115,7 +115,7 @@ The owner asked for suppression to be optional and kept for others, and for the 
   }
   ```
 
-- When the setting is present, both numbers are required. Refused at load, with a message naming the file and the setting: a missing number; a negative or fractional number; a quoted number; `assigneesBehindAFigure` greater than `team` when `team` is not zero.
+- When the setting is present, both numbers are required. Refused at load, with a message naming the file and the setting: a missing number; a negative or fractional number; a quoted number. `assigneesBehindAFigure` may be greater than `team`.
 - A number of one is allowed and is not the same as zero: with `assigneesBehindAFigure` at one, a figure with only unassigned issues behind it, and a footer count of zero, are still withheld.
 - The setting is a derive setting. It is part of what `report` compares between the derived data and the current file, so changing it makes `report` refuse and ask for `derive`. It is not a collection setting.
 - `discover` writes it with five and three when it creates the file, and keeps whatever the file says on a rerun, including its absence.
@@ -169,7 +169,7 @@ Both seams exist, and the owner confirmed on 2026-11-12 that they are the seams 
    - **No `suppressed` anywhere** in a report written with suppression off, over a store built to trip every rule at once.
    - **The disclosure line and method note:** the line is present when both numbers are zero, present with the numbers when either is below its default, and absent at or above the defaults; the method note states the numbers in force.
    - **Changing the setting** in either direction: `report` refuses until `derive` runs, and no `backfill` is needed.
-   - **Refused values:** a missing number, a negative, a fraction, a quoted number, `null`, a boolean, and assignees behind a figure greater than a non-zero team; the message names the file and the setting.
+   - **Refused values:** a missing number, a negative, a fraction, a quoted number, `null` and a boolean; the message names the file and the setting. A number behind a figure greater than the team number is accepted and applied.
    - **`discover`:** a new file has the setting as five and three; a rerun keeps changed numbers, keeps the defaults, and keeps the setting absent.
    - **What does not change:** the existing test that no account ID, display name, email or issue summary appears in the database file or the report passes with suppression off; the list of metric views is the same under any numbers, and none has a person column.
    - **The existing privacy probe with the default numbers:** the checks that no query recovers, bounds or tells zero from non-zero for a withheld delivered count still pass.

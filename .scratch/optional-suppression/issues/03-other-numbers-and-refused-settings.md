@@ -21,8 +21,7 @@ Spec: `../spec.md` (owner decisions D64, D65, D66; user stories 4 to 7 and 10; "
   - [ ] a number is fractional
   - [ ] a number is quoted
   - [ ] a number is `null` or a boolean
-  - [ ] the per-figure number is greater than a team minimum that is not zero
-- [ ] A per-figure number greater than a team minimum of zero is accepted
+- [ ] A per-figure number greater than the team minimum is accepted and applied, whether the team minimum is zero or not: with a team minimum of three and four assignees behind a figure, a sprint of five shows a row with four assignees and withholds a row with three (owner, 2026-11-13; this replaces the refusal the ticket first listed)
 - [ ] The setting, like every other, is refused when it contains a key the tool does not know
 - [ ] Each case is asserted in the report and by `query`
 - [ ] Expected multi-line strings are normalized to LF
