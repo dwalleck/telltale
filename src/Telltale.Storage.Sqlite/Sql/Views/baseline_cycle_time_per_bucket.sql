@@ -4,21 +4,20 @@
 -- baseline sprints are the rows of baseline_sprint. The median and the P85 are duration_figures', taken of
 -- its 'baseline' scope.
 --
--- Minimum group size (GLOSSARY, ADR-0003; owner decisions D44, D50). A pooled figure sits beside the figures
--- of the sprints it is pooled from, so it is withheld whenever one of those is: the four figures are null and
--- suppressed is 1 when cycle_time_per_sprint_and_bucket has the bucket suppressed for any baseline sprint.
--- Otherwise the pooled figure and the shown ones would give the withheld one away: with three shown cycle
--- times and one withheld, the pooled P85 is the withheld cycle time itself. The rule itself is in that view
--- and is read here, not repeated. A baseline sprint with no issue in the bucket does not suppress it.
--- A baseline sprint must itself have at least five distinct assignees (owner decision D50, which changed
--- D47): while one has not (baseline_sprint.suppressed), this view has no rows at all. Rows with withheld
--- figures would still say which buckets the small sprint had issues in, which its own report withholds.
--- So a row is withheld only for a bucket some baseline sprint's own table shows, with its count, as short of
--- three assignees; and a row that is shown is pooled from buckets of three or more in sprints of five or
--- more, so the pooled group passes both checks as well.
+-- Minimum group size (GLOSSARY, ADR-0003; owner decisions D44, D50, D56). Two rules, neither written here:
+-- 1. The whole baseline: while a baseline sprint has its delivered count withheld (baseline_sprint.suppressed:
+--    fewer than five distinct assignees, or fewer than three among its delivered issues), this view has no
+--    rows at all. Rows, even with withheld figures, would say which buckets that sprint has issues in.
+-- 2. One row: with every baseline sprint's delivered count shown, each has its bucket rows in
+--    cycle_time_per_sprint_and_bucket, and a pooled figure is withheld (the four figures null, suppressed 1)
+--    when any of them has the bucket suppressed there, that is, short of three assignees. Otherwise the pooled
+--    figure and the shown ones would give the withheld one away: with three shown cycle times and one
+--    withheld, the pooled P85 is the withheld cycle time itself. A baseline sprint with no issue in the bucket
+--    does not suppress it.
+-- So a row that is shown is pooled from buckets of three or more in sprints that pass both per-sprint checks.
 -- There is no issue count: the pooled count less the sprints' shown counts would be a withheld count.
 CREATE VIEW baseline_cycle_time_per_bucket AS
--- One row per bucket: 1 when any baseline sprint's own view withholds the bucket.
+-- One row per bucket: 1 when any baseline sprint's own view has the bucket suppressed (rule 2).
 WITH withheld AS (
     SELECT v.point_bucket, MAX(v.suppressed) AS suppressed
     FROM cycle_time_per_sprint_and_bucket v

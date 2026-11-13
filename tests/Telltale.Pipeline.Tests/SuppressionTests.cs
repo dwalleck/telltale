@@ -119,29 +119,108 @@ public class SuppressionTests
         await Assert.That(sums).IsEquivalentTo(new (long?, long?, long?)[] { (null, null, null) });
     }
 
+    /// <summary>The cycle time table of a sprint whose delivered count is withheld: one line, no rows (owner decisions D41, D45, D54).</summary>
+    private const string SuppressedCycleTime = "\n## Cycle time by point bucket\n\nsuppressed\n" + TimeInStatusHeading;
+
     [Test]
-    public async Task A_delivered_count_with_two_assignees_among_the_delivered_issues_reads_suppressed_and_the_tables_keep_their_rows()
+    [Arguments("two people delivered issues in three buckets")]
+    [Arguments("nothing was delivered")]
+    [Arguments("two people delivered straight from New")]
+    public async Task A_sprint_whose_delivered_count_is_withheld_shows_its_cycle_time_table_as_one_suppressed_line_whatever_was_delivered(string what)
     {
-        // Owner decision D49: the count is a figure like any other, so it needs three distinct assignees
-        // behind it as well as a team of five. Three issues delivered by two people; three more people in the sprint.
+        // Owner decision D49: the delivered count needs three distinct assignees among the delivered issues as
+        // well as a team of five. Owner decision D54: the cycle time table of such a sprint is one line, as
+        // for a sprint under five. Bucket rows would bound the count from below, their counts add up to it,
+        // and a sentence about an empty table would tell zero from more. A team of five in each case.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.AddSprint41();
+        foreach (var (person, number) in People.Team.Select((person, index) => (person, index + 1)))
+        {
+            InSprintFromItsStart(pipeline.Jira, $"FAKE-9{number}", person);
+        }
+
+        switch (what)
+        {
+            case "two people delivered issues in three buckets":
+                Delivered(pipeline.Jira, "FAKE-1", points: 3, People.One);
+                Delivered(pipeline.Jira, "FAKE-2", points: 3, People.One);
+                Delivered(pipeline.Jira, "FAKE-3", points: 5, People.Two);
+                InSprintFromItsStart(pipeline.Jira, "FAKE-4", People.Two).Moved(Local(2026, 1, 8, 9), Workflow.Done);
+                break;
+            case "two people delivered straight from New":
+                pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).AssignedTo(People.One).Moved(Local(2026, 1, 7, 9), Workflow.Done);
+                pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 6, 9)).AssignedTo(People.Two).Moved(Local(2026, 1, 7, 9), Workflow.Done);
+                break;
+        }
+
+        await pipeline.RunAllAsync(["run", "--sprint", "41"]);
+        pipeline.Out.GetStringBuilder().Clear();
+        var query = await pipeline.RunAsync("query", "SELECT sprint_id, point_bucket, issue_count, median_business_days, suppressed, (SELECT COUNT(*) FROM cycle_time_per_sprint_and_bucket WHERE sprint_id = '41') AS row_count, (SELECT SUM(issue_count) FROM cycle_time_per_sprint_and_bucket WHERE sprint_id = '41') AS counted FROM cycle_time_per_sprint_and_bucket WHERE sprint_id = '41';");
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: suppressed\n" + SuppressedCycleTime);
+        await Assert.That(await pipeline.ReadReportAsync(41)).DoesNotContain("has a cycle time");
+
+        // The same through query: one row for the sprint, with no bucket and no count, in every case.
+        await Assert.That(query).IsEqualTo(0);
+        await Assert.That(pipeline.Out.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            """
+            | sprint_id | point_bucket | issue_count | median_business_days | suppressed | row_count | counted |
+            | --- | --- | --- | --- | --- | --- | --- |
+            | 41 | NULL | NULL | NULL | 1 | 1 | NULL |
+
+            """);
+        var delivered = await pipeline.QueryAsync<(long? DeliveredCount, long Suppressed, long TeamSuppressed)>("SELECT delivered_count, suppressed, team_suppressed FROM delivered_per_sprint WHERE sprint_id = '41';");
+        await Assert.That(delivered).IsEquivalentTo(new (long?, long, long)[] { (null, 1, 0) });
+    }
+
+    [Test]
+    public async Task The_time_in_status_counts_of_a_sprint_whose_delivered_count_is_withheld_stay_and_the_method_note_says_what_they_can_show()
+    {
+        // Owner decision D55: these counts are of every issue that spent time in a status, delivered or not.
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.AddSprint41();
         Delivered(pipeline.Jira, "FAKE-1", points: 3, People.One);
-        Delivered(pipeline.Jira, "FAKE-2", points: 3, People.One);
-        Delivered(pipeline.Jira, "FAKE-3", points: 3, People.Two);
+        Delivered(pipeline.Jira, "FAKE-2", points: 3, People.Two);
         InSprintFromItsStart(pipeline.Jira, "FAKE-4", People.Three);
         InSprintFromItsStart(pipeline.Jira, "FAKE-5", People.Four);
         InSprintFromItsStart(pipeline.Jira, "FAKE-6", People.Five);
 
+        await pipeline.RunAllAsync(["run", "--sprint", "41"]);
+
+        var report = await pipeline.ReadReportAsync(41);
+        await Assert.That(report).Contains(
+            "\nDelivered issues: suppressed\n" + SuppressedCycleTime
+            + "\n| Status | Issues | Median (business days) |\n| --- | ---: | ---: |\n"
+            + "| Fake New | 5 | 1.0 |\n"
+            + "| Fake Development | 5 | 9.0 |\n"
+            + MethodHeading);
+        await Assert.That(report).Contains(
+            "the delivered count reads \"suppressed\" when fewer than three distinct assignees are among the delivered issues, and the cycle time table then reads \"suppressed\" as well, with no rows, because the number of its rows and their counts (the delivered issues that have a cycle time) would each give a lower bound of the withheld count. "
+            + "The time in status table of such a sprint keeps its counts: they count every issue that spent time in a status, delivered or not, so the count of a late status can be close to the withheld delivered count. ");
+    }
+
+    [Test]
+    public async Task A_bucket_short_of_three_assignees_keeps_its_count_in_a_sprint_whose_delivered_count_is_shown()
+    {
+        // Owner decision D5 still holds where D54 does not apply: three people delivered, so the delivered
+        // count is shown, and the bucket with one assignee shows its count beside its withheld figures.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.AddSprint41();
+        Delivered(pipeline.Jira, "FAKE-1", points: 3, People.One);
+        Delivered(pipeline.Jira, "FAKE-2", points: 3, People.Two);
+        Delivered(pipeline.Jira, "FAKE-3", points: 5, People.Three);
+        Delivered(pipeline.Jira, "FAKE-7", points: 5, People.Three);
+        InSprintFromItsStart(pipeline.Jira, "FAKE-4", People.Four);
+        InSprintFromItsStart(pipeline.Jira, "FAKE-5", People.Five);
+
         await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(await pipeline.ReadReportAsync(41)).Contains(
-            "\nDelivered issues: suppressed\n"
+            "\nDelivered issues: 4\n"
             + CycleTimeHeader
-            + "| 3 | 3 | suppressed | suppressed | suppressed | suppressed |\n"
+            + "| 3 | 2 | suppressed | suppressed | suppressed | suppressed |\n"
+            + "| 5 | 2 | suppressed | suppressed | suppressed | suppressed |\n"
             + TimeInStatusHeading);
-        var delivered = await pipeline.QueryAsync<(long? DeliveredCount, long Suppressed, long TeamSuppressed)>("SELECT delivered_count, suppressed, team_suppressed FROM delivered_per_sprint WHERE sprint_id = '41';");
-        await Assert.That(delivered).IsEquivalentTo(new (long?, long, long)[] { (null, 1, 0) });
     }
 
     [Test]
@@ -335,15 +414,20 @@ public class SuppressionTests
         }
 
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
+        // For a sprint the views mark suppressed, each table's view has its one row with no bucket or status
+        // and no count; here that row still carries figures. Otherwise a row has a count and its own flag.
+        var (bucket, status, statusName, position, count) = sprintSuppressed == 1
+            ? ("NULL", "NULL", "NULL", "NULL", "NULL")
+            : ("3.0", "'600004'", "'Fake Development'", "4", "5");
         await pipeline.ExecuteAsync(
             $$"""
             DROP VIEW cycle_time_per_sprint_and_bucket;
             CREATE VIEW cycle_time_per_sprint_and_bucket AS
-            SELECT '41' AS sprint_id, 3.0 AS point_bucket, 5 AS issue_count, 2.0 AS median_business_days, 2.0 AS p85_business_days,
+            SELECT '41' AS sprint_id, {{bucket}} AS point_bucket, {{count}} AS issue_count, 2.0 AS median_business_days, 2.0 AS p85_business_days,
                    2.0 AS median_calendar_days, 2.0 AS p85_calendar_days, 1 AS suppressed;
             DROP VIEW time_in_status_per_sprint;
             CREATE VIEW time_in_status_per_sprint AS
-            SELECT '41' AS sprint_id, '600004' AS status_id, 'Fake Development' AS status_name, 4 AS board_position, 5 AS issue_count,
+            SELECT '41' AS sprint_id, {{status}} AS status_id, {{statusName}} AS status_name, {{position}} AS board_position, {{count}} AS issue_count,
                    2.0 AS median_business_days, 1 AS suppressed;
             DROP VIEW delivered_per_sprint;
             CREATE VIEW delivered_per_sprint AS

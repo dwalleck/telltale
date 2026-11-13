@@ -37,7 +37,7 @@ public class QueryCommandTests
         await FillAndDeriveAsync(pipeline);
 
         var figures = await pipeline.RunAsync("query", "SELECT point_bucket, issue_count, median_business_days / 3 AS third FROM cycle_time_per_sprint_and_bucket WHERE sprint_id = '42';");
-        var nothing = await pipeline.RunAsync("query", "SELECT sprint_id, suppressed FROM sprint_team WHERE sprint_id = '99';");
+        var nothing = await pipeline.RunAsync("query", "SELECT sprint_id, team_suppressed FROM sprint_team WHERE sprint_id = '99';");
 
         await Assert.That(figures).IsEqualTo(0);
         await Assert.That(nothing).IsEqualTo(0);
@@ -46,7 +46,7 @@ public class QueryCommandTests
             | point_bucket | issue_count | third |
             | --- | --- | --- |
             | 3 | 5 | 0.6666666666666666 |
-            | sprint_id | suppressed |
+            | sprint_id | team_suppressed |
             | --- | --- |
 
             """);
@@ -58,7 +58,7 @@ public class QueryCommandTests
         await using var pipeline = new PipelineHarness();
         await FillAndDeriveAsync(pipeline);
         var file = Path.Combine(pipeline.Directory, "question.sql");
-        await File.WriteAllTextAsync(file, "-- How many sprints are short of five?\nSELECT COUNT(*) AS small_sprints\nFROM sprint_team\nWHERE suppressed = 1;\n");
+        await File.WriteAllTextAsync(file, "-- How many sprints are short of five?\nSELECT COUNT(*) AS small_sprints\nFROM sprint_team\nWHERE team_suppressed = 1;\n");
 
         var exit = await pipeline.RunAsync("query", "--file", file);
 

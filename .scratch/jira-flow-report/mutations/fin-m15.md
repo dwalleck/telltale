@@ -14,3 +14,6 @@ replace: |-
 
 Claim (review finding 6): what an earlier version deleted is gone from the file after the migration. The test ran red first; this pins which line it depends on.
 - Verified 2026-11-12 at 741dd98: red, 1 failed of 7 (Pipeline, filter /*/*/PrivacyTests/*); restored.
+- Verified 2026-11-12 at a198e06: red, 1 failed of 7 (Pipeline, filter /*/*/PrivacyTests/*); restored.
+- Verified 2026-11-12 at cf5da5b: red, 1 failed of 7 (Pipeline, filter /*/*/PrivacyTests/*); restored.
+- Verified 2026-11-12 at bc92ab3: red, 1 failed of 7 (Pipeline, filter /*/*/PrivacyTests/*); restored.

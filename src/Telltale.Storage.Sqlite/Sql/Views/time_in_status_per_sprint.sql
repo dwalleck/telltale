@@ -8,6 +8,10 @@
 -- has exactly one row, with no status, no count (D41) and suppressed = 1, whether or not an issue spent
 -- time in it (D45: which statuses have rows would say where its few people's work sat).
 -- An unassigned issue counts toward nobody.
+-- Only the team check (sprint_team.team_suppressed) is read here, not the check of the delivered count
+-- (delivered_suppressed): these counts are of every issue that spent time in a status, delivered or not, so
+-- they stay when the delivered count is withheld, and the report says that a late status's count can be
+-- close to it (owner decision D55).
 CREATE VIEW time_in_status_per_sprint AS
 WITH status_time AS (
     SELECT t.sprint_id,
@@ -34,8 +38,8 @@ JOIN board_status b ON b.status_id = st.status_id
 JOIN duration_figures f ON f.scope = 'sprint' AND f.measure = 'status' AND f.sprint_id = st.sprint_id AND CAST(f.status_id AS TEXT) = CAST(st.status_id AS TEXT)
 LEFT JOIN status s ON s.status_id = st.status_id
 WHERE b.is_done = 0
-  AND t.suppressed = 0
+  AND t.team_suppressed = 0
 UNION ALL
 SELECT t.sprint_id, NULL, NULL, NULL, NULL, NULL, 1
 FROM sprint_team t
-WHERE t.suppressed = 1;
+WHERE t.team_suppressed = 1;

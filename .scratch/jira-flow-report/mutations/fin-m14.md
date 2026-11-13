@@ -14,3 +14,6 @@ replace: |-
 
 Claim (review finding 3): allowing a recursive query grants no read; the refusals of a raw and of an internal object, also inside a recursive query, passed when written.
 - Verified 2026-11-12 at 741dd98: red, 8 failed of 25 (Pipeline, filter /*/*/QueryCommandTests/*); restored.
+- Verified 2026-11-12 at a198e06: red, 8 failed of 25 (Pipeline, filter /*/*/QueryCommandTests/*); restored.
+- Verified 2026-11-12 at cf5da5b: red, 8 failed of 25 (Pipeline, filter /*/*/QueryCommandTests/*); restored.
+- Verified 2026-11-12 at bc92ab3: red, 8 failed of 25 (Pipeline, filter /*/*/QueryCommandTests/*); restored.

@@ -5,14 +5,16 @@
 -- The median and the P85 are duration_figures' (how each is picked is said there), for business and for
 -- calendar days, which are ranked separately.
 --
--- Minimum group size (GLOSSARY, ADR-0003): the four figures are null and suppressed is 1 when the sprint has
--- fewer than five distinct assignees (sprint_team) or the bucket has fewer than three behind it. A bucket
--- short of three keeps its issue_count (owner decision D5). A sprint short of five has no bucket rows at
--- all: it has exactly one row, with no bucket, no count (D41: the counts of a small sprint are its people's
--- throughput, and summed they give back the delivered count that is withheld) and suppressed = 1, whether
--- or not anything was delivered in it (D45: which buckets have rows would say what its few people worked
--- on). In that row a null point_bucket does not mean unestimated. An issue counts toward its assignee at
--- the time of the sync, and an unassigned issue toward nobody.
+-- Minimum group size (GLOSSARY, ADR-0003): the four figures are null and suppressed is 1 when the bucket has
+-- fewer than three distinct assignees behind it. Such a bucket keeps its issue_count (owner decision D5).
+-- A sprint whose delivered count is withheld (sprint_team.delivered_suppressed: fewer than five assignees in
+-- the sprint, or fewer than three among its delivered issues) has no bucket rows at all: it has exactly one
+-- row, with no bucket, no count and suppressed = 1, whether or not anything was delivered in it. Bucket
+-- counts add up to the delivered issues that have a cycle time, and the number of bucket rows is at most
+-- that: both bound the withheld delivered count from below (D41, D54). And which buckets have rows says what
+-- the sprint's few people worked on (D45). In that row a null
+-- point_bucket does not mean unestimated. An issue counts toward its assignee at the time of the sync, and
+-- an unassigned issue toward nobody.
 CREATE VIEW cycle_time_per_sprint_and_bucket AS
 WITH bucket AS (
     SELECT c.delivery_sprint_id AS sprint_id,
@@ -32,7 +34,7 @@ shown AS (
     FROM bucket b
     -- An inner join: an issue delivered between sprints has no sprint, so it is in no row.
     JOIN sprint_team t ON t.sprint_id = b.sprint_id
-    WHERE t.suppressed = 0
+    WHERE t.delivered_suppressed = 0
 )
 SELECT s.sprint_id,
        s.point_bucket,
@@ -48,4 +50,4 @@ JOIN duration_figures calendar ON calendar.scope = 'sprint' AND calendar.measure
 UNION ALL
 SELECT t.sprint_id, NULL, NULL, NULL, NULL, NULL, NULL, 1
 FROM sprint_team t
-WHERE t.suppressed = 1;
+WHERE t.delivered_suppressed = 1;

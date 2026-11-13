@@ -20,3 +20,6 @@ The other direction (a later change's "from" the timeline was not in does not st
 - Verified 2026-11-12 at 2fa24b9: red, 2 failed of 52 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
 - Verified 2026-11-12 at 5c4f1d9: red, 2 failed of 53 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
 - Verified 2026-11-12 at 741dd98: red, 2 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
+- Verified 2026-11-12 at a198e06: red, 2 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
+- Verified 2026-11-12 at cf5da5b: red, 2 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
+- Verified 2026-11-12 at bc92ab3: red, 2 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.

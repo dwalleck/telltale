@@ -17,3 +17,6 @@ Expected red: `A_role_in_the_file_that_run_would_refuse_stops_a_rerun_and_is_nei
 - Verified 2026-11-12 at 73ad3e6: red, 1 failed of 111 (Pipeline, filter /*/*/DiscoverTests/*); restored.
 - Verified 2026-11-12 at 5c4f1d9: red, 1 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.
 - Verified 2026-11-12 at 741dd98: red, 1 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.
+- Verified 2026-11-12 at a198e06: red, 1 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.
+- Verified 2026-11-12 at cf5da5b: red, 1 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.
+- Verified 2026-11-12 at bc92ab3: red, 1 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.

@@ -72,14 +72,26 @@ public static class BaselineSprintRules
     }
 
     /// <summary>
-    /// What the console says when baseline sprints have fewer than five distinct assignees (owner decision
-    /// D50). Nothing stops: the views withhold every baseline figure, and this names the sprints and says so.
+    /// The baseline sprints whose delivered count is withheld (fewer than five distinct assignees, or fewer
+    /// than three among the delivered issues; owner decisions D50, D56), in order, read from the metric view
+    /// <c>baseline_sprint</c>. While there is one, the views withhold every baseline figure, and nothing stops:
+    /// the console and the report name the sprints, with <see cref="WithheldOnTheConsole"/> and
+    /// <see cref="WithheldInTheReport"/>. Neither says which of the two reasons applies.
     /// </summary>
-    public static string ShortOfFiveAssignees(IReadOnlyList<string> sprintIds) =>
-        $"{SprintsNamed(sprintIds)} {(sprintIds.Count == 1 ? "has" : "each have")} fewer than five assignees, so every baseline figure is withheld (baselineSprintIds in the configuration file).";
+    public static Task<IReadOnlyList<string>> ReadWithheldAsync(ITelltaleStore store, CancellationToken cancellationToken = default) =>
+        store.QueryViewsAsync<string>("SELECT sprint_id FROM baseline_sprint WHERE suppressed <> 0 ORDER BY sprint_id;", cancellationToken: cancellationToken);
+
+    /// <summary>The console's line about <paramref name="sprintIds"/>, the result of <see cref="ReadWithheldAsync"/> when it is not empty.</summary>
+    public static string WithheldOnTheConsole(IReadOnlyList<string> sprintIds) =>
+        $"{SprintsNamed(sprintIds)} {(sprintIds.Count == 1 ? "has" : "each have")} fewer than five assignees, or fewer than three among {(sprintIds.Count == 1 ? "its" : "their")} delivered issues, "
+        + "so every baseline figure is withheld (baselineSprintIds in the configuration file).";
+
+    /// <summary>The method note's sentence about the same sprints.</summary>
+    public static string WithheldInTheReport(IReadOnlyList<string> sprintIds) =>
+        $"{SprintsNamed(sprintIds)} {(sprintIds.Count == 1 ? "has its" : "each have their")} delivered count withheld, so every baseline figure in this report reads \"suppressed\".";
 
     /// <summary>"Baseline sprint 41", or "Baseline sprints 41, 42 and 43".</summary>
-    public static string SprintsNamed(IReadOnlyList<string> sprintIds) => sprintIds.Count == 1
+    private static string SprintsNamed(IReadOnlyList<string> sprintIds) => sprintIds.Count == 1
         ? $"Baseline sprint {sprintIds[0]}"
         : $"Baseline sprints {string.Join(", ", sprintIds.Take(sprintIds.Count - 1))} and {sprintIds[^1]}";
 }

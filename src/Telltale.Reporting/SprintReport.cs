@@ -46,14 +46,12 @@ public static class SprintReport
     /// </summary>
     public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, IReadOnlyList<string> baselineSprintIds, CancellationToken cancellationToken = default)
     {
-        // Owner decision D50: while a baseline sprint has a team smaller than five, every baseline figure is
+        // Owner decisions D50, D56: while a baseline sprint has its delivered count withheld, every baseline figure is
         // withheld. The baseline views have no rows then, so the cells are written from this list.
-        var smallBaselineSprints = baselineSprintIds.Count == 0
-            ? []
-            : await store.QueryViewsAsync<string>("SELECT sprint_id FROM baseline_sprint WHERE suppressed <> 0 ORDER BY sprint_id;", cancellationToken: cancellationToken);
-        var baseline = baselineSprintIds.Count == 0 ? BaselineColumns.None : smallBaselineSprints.Count > 0 ? BaselineColumns.Withheld : BaselineColumns.Shown;
+        var withheldBaselineSprints = baselineSprintIds.Count == 0 ? [] : await BaselineSprintRules.ReadWithheldAsync(store, cancellationToken);
+        var baseline = baselineSprintIds.Count == 0 ? BaselineColumns.None : withheldBaselineSprints.Count > 0 ? BaselineColumns.Withheld : BaselineColumns.Shown;
         var rows = await store.QueryViewsAsync<DeliveredRow>(
-            "SELECT sprint_name, started, ended, planned_end, delivered_count, suppressed, team_suppressed FROM delivered_per_sprint WHERE sprint_id = @sprintId;",
+            "SELECT sprint_name, started, ended, planned_end, delivered_count, suppressed FROM delivered_per_sprint WHERE sprint_id = @sprintId;",
             new { sprintId },
             cancellationToken);
 
@@ -66,7 +64,7 @@ public static class SprintReport
         var report = new StringBuilder();
         AppendTitle(report, sprint, teamTimeZone);
         AppendDeliveredCount(report, sprint);
-        AppendCycleTime(report, sprint, baseline, await store.QueryViewsAsync<CycleTimeRow>(
+        AppendCycleTime(report, baseline, await store.QueryViewsAsync<CycleTimeRow>(
             """
             SELECT v.point_bucket, v.issue_count, v.median_business_days, v.p85_business_days, v.median_calendar_days, v.p85_calendar_days, v.suppressed,
                    b.median_business_days AS baseline_median_business_days, b.p85_business_days AS baseline_p85_business_days, b.suppressed AS baseline_suppressed
@@ -77,9 +75,9 @@ public static class SprintReport
             """,
             new { sprintId },
             cancellationToken));
-        AppendTimeInStatus(report, sprint, baseline, await ReadTimeInStatusAsync(store, sprintId, cancellationToken));
+        AppendTimeInStatus(report, baseline, await ReadTimeInStatusAsync(store, sprintId, cancellationToken));
         var quality = await ReadDataQualityAsync(store, cancellationToken);
-        AppendMethodNote(report, quality, baselineSprintIds, smallBaselineSprints);
+        AppendMethodNote(report, quality, baselineSprintIds, withheldBaselineSprints);
         AppendFooter(report, quality);
         return report.ToString();
     }
@@ -130,11 +128,12 @@ public static class SprintReport
         report.Append("Delivered issues: ").Append(Figure(sprint.Suppressed, sprint.DeliveredCount?.ToString(CultureInfo.InvariantCulture))).Append('\n');
 
     /// <summary>The cycle time table: one row per point bucket, smallest estimate first and unestimated issues last.</summary>
-    private static void AppendCycleTime(StringBuilder report, DeliveredRow sprint, BaselineColumns baseline, IReadOnlyList<CycleTimeRow> buckets)
+    private static void AppendCycleTime(StringBuilder report, BaselineColumns baseline, IReadOnlyList<CycleTimeRow> buckets)
     {
         report.Append("\n## Cycle time by point bucket\n\n");
-        if (AppendSuppressedTable(report, sprint))
+        if (buckets is [{ IssueCount: null }])
         {
+            AppendSuppressedTable(report);
             return;
         }
 
@@ -156,11 +155,12 @@ public static class SprintReport
     }
 
     /// <summary>One row per status issues spent time in during the sprint, in board order. A status nobody was in has no row.</summary>
-    private static void AppendTimeInStatus(StringBuilder report, DeliveredRow sprint, BaselineColumns baseline, IReadOnlyList<TimeInStatusRow> rows)
+    private static void AppendTimeInStatus(StringBuilder report, BaselineColumns baseline, IReadOnlyList<TimeInStatusRow> rows)
     {
         report.Append("\n## Time in status\n\n");
-        if (AppendSuppressedTable(report, sprint))
+        if (rows is [{ IssueCount: null }])
         {
+            AppendSuppressedTable(report);
             return;
         }
 
@@ -180,46 +180,37 @@ public static class SprintReport
     }
 
     /// <summary>
-    /// For a sprint that fails the team check, writes the one line that stands for a whole table and returns
-    /// true (owner decision D45): no row, and no sentence about an empty table either, because which buckets
-    /// or statuses have rows says what the sprint's few people worked on.
+    /// Writes the one line that stands for a table its view withholds as a whole: no row, and no sentence about
+    /// an empty table either, because which buckets or statuses have rows says what the sprint's few people
+    /// worked on (owner decision D45). The view decides, and decides once: for such a sprint it gives exactly
+    /// one row, with no count (D41, D54), and the table's caller writes this line when that is what it got.
     /// </summary>
-    private static bool AppendSuppressedTable(StringBuilder report, DeliveredRow sprint)
-    {
-        if (sprint.TeamSuppressed == 0)
-        {
-            return false;
-        }
-
-        report.Append(Suppressed).Append('\n');
-        return true;
-    }
+    private static void AppendSuppressedTable(StringBuilder report) => report.Append(Suppressed).Append('\n');
 
     /// <summary>
     /// What the figures mean, with each rule as the glossary and the owner's decisions state it. The suppression
     /// rule is ADR-0003's for results grouped by issue attributes. The time zone is the one derive stored.
     /// </summary>
-    private static void AppendMethodNote(StringBuilder report, DataQualityRow quality, IReadOnlyList<string> baselineSprintIds, IReadOnlyList<string> smallBaselineSprints)
+    private static void AppendMethodNote(StringBuilder report, DataQualityRow quality, IReadOnlyList<string> baselineSprintIds, IReadOnlyList<string> withheldBaselineSprints)
     {
         report.Append("\n## Method\n\n")
             .Append("- Durations are in business days: days that are neither a weekend nor a company holiday, each counted in full (24 hours) in the team's time zone (").Append(quality.TimeZone).Append("). Calendar days are shown alongside: elapsed time divided by 24 hours.\n")
             .Append("- Cycle time runs from an issue's first entry into a work status to its last entry into a done status, for delivered issues only. It belongs to the sprint in which the issue was delivered.\n")
             .Append("- Figures are medians and P85s. The median is the middle value, or the mean of the two middle values. The P85 is the smallest value with at least 85% of the values at or below it.\n")
             .Append("- Time in status covers the statuses before done. An issue counts toward a status only if it spent more than zero business days there.\n")
-            .Append("- A figure is shown only where it cannot show one person's work. The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in it. When the team is smaller than five, the delivered count and both tables read \"suppressed\", with no rows. With a team of five or more, a row with fewer than three distinct assignees behind it keeps its issue count and reads \"suppressed\" for its figures, and the delivered count reads \"suppressed\" when fewer than three distinct assignees are among the delivered issues. The footer's two counts read \"suppressed\" when the issues in the whole store have fewer than five distinct assignees, or fewer than three are among the issues counted.\n")
+            .Append("- A figure is shown only where it cannot show one person's work. The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in it. When the team is smaller than five, the delivered count and both tables read \"suppressed\", with no rows. With a team of five or more, a row with fewer than three distinct assignees behind it keeps its issue count and reads \"suppressed\" for its figures, and the delivered count reads \"suppressed\" when fewer than three distinct assignees are among the delivered issues, and the cycle time table then reads \"suppressed\" as well, with no rows, because the number of its rows and their counts (the delivered issues that have a cycle time) would each give a lower bound of the withheld count. The time in status table of such a sprint keeps its counts: they count every issue that spent time in a status, delivered or not, so the count of a late status can be close to the withheld delivered count. The footer's two counts read \"suppressed\" when the issues in the whole store have fewer than five distinct assignees, or fewer than three are among the issues counted.\n")
             .Append("- An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. An unassigned issue counts toward nobody.\n");
 
         // Said only when there is a baseline: without one the report has no baseline column to explain.
         if (baselineSprintIds.Count > 0)
         {
             report.Append("- The baseline columns pool every issue of the baseline sprints, a list fixed in the configuration (sprints ").AppendJoin(", ", baselineSprintIds)
-                .Append("), each a completed sprint. A baseline figure reads \"suppressed\" when any baseline sprint has that row suppressed in its own report, so that a pooled figure cannot give back a withheld one. It reads \"none\" when no issue of the baseline sprints is in the row. When a baseline sprint has a team smaller than five, every baseline figure reads \"suppressed\".\n");
+                .Append("), each a completed sprint. A baseline figure reads \"suppressed\" when any baseline sprint has that row suppressed in its own report, so that a pooled figure cannot give back a withheld one. It reads \"none\" when no issue of the baseline sprints is in the row. Every baseline figure reads \"suppressed\" when a baseline sprint has its delivered count withheld: its team is smaller than five, or fewer than three distinct assignees are among its delivered issues.\n");
         }
 
-        if (smallBaselineSprints.Count > 0)
+        if (withheldBaselineSprints.Count > 0)
         {
-            report.Append("- ").Append(BaselineSprintRules.SprintsNamed(smallBaselineSprints)).Append(smallBaselineSprints.Count == 1 ? " has" : " each have")
-                .Append(" a team smaller than five, so every baseline figure in this report reads \"suppressed\".\n");
+            report.Append("- ").Append(BaselineSprintRules.WithheldInTheReport(withheldBaselineSprints)).Append('\n');
         }
 
         report.Append("- An interval that is still open (an issue still in a status, a sprint not yet completed) ends at the as-of time below.\n")
@@ -291,7 +282,7 @@ public static class SprintReport
         /// <summary>Each cell is the baseline views' figure, "suppressed" or "none".</summary>
         Shown,
 
-        /// <summary>A baseline sprint has a team smaller than five: every cell reads "suppressed" (owner decision D50).</summary>
+        /// <summary>A baseline sprint has its delivered count withheld: every cell reads "suppressed" (owner decisions D50, D56).</summary>
         Withheld,
     }
 
@@ -312,7 +303,7 @@ public static class SprintReport
     private sealed class TimeInStatusRow
     {
         public string StatusName { get; init; } = "";
-        /// <summary>Null when the sprint is short of five assignees: its counts are withheld with its figures (owner decision D41).</summary>
+        /// <summary>Null in the one row of a sprint short of five assignees: it has no status rows, and that one row is how the report knows to write the "suppressed" line (owner decisions D41, D45).</summary>
         public long? IssueCount { get; init; }
         public double? MedianBusinessDays { get; init; }
         public long Suppressed { get; init; } = 1;
@@ -337,16 +328,14 @@ public static class SprintReport
         public string? Ended { get; init; }
         public string? PlannedEnd { get; init; }
         public long? DeliveredCount { get; init; }
-        /// <summary>The delivered count's own flag: the team check, and three assignees among the delivered issues (owner decision D49).</summary>
+        /// <summary>The delivered count's own flag: the team check, and three assignees among the delivered issues (owner decision D49). The cycle time view withholds its rows under the same check (D54).</summary>
         public long Suppressed { get; init; } = 1;
-        /// <summary>The team check alone: 1 for a sprint whose tables show no rows.</summary>
-        public long TeamSuppressed { get; init; } = 1;
     }
 
     private sealed class CycleTimeRow
     {
         public double? PointBucket { get; init; }
-        /// <summary>Null when the sprint is short of five assignees: its counts are withheld with its figures (owner decision D41).</summary>
+        /// <summary>Null in the one row of a sprint whose delivered count is withheld (short of five assignees, or of three among its delivered issues): it has no bucket rows, and that one row is how the report knows to write the "suppressed" line (owner decisions D41, D54).</summary>
         public long? IssueCount { get; init; }
         public double? MedianBusinessDays { get; init; }
         public double? P85BusinessDays { get; init; }

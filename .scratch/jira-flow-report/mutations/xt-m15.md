@@ -17,3 +17,6 @@ Expected red: every case of `A_project_key_that_is_not_in_jiras_key_form_is_refu
 - Verified 2026-11-12 at 6c34c20: red, 7 failed of 52 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
 - Verified 2026-11-12 at 5c4f1d9: red, 7 failed of 53 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
 - Verified 2026-11-12 at 741dd98: red, 7 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
+- Verified 2026-11-12 at a198e06: red, 7 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
+- Verified 2026-11-12 at cf5da5b: red, 7 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
+- Verified 2026-11-12 at bc92ab3: red, 7 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.

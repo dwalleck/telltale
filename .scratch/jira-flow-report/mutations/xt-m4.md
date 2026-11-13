@@ -17,3 +17,6 @@ Expected red: `Sprint_changes_stored_as_jira_wrote_them_are_rewritten_in_the_sto
 - Verified 2026-11-12 at 73ad3e6: red, 1 failed of 26 (Pipeline, filter /*/*/TimeInStatusTableTests/*); restored.
 - Verified 2026-11-12 at 5c4f1d9: red, 1 failed of 28 (Pipeline, filter /*/*/TimeInStatusTableTests/*); restored.
 - Verified 2026-11-12 at 741dd98: red, 1 failed of 35 (Pipeline, filter /*/*/TimeInStatusTableTests/*); restored.
+- Verified 2026-11-12 at a198e06: red, 1 failed of 35 (Pipeline, filter /*/*/TimeInStatusTableTests/*); restored.
+- Verified 2026-11-12 at cf5da5b: red, 1 failed of 35 (Pipeline, filter /*/*/TimeInStatusTableTests/*); restored.
+- Verified 2026-11-12 at bc92ab3: red, 1 failed of 35 (Pipeline, filter /*/*/TimeInStatusTableTests/*); restored.

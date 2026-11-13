@@ -15,3 +15,6 @@ replace: |-
 Claim (B7): report asks the before-range rule of the baseline sprints at every run, also when neither the list nor the raw data changed.
 - Verified 2026-11-12 at 5c4f1d9: red, 1 failed of 38 (Pipeline, filter /*/*/BaselineTests/*); restored.
 - Verified 2026-11-12 at 741dd98: red, 1 failed of 38 (Pipeline, filter /*/*/BaselineTests/*); restored.
+- Verified 2026-11-12 at a198e06: red, 1 failed of 39 (Pipeline, filter /*/*/BaselineTests/*); restored.
+- Verified 2026-11-12 at cf5da5b: red, 1 failed of 40 (Pipeline, filter /*/*/BaselineTests/*); restored.
+- Verified 2026-11-12 at bc92ab3: red, 1 failed of 41 (Pipeline, filter /*/*/BaselineTests/*); restored.
