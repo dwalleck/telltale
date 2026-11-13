@@ -1,4 +1,5 @@
 using Telltale.Core.Intervals;
+using TUnit.Assertions.Enums;
 using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Core.Tests;
@@ -95,18 +96,98 @@ public class BriefVisitRuleTests
             new StatusInterval(New, Created, caughtUp),
             new StatusInterval(Development, caughtUp, caughtUp),
             new StatusInterval(Review, caughtUp, null),
-        });
+        }, CollectionOrdering.Matching);
     }
 
     [Test]
-    public async Task The_status_an_issue_is_in_now_is_not_a_stay_of_no_length_even_at_the_instant_it_was_entered()
+    public async Task The_status_an_issue_is_in_now_is_a_stay_with_no_end_and_never_a_brief_visit()
     {
         var entered = Local(2026, 11, 3, 10);
         var timeline = StatusTimeline.Build(Created, Development, [new StatusChange("1", entered, New, Development)]);
 
-        var statuses = BriefVisits.During(TimeInStatus.CountedTime(Sprint41, MemberThroughout, asOf: entered), BriefVisits.Stays(timeline), DevelopmentListed);
+        var stays = BriefVisits.Stays(timeline);
+        var statuses = BriefVisits.During(TimeInStatus.CountedTime(Sprint41, MemberThroughout, AsOf), stays, DevelopmentListed);
 
+        await Assert.That(stays).IsEquivalentTo(new[]
+        {
+            new StatusInterval(New, Created, entered),
+            new StatusInterval(Development, entered, null),
+        }, CollectionOrdering.Matching);
         await Assert.That(statuses).IsEmpty();
+    }
+
+    [Test]
+    public async Task A_change_from_a_status_to_itself_does_not_end_the_stay()
+    {
+        // Development to Development after twenty seconds: one unbroken stay of two days (D60), though the
+        // timeline has two intervals for it.
+        var entered = Local(2026, 11, 3, 10);
+        var left = Local(2026, 11, 5, 10);
+        var timeline = StatusTimeline.Build(Created, Review,
+        [
+            new StatusChange("1", entered, New, Development),
+            new StatusChange("2", entered.AddSeconds(20), Development, Development),
+            new StatusChange("3", left, Development, Review),
+        ]);
+
+        var stays = BriefVisits.Stays(timeline);
+
+        await Assert.That(stays).IsEquivalentTo(new[]
+        {
+            new StatusInterval(New, Created, entered),
+            new StatusInterval(Development, entered, left),
+            new StatusInterval(Review, left, null),
+        }, CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task A_change_from_a_status_to_itself_at_the_instant_it_was_entered_makes_no_stay_of_no_length()
+    {
+        // The issue entered Development and never left it: there is nothing it passed through.
+        var entered = Local(2026, 11, 3, 10);
+        var timeline = StatusTimeline.Build(Created, Development,
+        [
+            new StatusChange("1", entered, New, Development),
+            new StatusChange("2", entered, Development, Development),
+        ]);
+
+        var stays = BriefVisits.Stays(timeline);
+
+        await Assert.That(stays).IsEquivalentTo(new[]
+        {
+            new StatusInterval(New, Created, entered),
+            new StatusInterval(Development, entered, null),
+        }, CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task A_stay_of_no_length_made_only_by_a_change_dated_before_the_issue_was_created_is_not_a_visit()
+    {
+        // The timeline treats a change dated before the creation as made at the creation, and records an
+        // anomaly. The status the issue was created in would then be entered and left at one instant; the
+        // owner decided on 2026-11-13 that this is not a visit (decision bv-D5).
+        var timeline = StatusTimeline.Build(Created, Development, [new StatusChange("1", Created.AddDays(-1), New, Development)]);
+
+        var stays = BriefVisits.Stays(timeline);
+
+        await Assert.That(stays).IsEquivalentTo(new[] { new StatusInterval(Development, Created, null) });
+        await Assert.That(timeline.Anomalies).HasSingleItem();
+    }
+
+    [Test]
+    public async Task A_status_left_by_a_change_dated_at_the_instant_the_issue_was_created_is_a_stay_of_no_length()
+    {
+        // Dated at the creation, not before it: nothing was moved, so this is a pass-through like any other.
+        var timeline = StatusTimeline.Build(Created, Development, [new StatusChange("1", Created, New, Development)]);
+
+        var stays = BriefVisits.Stays(timeline);
+
+        await Assert.That(stays).IsEquivalentTo(new[]
+        {
+            new StatusInterval(New, Created, Created),
+            new StatusInterval(Development, Created, null),
+        }, CollectionOrdering.Matching);
+        await Assert.That(timeline.Anomalies).IsEmpty();
     }
 
     [Test]
@@ -139,7 +220,7 @@ public class BriefVisitRuleTests
     [Test]
     public async Task A_stay_of_no_length_at_the_instant_the_sprint_starts_counts_toward_it()
     {
-        // The counted time is a half-open span: its first instant is inside it.
+        // The counted time is a half-open span: its first instant is inside it (decision bv-D6).
         var statuses = BriefVisits.During(TimeInStatus.CountedTime(Sprint41, MemberThroughout, AsOf), ThroughDevelopmentAt(SprintStart), DevelopmentListed);
 
         await Assert.That(statuses).IsEquivalentTo(new[] { Development });
@@ -149,7 +230,8 @@ public class BriefVisitRuleTests
     public async Task A_stay_of_no_length_at_the_instant_the_sprint_ends_does_not_count_toward_it()
     {
         // The counted time is a half-open span: the instant it ends at is outside it, and no time in status
-        // is counted from that instant on.
+        // is counted from that instant on. The owner decided this on 2026-11-13 (decision bv-D6): the start is
+        // included and the end is not, though such a pass-through then counts toward no sprint.
         var statuses = BriefVisits.During(TimeInStatus.CountedTime(Sprint41, MemberThroughout, AsOf), ThroughDevelopmentAt(SprintEnd), DevelopmentListed);
 
         await Assert.That(statuses).IsEmpty();

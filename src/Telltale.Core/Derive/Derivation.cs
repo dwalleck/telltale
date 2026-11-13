@@ -103,6 +103,9 @@ public static class Derivation
             // Only sprints that count (the windows above) have time in status. A sprint the issue was never in
             // gives nothing, so it is not measured at all: most issues were in one or two of the board's sprints.
             var memberOf = membership.Intervals.Select(interval => interval.SprintId).ToHashSet(StringComparer.Ordinal);
+
+            // The issue's stays are the same for every sprint, and are not worked out when no status is listed.
+            IReadOnlyList<StatusInterval> stays = settings.BriefVisitThresholds.Count == 0 ? [] : BriefVisits.Stays(timeline);
             foreach (var window in windows.Where(counted => memberOf.Contains(counted.SprintId)))
             {
                 // The time this sprint counts of this issue, worked out once for the time in status and the brief visits.
@@ -112,7 +115,7 @@ public static class Derivation
                     .Select(pair => new SprintStatusTime(issue.IssueId, window.SprintId, pair.Key, pair.Value.CalendarTime, pair.Value.BusinessTime, pair.Value.BusinessDays)));
 
                 // A brief visit is not a changelog anomaly: nothing here adds to the anomalies or to what derive logs.
-                briefVisits.AddRange(BriefVisits.During(countedTime, BriefVisits.Stays(timeline), settings.BriefVisitThresholds)
+                briefVisits.AddRange(BriefVisits.During(countedTime, stays, settings.BriefVisitThresholds)
                     .Order(StringComparer.Ordinal)
                     .Select(statusId => new SprintBriefVisit(issue.IssueId, window.SprintId, statusId)));
             }

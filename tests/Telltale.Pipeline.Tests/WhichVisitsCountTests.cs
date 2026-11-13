@@ -348,6 +348,60 @@ public class WhichVisitsCountTests
         await Assert.That(await CountsAfterDeriveAsync(pipeline)).IsEqualTo(CountsHead + "| 43 | Fake Development | 1 | 1 |\n");
     }
 
+    [Test]
+    public async Task A_change_from_a_status_to_itself_does_not_end_the_stay_and_the_time_in_status_is_what_it_was()
+    {
+        // In Development from Tuesday 09:00 to Thursday 09:00, with a change from Development to Development
+        // twenty seconds in. It is one unbroken stay of two days (D60), and the row still shows the two days.
+        await using var pipeline = SprintFortyOne();
+        var tuesday = Local(2026, 1, 6, 9);
+        Issue(pipeline)
+            .Moved(tuesday, Workflow.Development)
+            .Moved(tuesday.AddSeconds(20), Workflow.Development)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done);
+        ListDevelopment(pipeline, minutes: 5);
+
+        await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
+
+        await Assert.That(await QueryAsync(pipeline, CountsSql)).IsEqualTo(CountsHead + DevelopmentNotCounted);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\n| Fake Development | 1 | 2.0 | 2.0 |\n");
+    }
+
+    [Test]
+    public async Task A_change_from_a_status_to_itself_at_the_instant_it_was_entered_is_not_a_brief_visit()
+    {
+        // Moved to Development, and from Development to Development, at one instant; then two days there. The
+        // issue never passed through Development: it stayed.
+        await using var pipeline = SprintFortyOne();
+        var tuesday = Local(2026, 1, 6, 9);
+        Issue(pipeline)
+            .Moved(tuesday, Workflow.Development)
+            .Moved(tuesday, Workflow.Development)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done);
+        ListDevelopment(pipeline, minutes: 5);
+
+        await Assert.That(await CountsAfterDeriveAsync(pipeline)).IsEqualTo(CountsHead + DevelopmentNotCounted);
+    }
+
+    [Test]
+    public async Task A_change_dated_before_the_issue_was_created_makes_no_brief_visit_to_the_status_it_was_created_in()
+    {
+        // The issue is created in New on Monday 5 January at 10:00, inside the sprint, and its first change,
+        // to Development, is dated the day before. The timeline treats that change as made at the creation, so
+        // New would be entered and left at one instant. That is a changelog anomaly and not a visit (decision
+        // bv-D5). Two days back in New later in the week put the issue in New's row.
+        await using var pipeline = SprintFortyOne();
+        var created = Local(2026, 1, 5, 10);
+        pipeline.Jira.AddIssue("FAKE-1", created).AssignedTo(People.One).InSprints(41)
+            .Moved(created.AddDays(-1), Workflow.Development)
+            .Moved(Local(2026, 1, 6, 9), Workflow.New)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 9, 10), Workflow.Done);
+        pipeline.Config["briefVisitThresholds"] = new JsonObject { [Workflow.New.Id] = 5 };
+
+        await Assert.That(await CountsAfterDeriveAsync(pipeline)).IsEqualTo(CountsHead + "| 41 | Fake New | 1 | 0 |\n");
+    }
+
     /// <summary>Runs <c>backfill</c> and <c>derive</c>, and reads the counts with <c>query</c>.</summary>
     private static async Task<string> CountsAfterDeriveAsync(PipelineHarness pipeline)
     {
