@@ -265,7 +265,7 @@ After changing the setting, run `telltale derive`, or `telltale run`, which incl
 
 What a report then shows:
 
-- **Either number below its default:** a line under the heading gives both numbers and says what that allows. With four and two the whole line is `Minimum group size in this report: a minimum team of four (below the default of five) and a minimum of two assignees behind a figure (below the default of three). A sprint whose team is smaller than the default allows is not withheld as a whole, and a figure may rest on the work of fewer people than the default allows.`
+- **Either number below its default:** a line under the heading gives both numbers and says what that allows. With four and two the whole line is `Minimum group size in this report: a minimum team of four (below the default of five) and a minimum of two assignees behind a figure (below the default of three). A sprint with a team smaller than five can be reported, and a figure may rest on the work of fewer people than the default allows.`
 - **Both numbers zero:** the line reads `Small-group suppression is off: a figure in this report may rest on the work of one or two people.`
 - **Both numbers at or above their defaults:** no line.
 - **In every case:** the method note describes the rule with the numbers in force, or says that small-group suppression is off.

@@ -14,6 +14,8 @@ public class NumbersInForceTests
 {
     private const string Heading = "# Fake Sprint 41 (2026-01-05 to 2026-01-19)\n\n";
 
+    private const string CycleTimeHeading = "\n## Cycle time by point bucket\n\n";
+
     // The method note's sentences that hold no number, as they are under the default numbers.
     private const string TheTeamOfASprintIs = " The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in it.";
 
@@ -25,7 +27,7 @@ public class NumbersInForceTests
         "- An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. An unassigned issue counts toward nobody.\n";
 
     // The two things the line under the heading says follow from a number below its default.
-    private const string ASmallTeam = "A sprint whose team is smaller than the default allows is not withheld as a whole";
+    private const string ASmallTeam = "A sprint with a team smaller than five can be reported";
 
     private const string FewPeople = "figure may rest on the work of fewer people than the default allows";
 
@@ -85,42 +87,47 @@ public class NumbersInForceTests
 
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
 
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(await pipeline.ReadReportAsync(41)).StartsWith(
             Heading
             + "Small-group suppression is off: a figure in this report may rest on the work of one or two people.\n\n"
-            + "Delivered issues: 5\n");
+            + "Delivered issues: 5\n"
+            + CycleTimeHeading);
     }
 
     [Test]
-    [Arguments(4, 2, "a minimum team of four (below the default of five) and a minimum of two assignees behind a figure (below the default of three). " + ASmallTeam + ", and a " + FewPeople)]
-    [Arguments(5, 1, "a minimum team of five (the default) and a minimum of one assignee behind a figure (below the default of three). A " + FewPeople)]
-    [Arguments(5, 0, "a minimum team of five (the default) and no minimum of assignees behind a figure (below the default of three). A " + FewPeople)]
-    [Arguments(13, 2, "a minimum team of 13 (above the default of five) and a minimum of two assignees behind a figure (below the default of three). A " + FewPeople)]
-    [Arguments(0, 3, "no minimum team (below the default of five) and a minimum of three assignees behind a figure (the default). " + ASmallTeam)]
-    [Arguments(0, 6, "no minimum team (below the default of five) and a minimum of six assignees behind a figure (above the default of three). " + ASmallTeam)]
-    [Arguments(4, 4, "a minimum team of four (below the default of five) and a minimum of four assignees behind a figure (above the default of three). " + ASmallTeam)]
-    public async Task With_either_number_below_its_default_and_not_both_zero_the_line_under_the_heading_gives_the_two_numbers_and_what_follows_from_each_one_that_is_below(int team, int assigneesBehindAFigure, string line)
+    [Arguments(4, 2, "5", "a minimum team of four (below the default of five) and a minimum of two assignees behind a figure (below the default of three). " + ASmallTeam + ", and a " + FewPeople)]
+    [Arguments(5, 1, "5", "a minimum team of five (the default) and a minimum of one assignee behind a figure (below the default of three). A " + FewPeople)]
+    [Arguments(5, 0, "5", "a minimum team of five (the default) and no minimum of assignees behind a figure (below the default of three). A " + FewPeople)]
+    [Arguments(13, 2, "suppressed", "a minimum team of 13 (above the default of five) and a minimum of two assignees behind a figure (below the default of three). A " + FewPeople)]
+    [Arguments(0, 3, "5", "no minimum team (below the default of five) and a minimum of three assignees behind a figure (the default). " + ASmallTeam)]
+    [Arguments(0, 6, "suppressed", "no minimum team (below the default of five) and a minimum of six assignees behind a figure (above the default of three). " + ASmallTeam)]
+    [Arguments(4, 4, "5", "a minimum team of four (below the default of five) and a minimum of four assignees behind a figure (above the default of three). " + ASmallTeam)]
+    public async Task With_either_number_below_its_default_and_not_both_zero_the_line_under_the_heading_gives_the_two_numbers_and_what_follows_from_each_one_that_is_below(int team, int assigneesBehindAFigure, string delivered, string line)
     {
         // Only a number of assignees behind a figure below three lets a figure rest on fewer people than the
         // default allows; a team number below five lets a smaller sprint through, and no more than that.
+        // The sprint has five people and the five deliver, so its delivered count is withheld under 13 or six.
         await using var pipeline = new PipelineHarness();
         AddSprint41WithATeamOfFive(pipeline.Jira);
         pipeline.Config["minimumGroupSize"] = MinimumGroupSize(team, assigneesBehindAFigure);
 
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
 
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(await pipeline.ReadReportAsync(41)).StartsWith(
             Heading
             + $"Minimum group size in this report: {line}.\n\n"
-            + "Delivered issues: ");
+            + $"Delivered issues: {delivered}\n"
+            + CycleTimeHeading);
     }
 
     [Test]
-    [Arguments(5, 3)]
-    [Arguments(6, 3)]
-    [Arguments(5, 4)]
-    [Arguments(8, 5)]
-    public async Task With_both_numbers_at_or_above_the_defaults_the_delivered_count_follows_the_heading_and_no_line_stands_between(int team, int assigneesBehindAFigure)
+    [Arguments(5, 3, "5")]
+    [Arguments(6, 3, "suppressed")]
+    [Arguments(5, 4, "5")]
+    [Arguments(8, 5, "suppressed")]
+    public async Task With_both_numbers_at_or_above_the_defaults_the_delivered_count_follows_the_heading_and_no_line_stands_between(int team, int assigneesBehindAFigure, string delivered)
     {
         await using var pipeline = new PipelineHarness();
         AddSprint41WithATeamOfFive(pipeline.Jira);
@@ -128,7 +135,8 @@ public class NumbersInForceTests
 
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).StartsWith(Heading + "Delivered issues: ");
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(await pipeline.ReadReportAsync(41)).StartsWith(Heading + $"Delivered issues: {delivered}\n" + CycleTimeHeading);
     }
 
     [Test]

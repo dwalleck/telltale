@@ -148,14 +148,17 @@ public static class SprintReport
             return;
         }
 
-        const string SmallTeam = "sprint whose team is smaller than the default allows is not withheld as a whole";
+        // Said of the default's number, so that it is true under every pair of numbers and of every sprint: under
+        // the default a sprint with such a team is withheld as a whole, and under a smaller team number one can be
+        // reported. Which of its figures are shown is the method note's to say.
+        var smallTeam = $"sprint with a team smaller than {NumbersInForce.Number(byDefault.Team)} can be reported";
         const string FewPeople = "figure may rest on the work of fewer people than the default allows";
         report.Append("Minimum group size in this report: ")
             .Append(numbers.TeamCheck ? $"a minimum team of {numbers.TeamInWords}" : "no minimum team")
             .Append(" (").Append(AgainstTheDefault(numbers.Team, byDefault.Team)).Append(") and ")
             .Append(numbers.FigureCheck ? $"a minimum of {numbers.AssigneesBehindAFigure()}" : "no minimum of assignees")
             .Append(" behind a figure (").Append(AgainstTheDefault(numbers.BehindAFigure, byDefault.AssigneesBehindAFigure)).Append("). ")
-            .Append(teamIsBelow && figureIsBelow ? $"A {SmallTeam}, and a {FewPeople}" : teamIsBelow ? $"A {SmallTeam}" : $"A {FewPeople}")
+            .Append(teamIsBelow && figureIsBelow ? $"A {smallTeam}, and a {FewPeople}" : teamIsBelow ? $"A {smallTeam}" : $"A {FewPeople}")
             .Append(".\n\n");
     }
 
