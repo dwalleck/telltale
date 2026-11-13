@@ -72,7 +72,7 @@ Nothing else changes. No duration is excluded, replaced or relabelled, and every
 
 ### Owner decisions (2026-11-12)
 
-These continue the numbering in `docs/decisions.md`. The implementation adds them there, in a new "Data quality" section, and cites them by number.
+These continue the numbering of the owner decisions list. The implementation adds them there, in a new "Data quality" section, and cites them by number.
 
 - **D58.** The statuses to check and their thresholds are one optional configuration setting, `briefVisitThresholds`: a dictionary of status ID to threshold. A status not listed is not checked.
 - **D59.** A threshold is elapsed clock time in minutes, written as a number. It is not business time.
@@ -132,18 +132,18 @@ Each is a narrowing the decisions' words do not settle. They are put to the owne
 
 ### Documents changed with the code
 
-- `GLOSSARY.md`: a "Brief visit" entry (the definition only, no implementation detail) and one sentence in "Minimum group size" covering the count. The commit message gives the reason and says the rule was set after results had been seen.
-- `docs/decisions.md`: D58 to D63.
-- `README.md`: the setting in the example and in the "Setting formats" table, the footer line in "What a report shows", the new view in the `query` section, and `derive` listed as needed after a threshold change.
-- `docs/context/handoff.md`: one dated line pointing at this spec.
+- The glossary: a "Brief visit" entry (the definition only, no implementation detail) and one sentence in "Minimum group size" covering the count. The commit message gives the reason and says the rule was set after results had been seen.
+- The owner decisions list: D58 to D63.
+- The README: the setting in the example and in the "Setting formats" table, the footer line in "What a report shows", the new view in the `query` section, and `derive` listed as needed after a threshold change.
+- The project handoff document: one dated line pointing at this spec.
 
 ## Testing Decisions
 
 A good test states a rule from this spec in terms of Jira history and configuration going in and a report line or view row coming out. It does not assert on table layouts, SQL text or class structure.
 
-Both seams exist already. No new seam is needed.
+Both seams exist already, and the owner confirmed on 2026-11-12 that they are the seams to use. No new seam is needed.
 
-1. **Pipeline seam (primary).** The real `derive`, `report`, `run` and `query` commands against the fake Jira, a temporary SQLite file and a fixed clock. Prior art: `TimeInStatusTableTests`, `SuppressionTests`, `MethodNoteAndFooterTests`, `QueryCommandTests`, and the configuration refusal tests. It must include:
+1. **Pipeline seam (primary).** The real `derive`, `report`, `run` and `query` commands against the fake Jira, a temporary SQLite file and a fixed clock. Prior art: the existing pipeline tests for the time in status table, suppression, the method note and footer, the `query` command, and refused configuration files. It must include:
    - a catch-up sequence (not started, then two work statuses seconds apart) giving a count under each listed status;
    - a stay just under, exactly at and just over the threshold;
    - a zero-length stay;
@@ -182,7 +182,7 @@ Mutation records, where the build run uses them: rerun only the records a change
 
 ## Further Notes
 
-- The handoff cites commit `437e710` for the total business days change. That hash is not in the repository; the commit on `main` is `96736c9`.
+- The status-duration handoff cites a commit hash for the total business days change that is not in the repository; the change is on `main` under another hash.
 - The thresholds the owner chooses are company configuration and stay on the work laptop. The values in this spec and in tests are invented.
 - Choosing thresholds after looking at the data is a revision made with knowledge of results. The method note and the glossary commit say so; the counts are a description of data quality and are not a success criterion.
 - If the counts turn out large, the next decision (annotate only, or exclude with a separately labelled figure and its own contributor check) is a new spec. The privacy rules for that are set out in the handoff under "Privacy must follow the contributors to each figure".
