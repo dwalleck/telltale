@@ -1,4 +1,6 @@
 using System.Text.Json.Nodes;
+using Telltale.Core.Configuration;
+using Telltale.Core.Storage;
 
 namespace Telltale.Pipeline.Tests.Harness;
 
@@ -9,6 +11,22 @@ namespace Telltale.Pipeline.Tests.Harness;
 /// </summary>
 public static class HarnessSteps
 {
+    /// <summary>
+    /// A record of derived data built under the default numbers of the minimum group size with no status listed
+    /// for brief visits, for a test that renders a report directly and is about neither: the report takes
+    /// nothing else from the record.
+    /// </summary>
+    public static DerivedSource RecordUnderTheDefaults { get; } = new(
+        "synthetic-digest",
+        TimeZone: "UTC",
+        Holidays: "",
+        BaselineSprintIds: "[]",
+        StatusRoles: "",
+        AbandonedResolutionIds: "",
+        MinimumGroupSize.Default.Team,
+        MinimumGroupSize.Default.AssigneesBehindAFigure,
+        DerivedSource.NoBriefVisitThresholds);
+
     /// <summary>
     /// What the <c>query</c> command prints for each statement in turn, with line endings normalised to
     /// <c>\n</c>. Standard output is cleared first, and a statement that is refused fails the test.

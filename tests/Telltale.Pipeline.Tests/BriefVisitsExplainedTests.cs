@@ -314,7 +314,7 @@ public class BriefVisitsExplainedTests
 
         var store = new SqliteStore(pipeline.DatabasePath);
         var derivedFrom = await store.ReadDerivedSourceAsync();
-        var report = await SprintReport.RenderAsync(store, "41", TimeZoneInfo.FindSystemTimeZoneById(ZoneId), baselineSprintIds: [], NumbersInForce.Of(derivedFrom!));
+        var report = await SprintReport.RenderAsync(store, "41", TimeZoneInfo.FindSystemTimeZoneById(ZoneId), baselineSprintIds: [], derivedFrom!);
 
         await Assert.That(report).EndsWith(
             WhenTheRuleWasAdded
