@@ -18,17 +18,17 @@ public class TelltaleSettingsTests
     }
 
     [Test]
-    [Arguments("jira")]
-    [Arguments("statusRoles")]
-    [Arguments("abandonedResolutionIds")]
-    [Arguments("baselineSprintIds")]
-    [Arguments("holidays")]
-    [Arguments("timeZone")]
-    [Arguments("jira.projectKeys")]
-    [Arguments("jira.sprintFieldId")]
-    [Arguments("jira.storyPointFieldId")]
-    [Arguments("jira.siteUrl")]
-    public async Task A_setting_that_is_null_is_refused_and_named(string setting)
+    [Arguments("jira", "jira must not be null.")]
+    [Arguments("statusRoles", "statusRoles must not be null.")]
+    [Arguments("abandonedResolutionIds", "abandonedResolutionIds must not be null.")]
+    [Arguments("baselineSprintIds", "baselineSprintIds must not be null.")]
+    [Arguments("holidays", "holidays must not be null.")]
+    [Arguments("timeZone", "timeZone must not be null.")]
+    [Arguments("jira.projectKeys", "jira.projectKeys must list at least one project key.")]
+    [Arguments("jira.sprintFieldId", "jira.sprintFieldId must not be empty.")]
+    [Arguments("jira.storyPointFieldId", "jira.storyPointFieldId must not be empty.")]
+    [Arguments("jira.siteUrl", "jira.siteUrl must be an absolute https:// address.")]
+    public async Task A_setting_that_is_null_is_refused_and_named(string setting, string message)
     {
         var config = Config();
         var withNull = setting switch
@@ -47,7 +47,7 @@ public class TelltaleSettingsTests
 
         var refusal = await Assert.That(() => TelltaleSettings.From(withNull)).Throws<SettingRefusedException>();
 
-        await Assert.That(refusal!.Message).StartsWith(setting + " ");
+        await Assert.That(refusal!.Message).IsEqualTo(message);
     }
 
     private static TelltaleConfig Config() => new()
