@@ -1,0 +1,40 @@
+name: Build and test
+
+# The only automated check on this repository. Windows is in the matrix because the tool is deployed there and
+# a CRLF checkout has broken tests that passed on macOS.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "build-and-test-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: "Build and test (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the .NET SDK that global.json pins
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # Warnings are errors (Directory.Build.props), so a new warning fails here.
+      - name: Build
+        run: dotnet build
+
+      # Tests run against a fake Jira: no network, no secrets.
+      - name: Test
+        run: dotnet test --no-build
