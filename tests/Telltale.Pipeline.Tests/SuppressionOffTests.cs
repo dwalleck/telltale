@@ -534,6 +534,18 @@ public class SuppressionOffTests
             + "| Fake Development | 2 | 1.0 | 2.0 | 1.0 |\n"
             + "| Fake Review | 1 | 1.0 | 1.0 | none |\n"
             + MethodHeading);
+
+        // And through query: the baseline views have no row for bucket 8 or for Review, and withhold nothing.
+        await Assert.That(await QueryAsync(pipeline, BaselineSql)).IsEqualTo(
+            """
+            | baseline_row | median_business_days | p85_business_days | median_calendar_days | p85_calendar_days | suppressed |
+            | --- | --- | --- | --- | --- | --- |
+            | bucket 3 | 1 | 1 | 1 | 1 | 0 |
+            | Fake New | 1 | NULL | NULL | NULL | 0 |
+            | Fake Development | 1 | NULL | NULL | NULL | 0 |
+            | sprint 41 | NULL | NULL | NULL | NULL | 0 |
+
+            """.ReplaceLineEndings("\n"));
     }
 
     [Test]
@@ -603,7 +615,12 @@ public class SuppressionOffTests
             $"baselineSprintIds in the configuration file lists {listed}, and the store holds no completed sprint with such an ID. "
             + "The baseline is drawn from completed sprints only. Correct the list, or run backfill if the sprint has completed since, and run again.\n");
         await Assert.That(Directory.Exists(pipeline.ReportDirectory)).IsFalse();
+
+        // Nothing was derived, so query has no baseline to answer from and says what to run.
+        pipeline.Error.GetStringBuilder().Clear();
         await Assert.That(await pipeline.RunAsync("query", "SELECT sprint_id FROM baseline_sprint;")).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo("The store has no derived data yet. Run derive first.\n");
+        await Assert.That(pipeline.Out.ToString()).DoesNotContain("sprint_id");
     }
 
     [Test]
@@ -626,7 +643,7 @@ public class SuppressionOffTests
             "\nDelivered issues: 2\n" + CycleTimeHeader + "| unestimated | 2 | 3.2 | 4.1 | 4.2 | 6.1 |\n");
         var printed = pipeline.Out.ToString().ReplaceLineEndings("\n");
         await Assert.That(printed).Contains("| sprint_id | sprint_name | state | started | ended | planned_end | delivered_count | suppressed | team_suppressed |\n");
-        await Assert.That(printed).Contains(" | 2 | 0 | 0 |\n");
+        await Assert.That(printed).Contains("| 41 | Fake Sprint 41 | closed | 2026-01-05T15:00:00.000Z | 2026-01-19T16:00:00.000Z | 2026-01-19T15:00:00.000Z | 2 | 0 | 0 |\n");
         await Assert.That(printed).Contains("| sprint_id | team_suppressed | delivered_suppressed |\n| --- | --- | --- |\n| 41 | 0 | 0 |\n");
         await AssertNothingForbiddenWasWrittenAsync(pipeline);
     }
