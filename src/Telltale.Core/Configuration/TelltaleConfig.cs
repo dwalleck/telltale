@@ -1,8 +1,9 @@
 namespace Telltale.Core.Configuration;
 
 /// <summary>
-/// The configuration file's content. It holds no secrets, so it can be committed and reviewed;
-/// the Jira email, the API token and the hashing salt come from the secret store. Every setting
+/// The configuration file's content. It holds no secrets: the Jira email, the API token and the
+/// hashing salt come from the secret store. It does name the Jira site and its projects, so it is
+/// kept out of this repository, which is public (<c>.gitignore</c> lists <c>/config/</c>). Every setting
 /// here is read by something: a setting is added by the change that first uses it, so the file
 /// never accepts a value that has no effect.
 /// </summary>
