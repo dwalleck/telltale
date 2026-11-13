@@ -1,6 +1,6 @@
 # Owner decisions: the Jira flow report
 
-Code comments, tests, tickets and the spec cite the owner's decisions by number ("owner decision D49"). This is the list. All were made on 2026-11-12: D1 to D57 while the first spec was built, D64 to D69 afterwards, for the optional suppression spec (`.scratch/optional-suppression/spec.md`). Each line gives the decision and where its full wording is; the tickets are in `.scratch/jira-flow-report/issues/`.
+Code comments, tests, tickets and the spec cite the owner's decisions by number ("owner decision D49"). This is the list. D1 to D69 were made on 2026-11-12: D1 to D57 while the first spec was built, D64 to D69 afterwards, for the optional suppression spec (`.scratch/optional-suppression/spec.md`). D70 was made on 2026-11-13, while that spec was built. Each line gives the decision and where its full wording is; the tickets are in `.scratch/jira-flow-report/issues/`.
 
 A decision that changes a metric definition is also in `GLOSSARY.md`, in a commit that gives the reason.
 
@@ -86,6 +86,7 @@ D5 to D56 describe the rule with its default numbers, five and three. They apply
 | D32 | A control character in a secret refuses the value. | ticket 12 |
 | D40 | On a board with no done status, `discover` still writes the file and says no status has the done role; `run` refuses the file until one is set. | ticket 11 |
 | D43 | `run`'s messages never quote a refused status role or project key. They still quote a refused time zone. | this list |
+| D70 | `discover` keeps its rule of never writing a file `run` would refuse for `minimumGroupSize` too. A rerun on a file whose numbers the loader refuses stops with the loader's message and leaves the file untouched. (2026-11-13) | optional suppression spec, ticket 05 |
 
 ## The repository
 

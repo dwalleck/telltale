@@ -16,7 +16,7 @@ Start with `docs/context/handoff.md`: it explains where this project came from, 
 ## Non-negotiables
 
 - The tool reports on the team's work, not on individuals. Person fields are pseudonymized at import (ADR-0003, ADR-0005), and no feature produces per-person results outside the two consented case studies.
-- The minimum group size (withholding figures that rest on few people) is a default, not a hard rule. The team asked for this tool, and its Jira figures aggregate what anyone with access to the board can already see. The numbers are being made configurable, zero turning the rule off: `.scratch/optional-suppression/spec.md`. Until that is built the views enforce five and three; do not weaken them by other means.
+- The minimum group size (withholding figures that rest on few people) is a default, not a hard rule: five and three unless `minimumGroupSize` in the configuration file says otherwise, and zero turns a check off (ADR-0008). The team asked for this tool, and its Jira figures aggregate what anyone with access to the board can already see. The metric views enforce whatever numbers are configured; no feature may show a figure the configured numbers withhold.
 - Metric definitions live in `docs/context/pilot-plan.md` and the glossary. Changing a definition is a commit with a reason, because the git history is the dated record that criteria were set before results existed.
 
 ## Agent skills
