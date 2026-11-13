@@ -50,6 +50,29 @@ public class TelltaleSettingsTests
         await Assert.That(refusal!.Message).IsEqualTo(message);
     }
 
+    [Test]
+    public async Task Without_a_minimum_group_size_the_numbers_in_force_are_five_and_three_and_configured_numbers_are_kept()
+    {
+        var absent = TelltaleSettings.From(Config());
+        var off = TelltaleSettings.From(Config() with { MinimumGroupSize = new MinimumGroupSize { Team = 0, AssigneesBehindAFigure = 0 } });
+
+        await Assert.That((absent.MinimumGroupSize.Team, absent.MinimumGroupSize.AssigneesBehindAFigure)).IsEqualTo((5, 3));
+        await Assert.That((off.MinimumGroupSize.Team, off.MinimumGroupSize.AssigneesBehindAFigure)).IsEqualTo((0, 0));
+    }
+
+    [Test]
+    [Arguments(5, 3, true)]
+    [Arguments(4, 3, false)]
+    [Arguments(5, 2, false)]
+    [Arguments(0, 0, false)]
+    public async Task A_rebuild_under_other_minimum_group_size_numbers_is_built_from_something_else_and_five_and_three_written_out_is_not(int team, int assigneesBehindAFigure, bool same)
+    {
+        var absent = TelltaleSettings.From(Config());
+        var written = TelltaleSettings.From(Config() with { MinimumGroupSize = new MinimumGroupSize { Team = team, AssigneesBehindAFigure = assigneesBehindAFigure } });
+
+        await Assert.That(written.DerivedFrom("synthetic-digest") == absent.DerivedFrom("synthetic-digest")).IsEqualTo(same);
+    }
+
     private static TelltaleConfig Config() => new()
     {
         Jira = new JiraConfig

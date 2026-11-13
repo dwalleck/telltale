@@ -39,6 +39,13 @@ public sealed record TelltaleConfig
     /// or empty: then there is no baseline, and reports show none.
     /// </summary>
     public IReadOnlyList<string> BaselineSprintIds { get; init; } = [];
+
+    /// <summary>
+    /// The minimum group size's two numbers (GLOSSARY: Minimum group size), e.g. <c>{ "team": 5, "assigneesBehindAFigure": 3 }</c>.
+    /// The setting may be left out: then the numbers are <see cref="Configuration.MinimumGroupSize.Default"/>.
+    /// When it is present, both numbers are required.
+    /// </summary>
+    public MinimumGroupSize? MinimumGroupSize { get; init; }
 }
 
 /// <summary>Where the team's work lives in Jira.</summary>

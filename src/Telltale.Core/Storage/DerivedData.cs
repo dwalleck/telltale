@@ -1,3 +1,4 @@
+using Telltale.Core.Configuration;
 using Telltale.Core.Workflow;
 
 namespace Telltale.Core.Storage;
@@ -130,6 +131,12 @@ public sealed record IssueAnomaly(string IssueId, ChangelogAnomalyKind Kind)
 /// <param name="AbandonedResolutionIds">The abandoned resolution IDs in order, separated by commas.</param>
 public sealed record DerivedSource(string RawDigest, string TimeZone, string Holidays, string BaselineSprintIds, string StatusRoles, string AbandonedResolutionIds)
 {
+    /// <summary>
+    /// The minimum group size's numbers the metric views apply (GLOSSARY: Minimum group size): the views read
+    /// them from the rebuild's record and never from the configuration. The defaults unless a rebuild is given others.
+    /// </summary>
+    public MinimumGroupSize MinimumGroupSize { get; init; } = MinimumGroupSize.Default;
+
     /// <summary><see cref="BaselineSprintIds"/> for a list of sprint IDs: the form the store keeps and the views read.</summary>
     public static string BaselineSprintIdsOf(IEnumerable<string> sprintIds) =>
         System.Text.Json.JsonSerializer.Serialize(sprintIds.Order(StringComparer.Ordinal));

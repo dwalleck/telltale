@@ -7,6 +7,7 @@ using Dapper;
 using Microsoft.Data.Sqlite;
 using SQLitePCL;
 using Telltale.Core;
+using Telltale.Core.Configuration;
 using Telltale.Core.Identity;
 using Telltale.Core.Storage;
 
@@ -429,11 +430,14 @@ public sealed class SqliteStore : ITelltaleStore
             connection,
             transaction,
             """
-            INSERT INTO run (as_of, raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, objects_version)
-            VALUES (@asOf, @rawDigest, @timeZone, @holidays, @baselineSprintIds, @statusRoles, @abandonedResolutionIds, @objectsVersion);
+            INSERT INTO run (as_of, raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure, objects_version)
+            VALUES (@asOf, @rawDigest, @timeZone, @holidays, @baselineSprintIds, @statusRoles, @abandonedResolutionIds, @minimumTeam, @minimumAssigneesBehindAFigure, @objectsVersion);
             """,
-            ["@asOf", "@rawDigest", "@timeZone", "@holidays", "@baselineSprintIds", "@statusRoles", "@abandonedResolutionIds", "@objectsVersion"],
-            [[StoredTime.ToStored(derived.AsOf), source.RawDigest, source.TimeZone, source.Holidays, source.BaselineSprintIds, source.StatusRoles, source.AbandonedResolutionIds, DerivedObjectsVersion]],
+            ["@asOf", "@rawDigest", "@timeZone", "@holidays", "@baselineSprintIds", "@statusRoles", "@abandonedResolutionIds", "@minimumTeam", "@minimumAssigneesBehindAFigure", "@objectsVersion"],
+            [[
+                StoredTime.ToStored(derived.AsOf), source.RawDigest, source.TimeZone, source.Holidays, source.BaselineSprintIds, source.StatusRoles, source.AbandonedResolutionIds,
+                (long)source.MinimumGroupSize.Team, (long)source.MinimumGroupSize.AssigneesBehindAFigure, DerivedObjectsVersion,
+            ]],
             cancellationToken);
 
         await ExecuteForEachRowAsync(
@@ -474,8 +478,27 @@ public sealed class SqliteStore : ITelltaleStore
 
         // Another version's table can lack a column read here, so its version is asked first.
         await RequireDerivedByThisVersionAsync(connection, cancellationToken);
-        return await connection.QuerySingleOrDefaultAsync<DerivedSource?>(Command(cancellationToken, "SELECT raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids FROM run;"));
+        var run = await connection.QuerySingleOrDefaultAsync<RunRow?>(Command(
+            cancellationToken,
+            "SELECT raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure FROM run;"));
+        return run is null
+            ? null
+            : new DerivedSource(run.RawDigest, run.TimeZone, run.Holidays, run.BaselineSprintIds, run.StatusRoles, run.AbandonedResolutionIds)
+            {
+                MinimumGroupSize = new MinimumGroupSize { Team = checked((int)run.MinimumTeam), AssigneesBehindAFigure = checked((int)run.MinimumAssigneesBehindAFigure) },
+            };
     }
+
+    /// <summary>The <c>run</c> table's one row, apart from the as-of time and the scripts' version.</summary>
+    private sealed record RunRow(
+        string RawDigest,
+        string TimeZone,
+        string Holidays,
+        string BaselineSprintIds,
+        string StatusRoles,
+        string AbandonedResolutionIds,
+        long MinimumTeam,
+        long MinimumAssigneesBehindAFigure);
 
     /// <summary>
     /// Stops when the derived tables and metric views were created by other scripts than this version's.

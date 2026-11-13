@@ -1,3 +1,5 @@
+Amended by [ADR-0008](0008-minimum-group-size-is-a-configurable-default.md) on 2026-11-12: the numbers five and three below are defaults that a deployment's configuration may change or set to zero.
+
 # Identities are pseudonymized at import, and only aggregates of five or more people are reported
 
 The data could easily become individual surveillance, which would destroy the trust of the volunteers whose honest usage the evaluation depends on. People are identified only by a salted hash computed at import; the salt lives in the secret store, never in the database, and no name-to-hash table is kept. The minimum group size is enforced inside the metric views, so no query path (including ad hoc SQL) can produce a result grouped by people that covers fewer than five. The tool is built so it cannot produce a per-person report, which is the answer when leadership eventually asks for one.

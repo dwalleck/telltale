@@ -35,6 +35,9 @@ public sealed record TelltaleSettings
 
     public required IReadOnlyList<DateOnly> Holidays { get; init; }
 
+    /// <summary>The minimum group size's numbers in force: the configured ones, or the defaults when the setting is absent.</summary>
+    public required MinimumGroupSize MinimumGroupSize { get; init; }
+
     /// <summary>The settings as a rebuild records them, apart from the raw data's digest: see <see cref="DerivedFrom"/>.</summary>
     private DerivedSource Recorded { get; init; } = new("", "", "", "", "", "");
 
@@ -66,9 +69,11 @@ public sealed record TelltaleSettings
         var baselineSprintIds = CheckedIds(config.BaselineSprintIds, "baselineSprintIds", "sprint");
         var timeZone = SettingRules.FindTimeZone(config.TimeZone)
             ?? throw new SettingRefusedException($"timeZone: '{config.TimeZone}' is not a known IANA time zone ID.");
+        var minimumGroupSize = config.MinimumGroupSize ?? MinimumGroupSize.Default;
 
         return new TelltaleSettings
         {
+            MinimumGroupSize = minimumGroupSize,
             Jira = jira,
             StatusRoles = roles,
             AbandonedResolutionIds = abandonedResolutionIds,
@@ -81,7 +86,10 @@ public sealed record TelltaleSettings
                 string.Join(",", config.Holidays.Order().Select(day => day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))),
                 DerivedSource.BaselineSprintIdsOf(baselineSprintIds),
                 string.Join(",", config.StatusRoles.Select(status => $"{status.Key}={status.Value}")),
-                string.Join(",", abandonedResolutionIds.Order(StringComparer.Ordinal))),
+                string.Join(",", abandonedResolutionIds.Order(StringComparer.Ordinal)))
+            {
+                MinimumGroupSize = minimumGroupSize,
+            },
         };
     }
 
