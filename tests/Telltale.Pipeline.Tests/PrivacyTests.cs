@@ -60,6 +60,16 @@ public class PrivacyTests
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(exit).IsEqualTo(0);
+        await AssertNothingForbiddenWasWrittenAsync(pipeline);
+    }
+
+    /// <summary>
+    /// The scan of everything a run over <see cref="AddScenario"/> left behind (every file, standard output and
+    /// standard error) for the personal and free text the fake served. It is shared with the test of the same
+    /// rule under suppression off (SuppressionOffTests; owner decision D68), so the two cannot drift apart.
+    /// </summary>
+    internal static async Task AssertNothingForbiddenWasWrittenAsync(PipelineHarness pipeline)
+    {
         var files = await pipeline.ReadAllFilesAsync();
 
         // The scan is only worth something if it reads the files the data is in: the issue ID is
@@ -179,7 +189,7 @@ public class PrivacyTests
     /// Two assigned issues delivered in sprint 41 and one unassigned issue still in development. FAKE-1 is
     /// resolved and was moved by someone who is not its assignee; the other moves are the board admin's.
     /// </summary>
-    private static void AddScenario(FakeJira jira)
+    internal static void AddScenario(FakeJira jira)
     {
         jira.AddSprint41();
         jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).AssignedTo(People.One)

@@ -44,10 +44,23 @@ public class SuppressionOffTests
     private const string TimeInStatusSql =
         "SELECT sprint_id, status_name, issue_count, median_business_days, total_business_days, suppressed FROM time_in_status_per_sprint ORDER BY sprint_id, board_position;";
 
+    /// <summary>The three baseline views in one result: the buckets by estimate, then the statuses in board order, then the baseline sprints by ID.</summary>
     private const string BaselineSql =
-        "SELECT * FROM (SELECT 'bucket ' || CAST(point_bucket AS INTEGER) AS baseline_row, median_business_days, p85_business_days, median_calendar_days, p85_calendar_days, suppressed FROM baseline_cycle_time_per_bucket ORDER BY point_bucket) "
-        + "UNION ALL SELECT * FROM (SELECT status_name, median_business_days, NULL, NULL, NULL, suppressed FROM baseline_time_in_status ORDER BY board_position) "
-        + "UNION ALL SELECT * FROM (SELECT 'sprint ' || sprint_id, NULL, NULL, NULL, NULL, suppressed FROM baseline_sprint ORDER BY sprint_id);";
+        "SELECT baseline_row, median_business_days, p85_business_days, median_calendar_days, p85_calendar_days, suppressed FROM ("
+        + "SELECT 1 AS section, point_bucket AS position, 'bucket ' || CAST(point_bucket AS INTEGER) AS baseline_row, median_business_days, p85_business_days, median_calendar_days, p85_calendar_days, suppressed FROM baseline_cycle_time_per_bucket "
+        + "UNION ALL SELECT 2, board_position, status_name, median_business_days, NULL, NULL, NULL, suppressed FROM baseline_time_in_status "
+        + "UNION ALL SELECT 3, CAST(sprint_id AS INTEGER), 'sprint ' || sprint_id, NULL, NULL, NULL, NULL, suppressed FROM baseline_sprint"
+        + ") ORDER BY section, position;";
+
+    /// <summary>
+    /// The metric views: what <c>query</c> may read. A view added later is added here, and to what
+    /// <see cref="The_metric_views_are_these_nine_with_suppression_off_and_none_holds_a_person"/> says of each.
+    /// </summary>
+    private static readonly string[] MetricViews =
+    [
+        "baseline_cycle_time_per_bucket", "baseline_sprint", "baseline_time_in_status", "cycle_time_per_sprint_and_bucket", "data_quality",
+        "delivered_per_sprint", "minimum_group_size", "sprint_team", "time_in_status_per_sprint",
+    ];
 
     private const string DataQualitySql = "SELECT anomaly_issue_count, delivered_between_sprints_count, suppressed FROM data_quality;";
 
@@ -418,7 +431,7 @@ public class SuppressionOffTests
             await pipeline.RunAllAsync(["run", "--sprint", "41"], ["report", "--sprint", "42"], ["report", "--sprint", "43"]);
         }
 
-        // The store does trip every rule: this is what the default numbers withhold of it.
+        // What the default numbers withhold of this store (AddStoreThatTripsEveryRule says which rules those are).
         const string WithheldFooter = "- Issues with changelog anomalies, in the whole store: suppressed\n- Issues delivered between sprints, in the whole store: suppressed\n";
         await Assert.That(TablesAndFooter(await byDefault.ReadReportAsync(41))).Contains(
             "\nDelivered issues: suppressed\n\n## Cycle time by point bucket\n\nsuppressed\n\n## Time in status\n\nsuppressed\n");
@@ -445,30 +458,28 @@ public class SuppressionOffTests
         await Assert.That(off.Error.ToString()).DoesNotContain("Baseline sprint");
         await Assert.That(off.Error.ToString()).DoesNotContain("withheld");
 
-        // Every row of every metric view that has a flag, and how many of them have it set.
-        await Assert.That(await QueryAsync(
-            off,
+        // Every flag of every metric view, found in the store and not listed here, so that a view added later
+        // is checked too: how many rows the view has, and in how many the flag is anything but 0 (the report
+        // shows a figure only when it is exactly 0, so a null counts as set).
+        var flags = await off.QueryAsync<(string View, string Flag)>(
+            "SELECT o.name, c.name FROM derived_object o JOIN pragma_table_info(o.name) c WHERE o.kind = 'view' AND c.name LIKE '%suppressed%' ORDER BY o.name, c.name;");
+        var flagged = string.Join(
+            " UNION ALL ",
+            flags.Select(flag => $"SELECT '{flag.View}.{flag.Flag}' AS flag, COUNT(*) AS row_count, COALESCE(SUM({flag.Flag} IS NOT 0), 0) AS flagged FROM {flag.View}"));
+        await Assert.That(await QueryAsync(off, $"SELECT flag, row_count, flagged FROM ({flagged}) ORDER BY flag;")).IsEqualTo(
             """
-            SELECT 'baseline_cycle_time_per_bucket' AS metric_view, COUNT(*) AS row_count, SUM(suppressed <> 0) AS flagged FROM baseline_cycle_time_per_bucket
-            UNION ALL SELECT 'baseline_sprint', COUNT(*), SUM(suppressed <> 0) FROM baseline_sprint
-            UNION ALL SELECT 'baseline_time_in_status', COUNT(*), SUM(suppressed <> 0) FROM baseline_time_in_status
-            UNION ALL SELECT 'cycle_time_per_sprint_and_bucket', COUNT(*), SUM(suppressed <> 0) FROM cycle_time_per_sprint_and_bucket
-            UNION ALL SELECT 'data_quality', COUNT(*), SUM(suppressed <> 0) FROM data_quality
-            UNION ALL SELECT 'delivered_per_sprint', COUNT(*), SUM(suppressed <> 0) + SUM(team_suppressed <> 0) FROM delivered_per_sprint
-            UNION ALL SELECT 'sprint_team', COUNT(*), SUM(team_suppressed <> 0) + SUM(delivered_suppressed <> 0) FROM sprint_team
-            UNION ALL SELECT 'time_in_status_per_sprint', COUNT(*), SUM(suppressed <> 0) FROM time_in_status_per_sprint;
-            """)).IsEqualTo(
-            """
-            | metric_view | row_count | flagged |
+            | flag | row_count | flagged |
             | --- | --- | --- |
-            | baseline_cycle_time_per_bucket | 3 | 0 |
-            | baseline_sprint | 3 | 0 |
-            | baseline_time_in_status | 3 | 0 |
-            | cycle_time_per_sprint_and_bucket | 7 | 0 |
-            | data_quality | 1 | 0 |
-            | delivered_per_sprint | 3 | 0 |
-            | sprint_team | 3 | 0 |
-            | time_in_status_per_sprint | 8 | 0 |
+            | baseline_cycle_time_per_bucket.suppressed | 3 | 0 |
+            | baseline_sprint.suppressed | 3 | 0 |
+            | baseline_time_in_status.suppressed | 3 | 0 |
+            | cycle_time_per_sprint_and_bucket.suppressed | 7 | 0 |
+            | data_quality.suppressed | 1 | 0 |
+            | delivered_per_sprint.suppressed | 3 | 0 |
+            | delivered_per_sprint.team_suppressed | 3 | 0 |
+            | sprint_team.delivered_suppressed | 3 | 0 |
+            | sprint_team.team_suppressed | 3 | 0 |
+            | time_in_status_per_sprint.suppressed | 8 | 0 |
 
             """.ReplaceLineEndings("\n"));
     }
@@ -584,85 +595,93 @@ public class SuppressionOffTests
     }
 
     [Test]
-    public async Task No_account_id_name_email_or_summary_reaches_the_database_the_report_or_the_console_with_suppression_off()
+    [Arguments("99", "a sprint the store does not hold")]
+    [Arguments("43", "a sprint that has not started")]
+    [Arguments("44", "a sprint that is still running")]
+    public async Task A_baseline_sprint_that_is_not_a_completed_sprint_of_the_store_is_refused_as_it_is_with_the_default_numbers(string listed, string what)
     {
-        // Owner decision D68: PrivacyTests' scan of everything the run leaves behind, over reports that show
-        // every figure.
-        await using var pipeline = SuppressionOff(Local(2026, 2, 17, 12));
-        AddStoreThatTripsEveryRule(pipeline.Jira);
-        pipeline.Jira.Issues[0].Resolved("300001");
-        pipeline.Config["baselineSprintIds"] = new JsonArray("41", "42", "43");
+        // With the test above, every way a baseline sprint could lack a row in sprint_team (which
+        // baseline_sprint would read as withheld, whatever the numbers): derive refuses each list before it
+        // builds anything, so the views never hold such a sprint. The message is the default numbers'
+        // (BaselineTests).
+        await using var pipeline = SuppressionOff();
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
+        pipeline.Jira.AddFutureSprint(43, "Fake Sprint 43", plannedStart: Local(2026, 2, 16, 9), plannedEnd: Local(2026, 2, 27, 17));
+        pipeline.Jira.AddSprint(44, "Fake Sprint 44", Local(2026, 2, 2, 9), plannedEnd: Local(2026, 2, 13, 17));
+        Delivered(pipeline.Jira, 41, "FAKE-1", points: 3, People.One, days: 1);
+        Delivered(pipeline.Jira, 42, "FAKE-2", points: 3, People.Two, days: 2);
+        pipeline.Config["baselineSprintIds"] = new JsonArray("41", listed);
 
-        await pipeline.RunAllAsync(["run", "--sprint", "41"], ["report", "--sprint", "42"], ["report", "--sprint", "43"]);
+        var exit = await pipeline.RunAsync("run", "--sprint", "42");
 
-        // The scan is only worth something if it reads the files the data is in, and if the text it looks for
-        // is the text the fake served.
-        var files = await pipeline.ReadAllFilesAsync();
-        await Assert.That(files.Keys).Contains("store.db");
-        await Assert.That(files["store.db"]).Contains(pipeline.Jira.IdOf("FAKE-11"));
-        foreach (var sprintId in new[] { 41, 42, 43 })
-        {
-            await Assert.That(files.Keys).Contains(Path.Combine("reports", $"sprint-{sprintId}.md"));
-            await Assert.That(files[Path.Combine("reports", $"sprint-{sprintId}.md")]).Contains($"Fake Sprint {sprintId}");
-        }
-
-        var forbidden = pipeline.Jira.ForbiddenText;
-        await Assert.That(forbidden).Contains(People.One.AccountId);
-        await Assert.That(forbidden).Contains(People.Six.DisplayName);
-        await Assert.That(forbidden).Contains(People.Four.Email);
-        await Assert.That(forbidden).Contains(People.BoardAdmin.AccountId);
-        await Assert.That(forbidden).Contains(pipeline.Jira.Issues[0].Summary);
-        await Assert.That(forbidden).Contains(pipeline.Jira.Issues[0].Description);
-        await Assert.That(forbidden).Contains("Synthetic goal of sprint 43 that must never be stored");
-        await Assert.That(forbidden).Contains(FakeJira.ResolutionDescription);
-
-        var written = files.Select(file => (Where: file.Key, Text: file.Value))
-            .Append((Where: "standard output", Text: pipeline.Out.ToString()))
-            .Append((Where: "standard error", Text: pipeline.Error.ToString()));
-        var leaks = (from place in written
-                     from text in forbidden
-                     where place.Text.Contains(text, StringComparison.OrdinalIgnoreCase)
-                     select $"'{text}' in {place.Where}").ToList();
-        await Assert.That(leaks).IsEmpty();
+        await Assert.That(exit).IsEqualTo(1).Because(what);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"baselineSprintIds in the configuration file lists {listed}, and the store holds no completed sprint with such an ID. "
+            + "The baseline is drawn from completed sprints only. Correct the list, or run backfill if the sprint has completed since, and run again.\n");
+        await Assert.That(Directory.Exists(pipeline.ReportDirectory)).IsFalse();
+        await Assert.That(await pipeline.RunAsync("query", "SELECT sprint_id FROM baseline_sprint;")).IsEqualTo(1);
     }
 
     [Test]
-    public async Task The_metric_views_and_their_columns_are_the_same_with_suppression_off_and_none_holds_a_person()
+    public async Task No_account_id_name_email_or_summary_reaches_the_database_the_report_or_the_console_with_suppression_off()
     {
-        // Owner decision D68: turning suppression off adds no view and no column, and no view is about a person.
-        await using var byDefault = new PipelineHarness(Local(2026, 2, 17, 12));
-        await using var off = SuppressionOff(Local(2026, 2, 17, 12));
-        foreach (var pipeline in new[] { byDefault, off })
+        // Owner decision D68. PrivacyTests' scenario and PrivacyTests' scan, with suppression off: two people
+        // delivered, so the default numbers withhold every figure of the sprint, and here each is in the report
+        // and in what query prints of every metric view. The scan reads standard output, where query prints.
+        await using var pipeline = SuppressionOff();
+        PrivacyTests.AddScenario(pipeline.Jira);
+
+        await pipeline.RunAllAsync(["run", "--sprint", "41"]);
+        foreach (var view in MetricViews)
         {
-            AddStoreThatTripsEveryRule(pipeline.Jira);
-            pipeline.Config["baselineSprintIds"] = new JsonArray("41", "42", "43");
-            await pipeline.RunAllAsync(["backfill"], ["derive"]);
+            await pipeline.RunAllAsync(["query", $"SELECT * FROM {view};"]);
         }
 
-        const string ColumnsOfTheMetricViews =
-            "SELECT o.name || '.' || c.name FROM derived_object o JOIN pragma_table_info(o.name) c WHERE o.kind = 'view' ORDER BY o.name, c.cid;";
-        var columns = await off.QueryAsync<string>(ColumnsOfTheMetricViews);
-        await Assert.That(columns).IsEquivalentTo(await byDefault.QueryAsync<string>(ColumnsOfTheMetricViews));
-        await Assert.That(columns).Contains("delivered_per_sprint.delivered_count");
-        await Assert.That(columns).Contains("baseline_time_in_status.suppressed");
+        // The cycle times are 2.25 and 4.08 business days (6.08 calendar days: a weekend lies in the second).
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(
+            "\nDelivered issues: 2\n" + CycleTimeHeader + "| unestimated | 2 | 3.2 | 4.1 | 4.2 | 6.1 |\n");
+        var printed = pipeline.Out.ToString().ReplaceLineEndings("\n");
+        await Assert.That(printed).Contains("| sprint_id | sprint_name | state | started | ended | planned_end | delivered_count | suppressed | team_suppressed |\n");
+        await Assert.That(printed).Contains(" | 2 | 0 | 0 |\n");
+        await Assert.That(printed).Contains("| sprint_id | team_suppressed | delivered_suppressed |\n| --- | --- | --- |\n| 41 | 0 | 0 |\n");
+        await PrivacyTests.AssertNothingForbiddenWasWrittenAsync(pipeline);
+    }
 
-        // No column is named for a person. The one name with "assignee" in it is a number of the setting.
+    [Test]
+    public async Task The_metric_views_are_these_nine_with_suppression_off_and_none_holds_a_person()
+    {
+        // Owner decision D68: turning suppression off adds no view, and no view is about a person. (That each
+        // view has the same columns in either state is OptionalSuppressionTests'.)
+        await using var pipeline = SuppressionOff(Local(2026, 2, 17, 12));
+        AddStoreThatTripsEveryRule(pipeline.Jira);
+        pipeline.Config["baselineSprintIds"] = new JsonArray("41", "42", "43");
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+
+        var views = await pipeline.QueryAsync<string>("SELECT name FROM derived_object WHERE kind = 'view' ORDER BY name;");
+        await Assert.That(views).IsEquivalentTo(MetricViews);
+
+        // No column is named for a person. This shows only that no column says it is one: the one name with
+        // "assignee" in it is exempted by hand (it is a number of the setting), and a person column under
+        // another name would pass.
+        var columns = await pipeline.QueryAsync<string>(
+            "SELECT o.name || '.' || c.name FROM derived_object o JOIN pragma_table_info(o.name) c WHERE o.kind = 'view' ORDER BY o.name, c.cid;");
         string[] personWords = ["assignee", "person", "people", "account", "author", "reporter", "hash", "email", "user"];
+        await Assert.That(columns).Contains("delivered_per_sprint.delivered_count");
         await Assert.That(columns.Where(column => column != "minimum_group_size.assignees_behind_a_figure" && personWords.Any(word => column.Contains(word, StringComparison.OrdinalIgnoreCase)))).IsEmpty();
 
-        // And no row of a view holds a person's stored hash, whatever its column is called. The store's content
-        // is one block per table or view, headed by its name.
-        var people = await off.QueryAsync<string>("SELECT DISTINCT assignee_hash FROM issue WHERE assignee_hash IS NOT NULL;");
+        // And no row of a view holds a person's stored hash, whatever its column is called. This shows that
+        // no view gives a hash out for this store; it does not show that no view is grouped by person (a view
+        // could group by the hash and leave it out). The store's content is one block per table or view,
+        // headed by its name.
+        var people = await pipeline.QueryAsync<string>("SELECT DISTINCT assignee_hash FROM issue WHERE assignee_hash IS NOT NULL;");
         await Assert.That(people.Count).IsEqualTo(6);
-        var views = (await off.QueryAsync<string>("SELECT name FROM derived_object WHERE kind = 'view';")).ToHashSet(StringComparer.Ordinal);
-        var blocks = ("\n" + await off.ReadStoreContentAsync()).Split("\n## ", StringSplitOptions.RemoveEmptyEntries).ToDictionary(block => block[..block.IndexOf('\n')], StringComparer.Ordinal);
+        var blocks = ("\n" + await pipeline.ReadStoreContentAsync()).Split("\n## ", StringSplitOptions.RemoveEmptyEntries).ToDictionary(block => block[..block.IndexOf('\n')], StringComparer.Ordinal);
         await Assert.That(blocks["issue"]).Contains(people[0]);
         await Assert.That(blocks["cycle_time_per_sprint_and_bucket"]).Contains("41 | 3 | 3 | ");
         var held = (from view in views
                     from person in people
                     where blocks[view].Contains(person, StringComparison.OrdinalIgnoreCase)
                     select view).ToList();
-        await Assert.That(views.Count).IsGreaterThanOrEqualTo(9);
         await Assert.That(held).IsEmpty();
     }
 
@@ -705,17 +724,26 @@ public class SuppressionOffTests
         + $"| {anomalies} | {betweenSprints} | 0 |\n";
 
     /// <summary>
-    /// Three sprints, all baseline sprints, that between them have every figure the default numbers withhold:
+    /// Three sprints, all baseline sprints, in a store of six assignees. What the default numbers withhold of it:
     /// <list type="bullet">
-    /// <item>Sprint 41 has four people: short of a team, and a baseline sprint under five (owner decisions D41,
-    /// D45, D50). Three have a 3-point issue each; the fourth has the only 5-point issue and the only one in
-    /// Review; an 8-point issue is unassigned.</item>
+    /// <item>Sprint 41 has four people: short of a team, so its delivered count and both tables are withheld
+    /// (owner decisions D41, D45), and as a baseline sprint it withholds the whole baseline (D50). Three have
+    /// a 3-point issue each; the fourth has the only 5-point issue and the only one in Review; an 8-point
+    /// issue is unassigned.</item>
     /// <item>Sprint 42 has a team of six, two of whom delivered: its delivered count and its cycle time table
-    /// are withheld, and with them the baseline (D49, D54, D56).</item>
+    /// are withheld (D49, D54), and it too withholds the whole baseline (D56).</item>
     /// <item>Sprint 43 has a team of six, five of whom delivered: bucket 5 has two people behind it and
-    /// Review one (D5).</item>
+    /// Review one, so those rows keep their counts and lose their figures (D5).</item>
     /// <item>One issue in the store has an anomaly, and none was delivered between sprints: both footer counts
     /// are withheld, one for its single assignee and one for having nobody behind it.</item>
+    /// </list>
+    /// Two rules it cannot trip beside those, and the tests that have them:
+    /// <list type="bullet">
+    /// <item>A pooled baseline row withheld for one baseline sprint's row (D44) shows only when no baseline
+    /// sprint withholds the whole baseline:
+    /// <see cref="A_pooled_baseline_row_whose_row_one_baseline_sprint_had_suppressed_is_shown"/>.</item>
+    /// <item>The footer's team check needs a store of fewer than five assignees, and sprints 42 and 43 need
+    /// six: <see cref="The_footers_two_counts_are_shown_when_the_whole_store_has_four_assignees"/>.</item>
     /// </list>
     /// </summary>
     private static void AddStoreThatTripsEveryRule(FakeJira jira)
