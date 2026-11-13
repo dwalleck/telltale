@@ -14,5 +14,6 @@ Spec: `../spec.md` (owner decision D69; user stories 3, 8 and 9; "Configuration"
 - [ ] A rerun keeps the default numbers as written
 - [ ] A rerun on a file without the setting leaves it without the setting
 - [ ] A rerun still saves its backup of the file before rewriting it
-- [ ] `discover` never refuses, warns about or comments on the numbers it finds
+- [ ] `discover` never refuses, warns about or comments on numbers the loader accepts, whatever they are
+- [ ] A rerun on a file whose `minimumGroupSize` the loader refuses stops with the loader's message and leaves the file and its backups untouched, as for every other setting `run` would refuse (owner, 2026-11-13)
 - [ ] All fixtures are synthetic
