@@ -1,5 +1,7 @@
 using System.Text.Json.Nodes;
 using Telltale.Pipeline.Tests.Harness;
+using static Telltale.Pipeline.Tests.Harness.HarnessSteps;
+using static Telltale.Pipeline.Tests.Harness.Scenarios;
 using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
@@ -122,6 +124,7 @@ public class DiscoverMinimumGroupSizeTests
 
         var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover");
 
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
         await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(edited);
         await Assert.That((await pipeline.ReadAllFilesAsync()).Keys).IsEquivalentTo(["telltale.json"]);
@@ -139,6 +142,7 @@ public class DiscoverMinimumGroupSizeTests
 
         var exit = await pipeline.RunWithFilesAsTheyAreAsync(RerunThatChangesTheTimeZone);
 
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
         var written = await ReadWrittenConfigAsync(pipeline);
         await Assert.That(written["timeZone"]!.GetValue<string>()).IsEqualTo("Europe/London");
@@ -148,7 +152,7 @@ public class DiscoverMinimumGroupSizeTests
     }
 
     [Test]
-    public async Task A_rerun_on_a_file_whose_numbers_run_would_refuse_stops_and_leaves_the_file_and_its_backups_as_they_are()
+    public async Task A_rerun_on_a_file_whose_numbers_run_would_refuse_stops_before_jira_is_called_and_leaves_the_file_and_its_backups_as_they_are()
     {
         // Owner decision D70: as for every other setting run would refuse. The first rerun leaves a backup to be left alone.
         await using var pipeline = new PipelineHarness();
@@ -156,27 +160,53 @@ public class DiscoverMinimumGroupSizeTests
         await DiscoverAsSetupAsync(pipeline, RerunThatChangesTheTimeZone);
         await EditWrittenConfigAsync(pipeline, config => config["minimumGroupSize"] = new JsonObject { ["team"] = -1, ["assigneesBehindAFigure"] = 3 });
         var before = await pipeline.ReadAllFilesAsync();
+        var requestsBefore = pipeline.Jira.Handler.Requests.Count;
+        pipeline.Out.GetStringBuilder().Clear();
 
         var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover", "--time-zone", "Europe/Paris");
 
+        // Refused with everything else that can be refused: before the first call to Jira, and before a line
+        // about a change that is then not made.
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString()).Contains("run would refuse it").And.Contains("minimumGroupSize.team");
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"discover did not write {pipeline.ConfigPath}, because run would refuse it: The configuration file {pipeline.ConfigPath} is not valid: minimumGroupSize.team must be written as a whole number of zero or more.\n");
+        await Assert.That(requestsBefore).IsGreaterThan(0);
+        await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(requestsBefore);
+        await Assert.That(pipeline.Out.ToString()).IsEmpty();
         var after = await pipeline.ReadAllFilesAsync();
         await Assert.That(before.Keys).IsEquivalentTo(["telltale.json", "telltale.json.20260203T180000Z.bak"]);
         await Assert.That(after.OrderBy(file => file.Key, StringComparer.Ordinal).Select(file => $"{file.Key}\n{file.Value}"))
             .IsEquivalentTo(before.OrderBy(file => file.Key, StringComparer.Ordinal).Select(file => $"{file.Key}\n{file.Value}"));
     }
 
-    /// <summary>Sprint 41 with four assignees, each delivering one issue: fewer than the default team of five.</summary>
-    private static void AddSprint41WithFourAssignees(FakeJira jira)
+    [Test]
+    [Arguments("null", "minimumGroupSize must be an object with the two numbers team and assigneesBehindAFigure; leave the setting out for five and three.")]
+    [Arguments("""{ "team": 5 }""", "minimumGroupSize.assigneesBehindAFigure is missing: when minimumGroupSize is present, both of its numbers are required.")]
+    [Arguments("""{ "team": "5", "assigneesBehindAFigure": 3 }""", "minimumGroupSize.team must be written as a whole number of zero or more.")]
+    [Arguments("""{ "team": 5, "assigneesBehindAFigure": -3 }""", "minimumGroupSize.assigneesBehindAFigure must be written as a whole number of zero or more.")]
+    [Arguments("""{ "team": 5, "assigneesBehindAFigure": 3, "people": 2 }""", "minimumGroupSize.people is not a setting the tool knows.")]
+    public async Task A_rerun_refuses_the_setting_as_run_does_whatever_is_wrong_with_it_and_calls_jira_for_none_of_it(string setting, string refusal)
     {
-        jira.AddSprint41();
-        foreach (var (person, number) in People.Team.Take(4).Select((person, index) => (person, index + 1)))
-        {
-            jira.AddIssue($"FAKE-{number}", Local(2026, 1, 5, 9)).AssignedTo(person).Estimated(3).InSprints(41)
-                .Moved(Local(2026, 1, 6, 9), Workflow.Development)
-                .Moved(Local(2026, 1, 8, 9), Workflow.Done);
-        }
+        // The loader's own reading and rules, asked before Jira: the message is the one run gives for the file.
+        await using var pipeline = new PipelineHarness();
+        await DiscoverAsSetupAsync(pipeline, DiscoverTests.FirstDiscover);
+        await EditWrittenConfigAsync(pipeline, config => config["minimumGroupSize"] = JsonNode.Parse(setting));
+        var edited = await File.ReadAllTextAsync(pipeline.ConfigPath);
+        var requestsBefore = pipeline.Jira.Handler.Requests.Count;
+        pipeline.Out.GetStringBuilder().Clear();
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(RerunThatChangesTheTimeZone);
+        var ran = await pipeline.RunWithFilesAsTheyAreAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(ran).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"discover did not write {pipeline.ConfigPath}, because run would refuse it: The configuration file {pipeline.ConfigPath} is not valid: {refusal}\n"
+            + $"The configuration file {pipeline.ConfigPath} is not valid: {refusal}\n");
+        await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(requestsBefore);
+        await Assert.That(pipeline.Out.ToString()).IsEmpty();
+        await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(edited);
+        await Assert.That((await pipeline.ReadAllFilesAsync()).Keys).IsEquivalentTo(["telltale.json"]);
     }
 
     /// <summary>A discover that only prepares the test: it must succeed, so a failed setup is reported where it happens.</summary>
@@ -187,15 +217,4 @@ public class DiscoverMinimumGroupSizeTests
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
     }
-
-    /// <summary>Changes the file on disk as the owner would in an editor.</summary>
-    private static async Task EditWrittenConfigAsync(PipelineHarness pipeline, Action<JsonNode> edit)
-    {
-        var config = await ReadWrittenConfigAsync(pipeline);
-        edit(config);
-        await File.WriteAllTextAsync(pipeline.ConfigPath, config.ToJsonString());
-    }
-
-    private static async Task<JsonNode> ReadWrittenConfigAsync(PipelineHarness pipeline) =>
-        JsonNode.Parse(await File.ReadAllTextAsync(pipeline.ConfigPath))!;
 }

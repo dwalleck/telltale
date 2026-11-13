@@ -137,6 +137,22 @@ internal static class DiscoverCommand
         var storyPointsInFile = Choose(given.StoryPointField, StoryPointField.Option, jira, StoryPointField.Setting, $"jira.{StoryPointField.Setting}", FieldIdProblem("customfield_10016"));
         RequireAll(path, ("--site-url", siteText is null), ("--board", boardId is null), ("--time-zone", timeZone is null), ("--backfill-start", backfillStart is null));
 
+        // The minimum group size has no option and discover never changes it, so what the file holds is what
+        // run would load. It is refused here, by the loader's own reading and rule: a rerun on numbers run
+        // would refuse stops before Jira is asked anything and before a change is listed that is then not
+        // made (owner decision D70). The check of the text about to be written still covers it.
+        if (root.TryGetPropertyValue("minimumGroupSize", out var minimumGroupSize))
+        {
+            try
+            {
+                ConfigFile.RequireMinimumGroupSize(minimumGroupSize, path);
+            }
+            catch (UserFacingException exception)
+            {
+                throw RunWouldRefuse(path, exception);
+            }
+        }
+
         var site = SettingRules.WithTrailingSlash(new Uri(siteText!));
         if (replacedUnshown.Contains("jira.siteUrl"))
         {
@@ -396,9 +412,13 @@ internal static class DiscoverCommand
         }
         catch (UserFacingException exception)
         {
-            throw new UserFacingException($"discover did not write {path}, because run would refuse it: {exception.Message}", exception);
+            throw RunWouldRefuse(path, exception);
         }
     }
+
+    /// <summary>What discover says when it stops because the file, as it is or as it would be written, is one run refuses.</summary>
+    private static UserFacingException RunWouldRefuse(string path, UserFacingException refusal) =>
+        new($"discover did not write {path}, because run would refuse it: {refusal.Message}", refusal);
 
     /// <summary>
     /// Replaces the file in one step: the text goes to a temporary file beside it, which then takes the

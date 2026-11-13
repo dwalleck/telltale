@@ -6,9 +6,10 @@ namespace Telltale.Core.Derive;
 
 /// <summary>
 /// The minimum group size's numbers the derived data was built under, and how a sentence states them (owner
-/// decision D67). The report and the console read them here, from the metric view every other view reads them
-/// from, and never from the configuration: a sentence then describes the figures beside it. Which of the two
-/// checks applies, and whether a number is one assignee or several, is decided here and nowhere else.
+/// decision D67). The report and the console take them from the record of the rebuild (<see cref="Of"/>), which
+/// is where the metric views read them from, and never from the configuration: a sentence then describes the
+/// figures beside it. Which of the two checks applies, and whether a number is one assignee or several, is
+/// decided here and nowhere else.
 /// </summary>
 public sealed class NumbersInForce(MinimumGroupSize numbers)
 {
@@ -44,13 +45,12 @@ public sealed class NumbersInForce(MinimumGroupSize numbers)
     /// <summary>The verb after <see cref="AssigneesBehindAFigure"/>: "are", or "is" after one assignee.</summary>
     public string BehindAFigureAre => BehindAFigure == 1 ? "is" : "are";
 
-    /// <summary>The one row of the metric view <c>minimum_group_size</c>. Its two columns are read by position, so no name has to match.</summary>
-    public static async Task<NumbersInForce> ReadAsync(ITelltaleStore store, CancellationToken cancellationToken = default)
-    {
-        var (team, behindAFigure) = (await store.QueryViewsAsync<(long Team, long BehindAFigure)>(
-            "SELECT team, assignees_behind_a_figure FROM minimum_group_size;", cancellationToken: cancellationToken)).Single();
-        return new(new MinimumGroupSize { Team = checked((int)team), AssigneesBehindAFigure = checked((int)behindAFigure) });
-    }
+    /// <summary>
+    /// The numbers <paramref name="derivedFrom"/> records: the ones the derived data was built under, which the
+    /// metric view <c>minimum_group_size</c>, and through it every other view, reads from the same record.
+    /// </summary>
+    public static NumbersInForce Of(DerivedSource derivedFrom) =>
+        new(new MinimumGroupSize { Team = checked((int)derivedFrom.MinimumTeam), AssigneesBehindAFigure = checked((int)derivedFrom.MinimumAssigneesBehindAFigure) });
 
     /// <summary>A number as a sentence writes it: in words up to twelve ("five"), in digits above.</summary>
     public static string Number(int number) =>

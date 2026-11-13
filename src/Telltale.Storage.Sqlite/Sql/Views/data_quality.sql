@@ -6,9 +6,11 @@
 -- about the whole store, grouped by an attribute of issues, so the team behind them is every assignee in
 -- the store, and each count also needs the distinct assignees of the issues it counts. suppressed is the
 -- team check: 1 when the store has fewer assignees than a team, and then both counts are null. With a team,
--- a count is null when fewer than the assignees a figure needs are among its issues; a count of nothing has
--- nobody behind it and is null too. An unassigned issue counts toward nobody. (sprint_team is the team
--- check per sprint.)
+-- a count is null when fewer than the assignees a figure needs are among its issues; while that number is
+-- one or more, a count of nothing has nobody behind it and is null too. A number of zero turns its check
+-- off (owner decision D65): with a team of zero suppressed is always 0, and with zero assignees behind a
+-- figure every count is shown, a count of nothing as 0. An unassigned issue counts toward nobody.
+-- (sprint_team is the team check per sprint.)
 CREATE VIEW data_quality AS
 WITH store_team AS (
     SELECT CASE WHEN COUNT(DISTINCT assignee_hash) >= (SELECT team FROM minimum_group_size) THEN 0 ELSE 1 END AS suppressed

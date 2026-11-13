@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using Telltale.Pipeline.Tests.Harness;
 using Telltale.Storage.Sqlite;
 using TUnit.Assertions.Enums;
+using static Telltale.Pipeline.Tests.Harness.Scenarios;
 using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
@@ -12,17 +13,12 @@ namespace Telltale.Pipeline.Tests;
 /// </summary>
 public class BaselineTests
 {
-    private const string CycleTimeHeader =
-        "\n## Cycle time by point bucket\n\n"
-        + "| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) | Baseline median (business days) | Baseline P85 (business days) |\n"
-        + "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n";
+    private const string CycleTimeHeader = ReportText.CycleTimeHeaderWithBaseline;
 
     /// <summary>What follows the time in status table: the method note's heading.</summary>
-    private const string AfterTheTables = "\n## Method\n";
+    private const string AfterTheTables = ReportText.MethodHeading;
 
-    private const string TimeInStatusHeader =
-        "\n## Time in status\n\n"
-        + "| Status | Issues | Median (business days) | Total (business days) | Baseline median (business days) |\n| --- | ---: | ---: | ---: | ---: |\n";
+    private const string TimeInStatusHeader = ReportText.TimeInStatusHeaderWithBaseline;
 
     [Test]
     public async Task With_baseline_sprints_configured_both_tables_show_figures_pooled_over_all_issues_of_those_sprints()
@@ -796,21 +792,6 @@ public class BaselineTests
         }
     }
 
-    /// <summary>
-    /// Sprint 42 with a team of six: three people's 3-point issues, a day in Development and 1, 2 and 3 in Review
-    /// (cycle times 2, 3 and 4), and three more people's 5-point issues, two days each.
-    /// </summary>
-    private static void AddSprintFortyTwoWithThreeAssigneesInEveryRow(FakeJira jira)
-    {
-        Delivered(jira, 42, "FAKE-11", points: 3, People.One, days: 1, reviewDays: 1);
-        Delivered(jira, 42, "FAKE-12", points: 3, People.Two, days: 1, reviewDays: 2);
-        Delivered(jira, 42, "FAKE-13", points: 3, People.Three, days: 1, reviewDays: 3);
-        foreach (var (person, number) in new[] { (People.Four, 21), (People.Five, 22), (People.Six, 23) })
-        {
-            Delivered(jira, 42, $"FAKE-{number}", points: 5, person, days: 2);
-        }
-    }
-
     private static Task<IReadOnlyList<(string StatusName, long Suppressed, double? MedianBusinessDays)>> ReadBaselineTimeInStatusAsync(PipelineHarness pipeline) =>
         pipeline.QueryAsync<(string StatusName, long Suppressed, double? MedianBusinessDays)>(
             "SELECT status_name, suppressed, median_business_days FROM baseline_time_in_status ORDER BY board_position;");
@@ -823,41 +804,5 @@ public class BaselineTests
         public double? P85BusinessDays { get; init; }
         public double? MedianCalendarDays { get; init; }
         public double? P85CalendarDays { get; init; }
-    }
-
-    /// <summary>The harness's two sprints as two working weeks each: Monday 09:00 to the second Friday 17:00, completed as planned.</summary>
-    private static void AddTwoSprintsOfTwoWorkingWeeks(FakeJira jira)
-    {
-        jira.AddSprint41(plannedEnd: Local(2026, 1, 16, 17), completed: Local(2026, 1, 16, 17));
-        jira.AddSprint42(start: Local(2026, 1, 19, 9), plannedEnd: Local(2026, 1, 30, 17), completed: Local(2026, 1, 30, 17));
-    }
-
-    /// <summary>
-    /// An issue of sprint 41 or 42, created as the sprint starts (Monday 09:00) and in development from Tuesday
-    /// 09:00 for <paramref name="days"/> business days; then, with <paramref name="reviewDays"/>, in Review for
-    /// that many; then done. Null <paramref name="points"/> leaves it unestimated. It spends a day in New, and its cycle time is the two together (at most eight
-    /// business days, so it is done inside the sprint).
-    /// </summary>
-    private static FakeIssue Delivered(FakeJira jira, long sprintId, string key, double? points, FakePerson? assignee, int days, int reviewDays = 0)
-    {
-        var monday = sprintId == 41 ? Local(2026, 1, 5, 9) : Local(2026, 1, 19, 9);
-        var tuesday = monday.AddDays(1);
-
-        // Tuesday plus four business days is the next Monday: a weekend lies between.
-        DateTimeOffset After(int businessDays) => tuesday.AddDays(businessDays < 4 ? businessDays : businessDays + 2);
-
-        var issue = jira.AddIssue(key, monday).InSprints(sprintId).Moved(tuesday, Workflow.Development);
-        if (points is { } estimate)
-        {
-            issue.Estimated(estimate);
-        }
-
-        if (reviewDays > 0)
-        {
-            issue.Moved(After(days), Workflow.Review);
-        }
-
-        issue.Moved(After(days + reviewDays), Workflow.Done);
-        return assignee is null ? issue : issue.AssignedTo(assignee);
     }
 }

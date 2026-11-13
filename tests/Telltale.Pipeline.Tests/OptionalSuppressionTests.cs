@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Telltale.Pipeline.Tests.Harness;
+using static Telltale.Pipeline.Tests.Harness.Scenarios;
 using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
@@ -233,24 +234,5 @@ public class OptionalSuppressionTests
             _ => "\nDelivered issues: suppressed\n\n## Cycle time by point bucket\n\nsuppressed\n\n## Time in status\n\nsuppressed\n\n## Method\n",
         };
         await Assert.That(await pipeline.ReadReportAsync(41)).Contains(figures);
-    }
-
-    private static JsonObject MinimumGroupSize(int team, int assigneesBehindAFigure) =>
-        new() { ["team"] = team, ["assigneesBehindAFigure"] = assigneesBehindAFigure };
-
-    /// <summary>
-    /// Sprint 41 with four people, one delivered 3-point issue each: created as the sprint starts (Monday
-    /// 5 January 09:00), in development from Tuesday 09:00, done Thursday 09:00. So one business day in New and
-    /// a cycle of two days, each.
-    /// </summary>
-    private static void AddSprint41WithFourAssignees(FakeJira jira)
-    {
-        jira.AddSprint41();
-        foreach (var (person, number) in People.Team.Take(4).Select((person, index) => (person, index + 1)))
-        {
-            jira.AddIssue($"FAKE-{number}", Local(2026, 1, 5, 9)).AssignedTo(person).Estimated(3).InSprints(41)
-                .Moved(Local(2026, 1, 6, 9), Workflow.Development)
-                .Moved(Local(2026, 1, 8, 9), Workflow.Done);
-        }
     }
 }
