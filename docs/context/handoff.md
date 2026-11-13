@@ -17,6 +17,8 @@ The project owner (a senior .NET engineer) needs to justify AI plan upgrades to 
 
 ## What is open
 
+**Update, Nov 13, 2026:** brief status visits are counted, and it is built: the optional setting `briefVisitThresholds` lists statuses and thresholds, and each sprint report's footer says how many issues had a visit to a listed status shorter than its threshold. No existing figure changes. The spec is `.scratch/brief-status-visits/spec.md`; the decisions are D58 to D63 and D71 to D79 in `docs/decisions.md`.
+
 **Update, Nov 13, 2026:** the minimum group size is a configuration setting, and it is built: `minimumGroupSize`, five and three by default, zero turning a check off. The spec is `.scratch/optional-suppression/spec.md`; the decision is ADR-0008, which amends ADR-0003.
 
 **Update, Nov 12, 2026:** the first spec is built and merged. The Jira path works end to end against synthetic fixtures: `discover`, `secrets set`, `backfill`, `sync`, `derive`, `report`, `run` and `query` (see `README.md`). The owner's decisions made while building it are in `docs/decisions.md`. The next step is ticket 13, the first run against the real Jira on the work laptop: `.scratch/jira-flow-report/issues/13-first-real-run-on-work-laptop.md`. Start there.

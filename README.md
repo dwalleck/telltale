@@ -19,6 +19,7 @@ One markdown file per sprint, with:
 - **Time in status:** how many issues spent time in each workflow status, their median time and total business days. Totals sum issue time within the sprint and membership windows, not effort.
 - **Baseline columns:** cycle-time medians and P85s and time-in-status medians pooled over a fixed list of earlier sprints, for comparison.
 - **Method note and data quality footer:** how the figures were computed and what was left out.
+- **Brief visit lines in the footer:** when the configuration lists statuses under `briefVisitThresholds`, one line per listed status says how many of the issues in that status's time in status row had a visit shorter than the status's threshold. No figure is changed because of one. See [Brief visit thresholds](#brief-visit-thresholds).
 
 Time is counted in business days in the team's time zone, skipping weekends and the configured holidays. The definitions are in [`GLOSSARY.md`](GLOSSARY.md).
 
@@ -33,6 +34,7 @@ Reporting no per-person results is a hard constraint of the design. Withholding 
 - **A report written below the defaults says so.** When either number is below its default, a line under the report's heading gives the numbers in force, or says that small-group suppression is off. The method note of every report states the rule the report was written under.
 - **The rule lives in the database views.** `report` and `query` both read through them, so neither can show a figure that the numbers in force withhold.
 - **Opening the database file in another program bypasses the rule.** That program reads every table.
+- **Whoever edits the configuration file is trusted with it.** The rule is applied to each brief visit count on its own. Someone who derives twice under different `briefVisitThresholds` can subtract one shown count from the other, and the difference can rest on fewer people than the numbers in force allow. See [Brief visit thresholds](#brief-visit-thresholds).
 
 ## Requirements
 
@@ -57,7 +59,7 @@ To run from source without publishing, use `dotnet run --project src/Telltale.Cl
 
 ### Upgrading
 
-A store written by a version from before the `minimumGroupSize` setting needs one `telltale derive` after upgrading, because the derived tables changed. Until then `report` and `query` stop with:
+A store written by a version from before the `minimumGroupSize` setting or the `briefVisitThresholds` setting needs one `telltale derive` after upgrading, because the derived tables changed. Until then `report` and `query` stop with:
 
 ```
 The derived data in the store was built by another version of this tool. Run derive first.
@@ -93,7 +95,7 @@ Run it from a working folder outside your clone of this repository, so the store
    telltale discover --site-url https://example.atlassian.net/ --board 42 --time-zone America/Chicago --backfill-start 2026-07-01
    ```
 
-3. **Review `config/telltale.json`.** Give every status a role (`not started`, `work`, `blocked` or `done`); at least one must be `done`. List the resolutions that mean an issue was abandoned, the company holidays, and the baseline sprint IDs. `discover` wrote `minimumGroupSize` with its default numbers; leave it, or see [Minimum group size](#minimum-group-size).
+3. **Review `config/telltale.json`.** Give every status a role (`not started`, `work`, `blocked` or `done`); at least one must be `done`. List the resolutions that mean an issue was abandoned, the company holidays, and the baseline sprint IDs. `discover` wrote `minimumGroupSize` with its default numbers; leave it, or see [Minimum group size](#minimum-group-size). To count brief visits, add `briefVisitThresholds` by hand; see [Brief visit thresholds](#brief-visit-thresholds).
 
 4. **Fetch the history.**
 
@@ -132,6 +134,8 @@ A rerun keeps what the file already says, and saves a backup of the file before 
 
 A new file gets `minimumGroupSize` with five and three. A rerun never changes the setting: it keeps the numbers the file has, and does not add the setting to a file without it.
 
+`discover` never writes `briefVisitThresholds`. A rerun keeps the setting as the file has it and never changes or removes it. A rerun on a file whose `briefVisitThresholds` would be refused stops with that message and leaves the file untouched.
+
 ### `secrets set <jira-email|jira-api-token|hashing-salt>`
 
 Stores one secret in Windows Credential Manager. The value is asked for at a prompt, or piped in with `--stdin`; it is never taken as an argument.
@@ -153,7 +157,7 @@ Fetches what changed in Jira since the last `sync` or `backfill` and adds it to 
 
 ### `derive`
 
-Drops and rebuilds every derived table and view from the raw data: issue cycles, time in each status, sprint windows and the metric views. Run it after changing `statusRoles`, `abandonedResolutionIds`, `holidays`, `timeZone`, `baselineSprintIds` or `minimumGroupSize`. It calls no Jira.
+Drops and rebuilds every derived table and view from the raw data: issue cycles, time in each status, sprint windows and the metric views. Run it after changing `statusRoles`, `abandonedResolutionIds`, `holidays`, `timeZone`, `baselineSprintIds`, `minimumGroupSize` or `briefVisitThresholds`. It calls no Jira.
 
 ### `report [--sprint <id>]`
 
@@ -171,7 +175,9 @@ Runs one `SELECT` over the metric views and prints the rows as a markdown table.
 telltale query "SELECT * FROM delivered_per_sprint"
 ```
 
-The main views are `delivered_per_sprint`, `cycle_time_per_sprint_and_bucket`, `time_in_status_per_sprint`, `baseline_cycle_time_per_bucket`, `baseline_time_in_status` and `data_quality`. `minimum_group_size` holds the two numbers the derived data was built under.
+The main views are `delivered_per_sprint`, `cycle_time_per_sprint_and_bucket`, `time_in_status_per_sprint`, `baseline_cycle_time_per_bucket`, `baseline_time_in_status`, `data_quality` and `brief_visits_per_sprint`. `minimum_group_size` holds the two numbers the derived data was built under.
+
+`brief_visits_per_sprint` has one row per sprint and status listed under `briefVisitThresholds` that has a row in the sprint's time in status table: the threshold in minutes, the count, and a `suppressed` flag. A withheld count is `NULL` with `suppressed` at 1. Without the setting the view has no rows.
 
 ## Configuration file
 
@@ -203,7 +209,12 @@ The main views are `delivered_per_sprint`, `cycle_time_per_sprint_and_bucket`, `
   "baselineSprintIds": ["41", "42", "43"],
   // The smallest team a sprint needs, and the fewest distinct assignees a figure needs behind it.
   // Zero turns that check off. Optional; without it the numbers are five and three.
-  "minimumGroupSize": { "team": 5, "assigneesBehindAFigure": 3 }
+  "minimumGroupSize": { "team": 5, "assigneesBehindAFigure": 3 },
+  // Status ID to the shortest believable stay, in minutes. Optional; without it no status is checked.
+  "briefVisitThresholds": {
+    "10001": 5,
+    "10002": 0.5
+  }
 }
 ```
 
@@ -222,6 +233,7 @@ The main views are `delivered_per_sprint`, `cycle_time_per_sprint_and_bucket`, `
 | `holidays` | A list of dates, each as `"yyyy-MM-dd"`. May be empty. | `["2026-12-25"]` |
 | `baselineSprintIds` | A list of sprint IDs, each a quoted string of digits. Optional. | `["41", "42"]` |
 | `minimumGroupSize` | An object with the two numbers `team` and `assigneesBehindAFigure`. Each is a whole number of zero or more, written in plain digits, not quoted, with no fraction and no exponent, and no greater than 2,147,483,647. Optional; when it is present both numbers are required. | `{ "team": 5, "assigneesBehindAFigure": 3 }` |
+| `briefVisitThresholds` | An object of status ID (a string of digits, as in `statusRoles`) to threshold: a number of minutes greater than zero, not quoted. A fraction is allowed. Each status must be in `statusRoles` with a role other than `done`, and may be listed once. Optional; may be empty. | `{ "10001": 5, "10002": 0.5 }` |
 
 Things that are refused when the file is loaded, with a message that names the file:
 
@@ -233,6 +245,12 @@ Things that are refused when the file is loaded, with a message that names the f
 - **`minimumGroupSize` with one of its numbers missing, or written as anything but an object**, such as `null`, `false`, `0` or `"off"`. To turn the rule off, write both numbers as zero. For five and three, leave the setting out.
 - **Any other name inside `minimumGroupSize`**, including `team` with another capitalization: `minimumGroupSize.cohort is not a setting the tool knows.`
 - **A `minimumGroupSize` number written twice**: `minimumGroupSize.team is written twice.`
+- **A status under `briefVisitThresholds` that is not in `statusRoles`**, which catches a mistyped status ID: `briefVisitThresholds: every status listed must be a status in statusRoles, and one is not.` No message about this setting quotes a status ID or a threshold.
+- **A status with the role `done` under `briefVisitThresholds`**: `briefVisitThresholds: a status with the role done cannot be listed, and one is. A done status has no time in status row.`
+- **A threshold that is not a number greater than zero**: zero, a negative number, a quoted number (`"5"`), `null`, `true` or `false`, a list or an object. The message is `briefVisitThresholds: every threshold must be written as a number of minutes greater than zero, and one is not.`
+- **A threshold too large or too small to be a length of time**: `1e300` is refused as too large, and `1e-9` because it `rounds to no time at all`. The shortest length of time the tool measures is a ten-millionth of a second.
+- **`briefVisitThresholds` written as anything but an object**, such as `null`, `false`, `5`, `"off"` or a list: `briefVisitThresholds must be an object of status IDs, each with its threshold in minutes; leave the setting out to check no status.`
+- **A status listed twice under `briefVisitThresholds`**: `briefVisitThresholds lists a status twice.`
 
 About `holidays`:
 
@@ -249,7 +267,7 @@ About `holidays`:
   - A row of either table with fewer assignees behind it keeps its issue count and reads `suppressed` for its figures.
   - A sprint with fewer assignees among its delivered issues reads `suppressed` for its delivered count, and its cycle time table reads `suppressed` with no rows and no counts. Its time in status table keeps its rows.
 
-Without the setting the numbers are five and three, and writing five and three gives the same reports as leaving it out. The numbers apply to the baseline sprints and to the footer's two counts as well.
+Without the setting the numbers are five and three, and writing five and three gives the same reports as leaving it out. The numbers apply to the baseline sprints, to the footer's two counts of the whole store and to its brief visit counts as well.
 
 To change the rule, write other numbers. Any two whole numbers from zero to 2,147,483,647 are accepted, above the defaults as well as below, and the number behind a figure may be greater than the team number.
 
@@ -271,6 +289,34 @@ What a report then shows:
 - **In every case:** the method note describes the rule with the numbers in force, or says that small-group suppression is off.
 
 The setting changes only this rule. Person fields are still hashed before they are stored, and no report or view is grouped by person.
+
+### Brief visit thresholds
+
+`briefVisitThresholds` lists the statuses to check for brief visits, each with its threshold: the shortest believable stay in that status, in minutes. A brief visit is one unbroken stay in a status that ended and was shorter than the threshold; the full definition is the "Brief visit" entry of [`GLOSSARY.md`](GLOSSARY.md). The setting exists because issues are sometimes moved through several statuses at once, long after the work happened, and such a stay of a few seconds still counts toward the status's time in status.
+
+- A threshold is clock time, not business time: a stay across a weekend is as long as the clock says.
+- A status that is not listed is not checked. Without the setting, or with an empty one (`{}`), nothing is checked and reports are what they were before the setting existed.
+- A threshold is applied to the nearest ten-millionth of a second, and the report prints the threshold as applied. `0.5` is thirty seconds exactly.
+- A stay exactly as long as the threshold is not brief.
+
+What a report then shows:
+
+- **One line per listed status at the end of the footer**, in board order, for each listed status that has a row in the sprint's time in status table. A shown count reads `Development: 4 issues had a visit shorter than 5 minutes`. A withheld one reads `Development: issues with a visit shorter than 5 minutes: suppressed`.
+- **The count is of issues in that status's time in status row**, each counted once, so it is never larger than the row's issue count.
+- **A paragraph at the end of the method note** says what a brief visit is, that brief visits are counted and no figure was excluded or corrected, and that the rule was added on 2026-11-12, after the first run on real data.
+- **No other figure changes.** The medians, totals and counts are what they are without the setting, and so is the footer's changelog anomaly count: a brief visit is not a changelog anomaly, and `derive` and `run` print nothing about it.
+- **There is no baseline count.** To see a baseline sprint's counts, run `telltale report --sprint <id>` on that sprint.
+
+How the minimum group size applies:
+
+- A count is withheld when its row in the time in status table has its figures withheld, or when fewer than `assigneesBehindAFigure` distinct assignees (three by default) are among the issues counted.
+- A count of zero is withheld too, so a zero and a withheld count both read `suppressed`.
+- A sprint with a team smaller than `team` (five by default) has no brief visit lines.
+- With `assigneesBehindAFigure` at zero no count is withheld, and a count of zero reads `0 issues had a visit shorter than 5 minutes`.
+- A shown count can be subtracted from the row's issue count, which gives the number of issues with no brief visit. That number is not checked against the minimum group size.
+- Each derive's counts are checked on their own. Deriving under one threshold and then under another gives two counts whose difference is the number of issues with a stay between the two thresholds, and that difference can rest on one or two people. The tool does not prevent this: whoever edits the configuration file is trusted with it, as whoever opens the database file is.
+
+After changing the setting, run `telltale derive`, or `telltale run`, which includes it. Until then `report` and `query` stop with `briefVisitThresholds in the configuration file changed since the derived data was built. Run derive first.` No `backfill` is needed. Writing the same length of time another way (`6`, `6.0`) is not a change.
 
 ## Development
 
