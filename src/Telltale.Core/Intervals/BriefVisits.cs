@@ -20,10 +20,11 @@ public sealed record Stay(string StatusId, DateTimeOffset Start, DateTimeOffset?
 
 /// <summary>
 /// The brief visit rule (GLOSSARY: Brief visit; owner decisions D58 to D60). A visit is one unbroken stay in
-/// a status: one <see cref="StatusInterval"/> of the issue's whole history, not clipped to a sprint window or
+/// a status: one <see cref="Stay"/> of the issue's whole history, not clipped to a sprint window or
 /// to sprint membership. It is brief when it ended and lasted less than the status's threshold, in clock time:
 /// the difference between the two recorded instants. A status entered and left at the same instant is a stay of
-/// no length, and so brief under any threshold (decision bv-D1 of the brief-status-visits run).
+/// no length, and so brief under any threshold (D71). A stay whose start or end comes from a changelog anomaly
+/// is never brief, because its real length is unknown (D75, D81).
 /// </summary>
 public static class BriefVisits
 {
