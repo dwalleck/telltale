@@ -18,3 +18,4 @@ Claim (C4, D48): report and query refuse a store filled under other collection s
 - Re-pointed 2026-11-12 by fin (final fix pass): a step reads the watermark once and passes the date on (review finding 9).
 - Verified 2026-11-12 at 741dd98: red, 7 failed of 55 (Pipeline, filter /*/*/(IncrementalSyncTests|QueryCommandTests)/*); restored.
 - Verified 2026-11-12 at a198e06: red, 7 failed of 55 (Pipeline, filter /*/*/(IncrementalSyncTests|QueryCommandTests)/*); restored.
+- Verified 2026-11-12 at cf5da5b: red, 7 failed of 55 (Pipeline, filter /*/*/(IncrementalSyncTests|QueryCommandTests)/*); restored.

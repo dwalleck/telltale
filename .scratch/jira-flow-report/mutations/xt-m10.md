@@ -19,3 +19,4 @@ Expected red: `A_status_id_in_the_file_that_is_not_digits_stops_a_rerun_and_is_n
 - Verified 2026-11-12 at 5c4f1d9: red, 1 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.
 - Verified 2026-11-12 at 741dd98: red, 1 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.
 - Verified 2026-11-12 at a198e06: red, 1 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.
+- Verified 2026-11-12 at cf5da5b: red, 1 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.

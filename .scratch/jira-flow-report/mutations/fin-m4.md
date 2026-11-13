@@ -18,3 +18,4 @@ Claim (C4): derive refuses a store filled under another site, board, project lis
 - Re-pointed 2026-11-12 by fin (final fix pass): a step reads the watermark once and passes the date on (review finding 9).
 - Verified 2026-11-12 at 741dd98: red, 6 failed of 30 (Pipeline, filter /*/*/IncrementalSyncTests/*); restored.
 - Verified 2026-11-12 at a198e06: red, 6 failed of 30 (Pipeline, filter /*/*/IncrementalSyncTests/*); restored.
+- Verified 2026-11-12 at cf5da5b: red, 6 failed of 30 (Pipeline, filter /*/*/IncrementalSyncTests/*); restored.

@@ -19,3 +19,4 @@ Expected red: the sprintFieldId and storyPointFieldId cases of `A_bad_value_in_t
 - Verified 2026-11-12 at 5c4f1d9: red, 4 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.
 - Verified 2026-11-12 at 741dd98: red, 4 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.
 - Verified 2026-11-12 at a198e06: red, 4 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.
+- Verified 2026-11-12 at cf5da5b: red, 4 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.

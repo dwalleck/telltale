@@ -16,3 +16,4 @@ Claim (C5): what the store was filled from names the Jira site, and a changed si
 - Verified 2026-11-12 at 5c4f1d9: red, 3 failed of 30 (Pipeline, filter /*/*/IncrementalSyncTests/*); restored.
 - Verified 2026-11-12 at 741dd98: red, 3 failed of 30 (Pipeline, filter /*/*/IncrementalSyncTests/*); restored.
 - Verified 2026-11-12 at a198e06: red, 3 failed of 30 (Pipeline, filter /*/*/IncrementalSyncTests/*); restored.
+- Verified 2026-11-12 at cf5da5b: red, 3 failed of 30 (Pipeline, filter /*/*/IncrementalSyncTests/*); restored.

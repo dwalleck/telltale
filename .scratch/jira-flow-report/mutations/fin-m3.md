@@ -16,3 +16,4 @@ Claim (C16): duration_sample and duration_figures hold one row per issue or appl
 - Verified 2026-11-12 at 5c4f1d9: red, 11 failed of 18 (Pipeline, filter /*/*/QueryCommandTests/*); restored.
 - Verified 2026-11-12 at 741dd98: red, 13 failed of 25 (Pipeline, filter /*/*/QueryCommandTests/*); restored.
 - Verified 2026-11-12 at a198e06: red, 13 failed of 25 (Pipeline, filter /*/*/QueryCommandTests/*); restored.
+- Verified 2026-11-12 at cf5da5b: red, 13 failed of 25 (Pipeline, filter /*/*/QueryCommandTests/*); restored.

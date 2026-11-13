@@ -15,3 +15,4 @@ replace: |-
 Claim (review finding 1): the time-in-status tests fail when the join between a status and its figures compares a number with text, which is what an unspecified affinity of a mixed key column could come to.
 - Verified 2026-11-12 at 741dd98: red, 19 failed of 35 (Pipeline, filter /*/*/TimeInStatusTableTests/*); restored.
 - Verified 2026-11-12 at a198e06: red, 19 failed of 35 (Pipeline, filter /*/*/TimeInStatusTableTests/*); restored.
+- Verified 2026-11-12 at cf5da5b: red, 19 failed of 35 (Pipeline, filter /*/*/TimeInStatusTableTests/*); restored.
