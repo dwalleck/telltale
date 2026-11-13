@@ -1,6 +1,6 @@
 # Owner decisions: the Jira flow report
 
-Code comments, tests, tickets and the spec cite the owner's decisions by number ("owner decision D49"). This is the list. D1 to D69 were made on 2026-11-12: D1 to D57 while the first spec was built, and D58 to D69 afterwards, after the first run on real data: D58 to D63 for the brief status visits spec (`.scratch/brief-status-visits/spec.md`) and D64 to D69 for the optional suppression spec (`.scratch/optional-suppression/spec.md`). Two things were decided on 2026-11-13, while that spec was built: D70, and the change to D66 that its row records. D71 to D79 were decided on 2026-11-13 as well, while the brief status visits spec was built. Each line gives the decision and where its full wording is; the tickets are in `.scratch/jira-flow-report/issues/`.
+Code comments, tests, tickets and the spec cite the owner's decisions by number ("owner decision D49"). This is the list. D1 to D69 were made on 2026-11-12: D1 to D57 while the first spec was built, and D58 to D69 afterwards, after the first run on real data: D58 to D63 for the brief status visits spec (`.scratch/brief-status-visits/spec.md`) and D64 to D69 for the optional suppression spec (`.scratch/optional-suppression/spec.md`). Two things were decided on 2026-11-13, while that spec was built: D70, and the change to D66 that its row records. D71 to D80 were decided on 2026-11-13 as well, while the brief status visits spec was built. Each line gives the decision and where its full wording is; the tickets are in `.scratch/jira-flow-report/issues/`.
 
 A decision that changes a metric definition is also in `GLOSSARY.md`, in a commit that gives the reason.
 
@@ -77,7 +77,7 @@ D5 to D56 describe the rule with its default numbers, five and three. They apply
 
 D58 to D63 were made on 2026-11-12, after the first run on real data had shown issues passing through a work status in seconds. They add a count of how often that happens and change no existing figure. The rule is a description of data quality set with knowledge of results, not a success criterion. The term is the "Brief visit" entry of `GLOSSARY.md`; the owner confirmed four readings of these decisions on the same day, and they are in the spec.
 
-D71 to D79 were made on 2026-11-13, while that spec was built, each on a question a ticket or its review put to the owner. The build run numbered them bv-D1 to bv-D9, in the same order; the tickets, in `.scratch/brief-status-visits/issues/`, cite them by those numbers.
+D71 to D80 were made on 2026-11-13, while that spec was built, each on a question a ticket or its review put to the owner. The build run numbered D71 to D79 bv-D1 to bv-D9, in the same order, and D80 bv-D12; the tickets, in `.scratch/brief-status-visits/issues/`, cite them by those numbers.
 
 | # | Decision | Full wording |
 | --- | --- | --- |
@@ -96,6 +96,7 @@ D71 to D79 were made on 2026-11-13, while that spec was built, each on a questio
 | D77 | A shown time in status median can hint that a withheld brief visit count is not zero. This is accepted and no figure changes. The method note says a short median does not show how many issues had a brief visit. (2026-11-13) | bv-D7; tickets 03 and 05 of the brief status visits spec |
 | D78 | A shown brief visit count can be subtracted from the row's issue count, which gives the number of issues with no brief visit, and that number may rest on fewer assignees than the configured number. This is accepted and recorded, as D37 is: the count is not withheld for it. (2026-11-13) | bv-D8; ticket 03 of the brief status visits spec |
 | D79 | The counts of two derives under different thresholds can be subtracted, which gives the number of issues with a stay between the two thresholds, and that number may rest on too few people. This is accepted and recorded: whoever edits the configuration file is trusted with it. The README says so beside its note that opening the database file bypasses the views. (2026-11-13) | bv-D9; tickets 03 and 05 of the brief status visits spec |
+| D80 | A threshold is applied to the nearest ten-millionth of a second, the shortest length of time the tool measures. A threshold that rounds to less than that is refused (D72). The report prints the threshold as applied. (2026-11-13) | bv-D12; tickets 04 and 05 of the brief status visits spec |
 
 ## Commands, configuration and secrets
 

@@ -19,7 +19,7 @@ One markdown file per sprint, with:
 - **Time in status:** how many issues spent time in each workflow status, their median time and total business days. Totals sum issue time within the sprint and membership windows, not effort.
 - **Baseline columns:** cycle-time medians and P85s and time-in-status medians pooled over a fixed list of earlier sprints, for comparison.
 - **Method note and data quality footer:** how the figures were computed and what was left out.
-- **Brief visit lines in the footer:** when the configuration lists statuses under `briefVisitThresholds`, one line per listed status says how many of the issues in that status's time in status row had a visit shorter than the status's threshold. No figure is changed because of one. See [Brief visit thresholds](#brief-visit-thresholds).
+- **Brief visit lines in the footer:** when the configuration lists statuses under `briefVisitThresholds`, one line for each listed status that has a row in the sprint's time in status table says how many of the issues in that row had a visit shorter than the status's threshold, or reads `suppressed`. A listed status with no row has no line, and a sprint whose tables are withheld has none. No figure is changed because of a brief visit. See [Brief visit thresholds](#brief-visit-thresholds).
 
 Time is counted in business days in the team's time zone, skipping weekends and the configured holidays. The definitions are in [`GLOSSARY.md`](GLOSSARY.md).
 
@@ -134,7 +134,7 @@ A rerun keeps what the file already says, and saves a backup of the file before 
 
 A new file gets `minimumGroupSize` with five and three. A rerun never changes the setting: it keeps the numbers the file has, and does not add the setting to a file without it.
 
-`discover` never writes `briefVisitThresholds`. A rerun keeps the setting as the file has it and never changes or removes it. A rerun on a file whose `briefVisitThresholds` would be refused stops with that message and leaves the file untouched.
+`discover` never writes `briefVisitThresholds`. A rerun keeps the setting as the file has it and never changes or removes it. A rerun on a file whose `briefVisitThresholds` would be refused writes nothing and leaves the file untouched. It prints `discover did not write <file>, because run would refuse it:` followed by the message `run` would give.
 
 ### `secrets set <jira-email|jira-api-token|hashing-salt>`
 
@@ -245,7 +245,7 @@ Things that are refused when the file is loaded, with a message that names the f
 - **`minimumGroupSize` with one of its numbers missing, or written as anything but an object**, such as `null`, `false`, `0` or `"off"`. To turn the rule off, write both numbers as zero. For five and three, leave the setting out.
 - **Any other name inside `minimumGroupSize`**, including `team` with another capitalization: `minimumGroupSize.cohort is not a setting the tool knows.`
 - **A `minimumGroupSize` number written twice**: `minimumGroupSize.team is written twice.`
-- **A status under `briefVisitThresholds` that is not in `statusRoles`**, which catches a mistyped status ID: `briefVisitThresholds: every status listed must be a status in statusRoles, and one is not.` No message about this setting quotes a status ID or a threshold.
+- **A status under `briefVisitThresholds` that is not in `statusRoles`**, which catches a mistyped status ID: `briefVisitThresholds: every status listed must be a status in statusRoles, and one is not.` The messages of the setting's own rules, the six listed here, never quote a status ID or a threshold. Two other readers can quote part of the file: a file that is not valid JSON (a status ID written without quotes, for example) gets the JSON reader's message, and `discover` names a key that its own reader finds written twice.
 - **A status with the role `done` under `briefVisitThresholds`**: `briefVisitThresholds: a status with the role done cannot be listed, and one is. A done status has no time in status row.`
 - **A threshold that is not a number greater than zero**: zero, a negative number, a quoted number (`"5"`), `null`, `true` or `false`, a list or an object. The message is `briefVisitThresholds: every threshold must be written as a number of minutes greater than zero, and one is not.`
 - **A threshold too large or too small to be a length of time**: `1e300` is refused as too large, and `1e-9` because it `rounds to no time at all`. The shortest length of time the tool measures is a ten-millionth of a second.
@@ -296,7 +296,7 @@ The setting changes only this rule. Person fields are still hashed before they a
 
 - A threshold is clock time, not business time: a stay across a weekend is as long as the clock says.
 - A status that is not listed is not checked. Without the setting, or with an empty one (`{}`), nothing is checked and reports are what they were before the setting existed.
-- A threshold is applied to the nearest ten-millionth of a second, and the report prints the threshold as applied. `0.5` is thirty seconds exactly.
+- A threshold is applied to the nearest ten-millionth of a second, and one that rounds to less than that is refused. The report prints the threshold as applied, in plain digits. `0.5` is thirty seconds exactly.
 - A stay exactly as long as the threshold is not brief.
 
 What a report then shows:
