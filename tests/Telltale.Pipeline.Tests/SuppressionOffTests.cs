@@ -507,6 +507,7 @@ public class SuppressionOffTests
             + MethodHeading);
         await Assert.That(await pipeline.ReadReportAsync(42)).StartsWith(
             "# Fake Sprint 42 (2026-01-19 to 2026-01-30)\n\n"
+            + "Small-group suppression is off: a figure in this report may rest on the work of one or two people.\n\n"
             + "Delivered issues: 0\n"
             + "\n## Cycle time by point bucket\n\nNo issue delivered in this sprint has a cycle time.\n"
             + "\n## Time in status\n\nNo issue of this sprint spent time in a status that is not done.\n"
