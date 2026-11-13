@@ -13,3 +13,4 @@ replace: |-
 # fin-m16: the bucket counts of a sprint whose delivered count is withheld are shown
 
 Claim (owner decision D53): where a sprint's delivered count is withheld for fewer than three delivering assignees, the issue counts of its point buckets are withheld too, in the view. The test ran red first.
+- Verified 2026-11-12 at b966865: red, 1 failed of 14 (Pipeline, filter /*/*/SuppressionTests/*); restored.

@@ -15,3 +15,4 @@ replace: |-
 Claim (B4): a footer count needs three distinct assignees among the issues it counts. The test was written together with the view.
 - Verified 2026-11-12 at 5c4f1d9: red, 2 failed of 20 (Pipeline, filter /*/*/MethodNoteAndFooterTests/*); restored.
 - Verified 2026-11-12 at 741dd98: red, 2 failed of 20 (Pipeline, filter /*/*/MethodNoteAndFooterTests/*); restored.
+- Verified 2026-11-12 at b966865: red, 2 failed of 20 (Pipeline, filter /*/*/MethodNoteAndFooterTests/*); restored.

@@ -15,3 +15,4 @@ replace: |-
 Claim (B14): a median that is not a round number is shown rounded to one decimal place (1.375 reads 1.4). `A_median_that_is_not_a_round_number_is_shown_to_one_decimal_place` passed when written.
 - Verified 2026-11-12 at 5c4f1d9: red, 1 failed of 28 (Pipeline, filter /*/*/TimeInStatusTableTests/*); restored.
 - Verified 2026-11-12 at 741dd98: red, 1 failed of 35 (Pipeline, filter /*/*/TimeInStatusTableTests/*); restored.
+- Verified 2026-11-12 at b966865: red, 1 failed of 35 (Pipeline, filter /*/*/TimeInStatusTableTests/*); restored.
