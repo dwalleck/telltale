@@ -7,7 +7,9 @@
 --
 -- Minimum group size (GLOSSARY, ADR-0003): the four figures are null and suppressed is 1 when the sprint has
 -- fewer than five distinct assignees (sprint_team) or the bucket has fewer than three behind it. A bucket
--- short of three keeps its issue_count (owner decision D5). A sprint short of five has no bucket rows at
+-- short of three keeps its issue_count (owner decision D5), unless the sprint's delivered count is withheld
+-- because fewer than three assignees are among its delivered issues: then every bucket's issue_count is
+-- null too, since the counts add up to the withheld count (owner decision D53). A sprint short of five has no bucket rows at
 -- all: it has exactly one row, with no bucket, no count (D41: the counts of a small sprint are its people's
 -- throughput, and summed they give back the delivered count that is withheld) and suppressed = 1, whether
 -- or not anything was delivered in it (D45: which buckets have rows would say what its few people worked
@@ -27,11 +29,14 @@ WITH bucket AS (
 shown AS (
     SELECT b.sprint_id,
            b.point_bucket,
-           b.issue_count,
+           -- Owner decision D53: where the sprint's delivered count is withheld (delivered_per_sprint), the
+           -- bucket counts add up to it, so they are withheld with it. The rows stay.
+           CASE WHEN d.suppressed = 0 THEN b.issue_count END AS issue_count,
            CASE WHEN b.assignees >= (SELECT assignees_behind_a_figure FROM minimum_group_size) THEN 0 ELSE 1 END AS suppressed
     FROM bucket b
     -- An inner join: an issue delivered between sprints has no sprint, so it is in no row.
     JOIN sprint_team t ON t.sprint_id = b.sprint_id
+    JOIN delivered_per_sprint d ON d.sprint_id = b.sprint_id
     WHERE t.suppressed = 0
 )
 SELECT s.sprint_id,

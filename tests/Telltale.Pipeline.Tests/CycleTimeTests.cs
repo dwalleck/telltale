@@ -426,7 +426,9 @@ public class CycleTimeTests
             new RawData(
                 Issues: [.. Enumerable.Range(1, 10).Select(id => new RawIssue { IssueId = $"{id}", IssueTypeId = FakeJira.IssueTypeStoryId, Created = start, StatusId = Workflow.Done.Id, ResolutionId = null, StoryPoints = 3, AssigneeHash = $"synthetic-hash-{((id - 1) % 5) + 1}", Updated = end, SprintIds = "" })],
                 Changes: [],
-                Sprints: [],
+
+                // The sprint the derived rows below are in: the view reads the sprint's delivered count, which needs its row.
+                Sprints: [new RawSprint("41", FakeJira.BoardId, "Fake Sprint 41", SprintStates.Closed, Local(2026, 1, 5, 9), Local(2026, 1, 19, 9), Local(2026, 1, 19, 9))],
                 Statuses: []),
             new Watermark("synthetic-collector", new CollectionScope("https://example.invalid/", FakeJira.BoardId, FakeJira.ProjectKey, new DateOnly(2025, 1, 1), "status"), UpdatedThrough: end),
             SaltFingerprint: "synthetic-fingerprint"));

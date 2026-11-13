@@ -120,15 +120,18 @@ public class SuppressionTests
     }
 
     [Test]
-    public async Task A_delivered_count_with_two_assignees_among_the_delivered_issues_reads_suppressed_and_the_tables_keep_their_rows()
+    public async Task A_delivered_count_with_two_assignees_among_the_delivered_issues_reads_suppressed_and_so_do_the_counts_of_its_point_buckets()
     {
         // Owner decision D49: the count is a figure like any other, so it needs three distinct assignees
-        // behind it as well as a team of five. Three issues delivered by two people; three more people in the sprint.
+        // behind it as well as a team of five. Owner decision D53: the bucket counts of such a sprint add up to
+        // the withheld count, so they are withheld with it; the rows stay. Four issues delivered by two people,
+        // in two buckets; three more people in the sprint.
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.AddSprint41();
         Delivered(pipeline.Jira, "FAKE-1", points: 3, People.One);
         Delivered(pipeline.Jira, "FAKE-2", points: 3, People.One);
         Delivered(pipeline.Jira, "FAKE-3", points: 3, People.Two);
+        Delivered(pipeline.Jira, "FAKE-7", points: 5, People.Two);
         InSprintFromItsStart(pipeline.Jira, "FAKE-4", People.Three);
         InSprintFromItsStart(pipeline.Jira, "FAKE-5", People.Four);
         InSprintFromItsStart(pipeline.Jira, "FAKE-6", People.Five);
@@ -138,10 +141,42 @@ public class SuppressionTests
         await Assert.That(await pipeline.ReadReportAsync(41)).Contains(
             "\nDelivered issues: suppressed\n"
             + CycleTimeHeader
-            + "| 3 | 3 | suppressed | suppressed | suppressed | suppressed |\n"
+            + "| 3 | suppressed | suppressed | suppressed | suppressed | suppressed |\n"
+            + "| 5 | suppressed | suppressed | suppressed | suppressed | suppressed |\n"
             + TimeInStatusHeading);
         var delivered = await pipeline.QueryAsync<(long? DeliveredCount, long Suppressed, long TeamSuppressed)>("SELECT delivered_count, suppressed, team_suppressed FROM delivered_per_sprint WHERE sprint_id = '41';");
         await Assert.That(delivered).IsEquivalentTo(new (long?, long, long)[] { (null, 1, 0) });
+
+        // The view says no more than the report: ad hoc SQL cannot add the counts up either.
+        var buckets = await pipeline.QueryAsync<(double? PointBucket, long? IssueCount, long Suppressed)>(
+            "SELECT point_bucket, issue_count, suppressed FROM cycle_time_per_sprint_and_bucket WHERE sprint_id = '41' ORDER BY point_bucket;");
+        await Assert.That(buckets).IsEquivalentTo(new (double?, long?, long)[] { (3, null, 1), (5, null, 1) }, CollectionOrdering.Matching);
+        var sum = await pipeline.QueryAsync<long?>("SELECT SUM(issue_count) FROM cycle_time_per_sprint_and_bucket WHERE sprint_id = '41';");
+        await Assert.That(sum).IsEquivalentTo(new long?[] { null });
+    }
+
+    [Test]
+    public async Task A_bucket_short_of_three_assignees_keeps_its_count_in_a_sprint_whose_delivered_count_is_shown()
+    {
+        // Owner decision D5 still holds where D53 does not apply: three people delivered, so the delivered
+        // count is shown, and the bucket with one assignee shows its count beside its withheld figures.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.AddSprint41();
+        Delivered(pipeline.Jira, "FAKE-1", points: 3, People.One);
+        Delivered(pipeline.Jira, "FAKE-2", points: 3, People.Two);
+        Delivered(pipeline.Jira, "FAKE-3", points: 5, People.Three);
+        Delivered(pipeline.Jira, "FAKE-7", points: 5, People.Three);
+        InSprintFromItsStart(pipeline.Jira, "FAKE-4", People.Four);
+        InSprintFromItsStart(pipeline.Jira, "FAKE-5", People.Five);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(
+            "\nDelivered issues: 4\n"
+            + CycleTimeHeader
+            + "| 3 | 2 | suppressed | suppressed | suppressed | suppressed |\n"
+            + "| 5 | 2 | suppressed | suppressed | suppressed | suppressed |\n"
+            + TimeInStatusHeading);
     }
 
     [Test]
