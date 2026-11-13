@@ -58,19 +58,22 @@ public class WhichVisitsCountTests
     public async Task A_status_entered_and_left_at_the_same_instant_and_never_stayed_in_gives_no_line_as_it_has_no_row()
     {
         // The issue spent no time in Development, so Development has no time in status row in the sprint, and a
-        // listed status with no row has no line (story 31).
+        // listed status with no row has no line (story 31). Review is listed too, and has its line: the two
+        // days there were no brief visit.
         await using var pipeline = SprintFortyOne();
         var wednesday = Local(2026, 1, 7, 10);
         Issue(pipeline)
             .Moved(wednesday, Workflow.Development)
             .Moved(wednesday, Workflow.Review)
             .Moved(Local(2026, 1, 9, 10), Workflow.Done);
-        ListDevelopment(pipeline, minutes: 5);
+        pipeline.Config["briefVisitThresholds"] = new JsonObject { [Workflow.Development.Id] = 5, [Workflow.Review.Id] = 5 };
 
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
 
-        await Assert.That(await QueryAsync(pipeline, CountsSql)).IsEqualTo(CountsHead);
-        await Assert.That(await pipeline.ReadReportAsync(41)).DoesNotContain("a visit shorter than");
+        await Assert.That(await QueryAsync(pipeline, CountsSql)).IsEqualTo(CountsHead + "| 41 | Fake Review | 1 | 0 |\n");
+        var report = await pipeline.ReadReportAsync(41);
+        await Assert.That(report).EndsWith("\n- Fake Review: 0 issues had a visit shorter than 5 minutes\n");
+        await Assert.That(report).DoesNotContain("Fake Development:");
     }
 
     [Test]
