@@ -24,7 +24,7 @@ Time is counted in business days in the team's time zone, skipping weekends and 
 
 ## Privacy rules
 
-The first rule is a hard constraint of the design. The second is a default that the configuration file can change (see [ADR-0003](docs/adr/0003-pseudonymized-aggregates-only.md), and [ADR-0008](docs/adr/0008-minimum-group-size-is-a-configurable-default.md), which amends it):
+Reporting no per-person results is a hard constraint of the design. Withholding small groups is a default that the configuration file can change (see [ADR-0003](docs/adr/0003-pseudonymized-aggregates-only.md), and [ADR-0008](docs/adr/0008-minimum-group-size-is-a-configurable-default.md), which amends it):
 
 - **No per-person results.** Jira account IDs are hashed with a secret salt before storage. Names, emails and issue keys are not stored. No setting changes this.
 - **Small groups are withheld by default.** A sprint needs a team of at least five, and a figure needs at least three distinct assignees behind it. Anything short of that reads `suppressed`.
