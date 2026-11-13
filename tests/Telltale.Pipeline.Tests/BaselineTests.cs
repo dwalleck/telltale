@@ -503,6 +503,51 @@ public class BaselineTests
     }
 
     [Test]
+    public async Task A_baseline_sprint_whose_delivered_count_is_withheld_withholds_the_baseline_of_every_bucket_it_has_an_issue_in()
+    {
+        // Owner decision D54, review round 2 finding 14. Sprint 41 has a team of six, but only two of them
+        // delivered: its own cycle time table is one "suppressed" line. Its buckets (3 and unestimated) count
+        // as suppressed for the baseline, so no pooled figure is shown for them; bucket 5 is sprint 42's alone.
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsOfTwoWorkingWeeks(pipeline.Jira);
+        Delivered(pipeline.Jira, 41, "FAKE-1", points: 3, People.One, days: 1);
+        Delivered(pipeline.Jira, 41, "FAKE-2", points: null, People.Two, days: 2);
+        foreach (var (person, number) in new[] { (People.Three, 3), (People.Four, 4), (People.Five, 5), (People.Six, 6) })
+        {
+            pipeline.Jira.AddIssue($"FAKE-{number}", Local(2026, 1, 5, 9)).AssignedTo(person).InSprints(41);
+        }
+
+        AddSprintFortyTwoWithThreeAssigneesInEveryRow(pipeline.Jira);
+        foreach (var (person, number) in new[] { (People.One, 31), (People.Two, 32), (People.Three, 33) })
+        {
+            Delivered(pipeline.Jira, 42, $"FAKE-{number}", points: null, person, days: 2);
+        }
+
+        pipeline.Config["baselineSprintIds"] = new JsonArray("41", "42");
+
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+        pipeline.Out.GetStringBuilder().Clear();
+        var query = await pipeline.RunAsync("query", "SELECT point_bucket, median_business_days, p85_business_days, suppressed FROM baseline_cycle_time_per_bucket ORDER BY point_bucket IS NULL, point_bucket;");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains(
+            CycleTimeHeader
+            + "| 3 | 3 | 3.0 | 4.0 | 3.0 | 6.0 | suppressed | suppressed |\n"
+            + "| 5 | 3 | 2.0 | 2.0 | 2.0 | 2.0 | 2.0 | 2.0 |\n"
+            + "| unestimated | 3 | 2.0 | 2.0 | 2.0 | 2.0 | suppressed | suppressed |\n");
+        await Assert.That(query).IsEqualTo(0);
+        await Assert.That(pipeline.Out.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            """
+            | point_bucket | median_business_days | p85_business_days | suppressed |
+            | --- | --- | --- | --- |
+            | 3 | NULL | NULL | 1 |
+            | 5 | 2 | 2 | 0 |
+            | NULL | NULL | NULL | 1 |
+
+            """);
+    }
+
+    [Test]
     public async Task A_baseline_sprint_jira_gives_no_start_date_has_no_sprint_window_and_is_refused_with_a_message_of_its_own()
     {
         // B8 of the final review: such a sprint was reported as having "fewer than five assignees".

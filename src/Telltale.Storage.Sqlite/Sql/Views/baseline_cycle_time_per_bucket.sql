@@ -19,11 +19,26 @@
 -- There is no issue count: the pooled count less the sprints' shown counts would be a withheld count.
 CREATE VIEW baseline_cycle_time_per_bucket AS
 -- One row per bucket: 1 when any baseline sprint's own view withholds the bucket.
-WITH withheld AS (
-    SELECT v.point_bucket, MAX(v.suppressed) AS suppressed
+WITH per_sprint AS (
+    SELECT v.point_bucket, v.suppressed
     FROM cycle_time_per_sprint_and_bucket v
     JOIN baseline_sprint b ON b.sprint_id = v.sprint_id
-    GROUP BY v.point_bucket
+    -- A baseline sprint whose delivered count is withheld has no bucket rows in that view, only its one row.
+    -- Every bucket it has a cycle time in counts as suppressed (owner decision D54), read from the samples
+    -- and not from a row that could be missing, so the baseline fails closed.
+    JOIN sprint_team t ON t.sprint_id = v.sprint_id
+    WHERE t.delivered_suppressed = 0
+    UNION ALL
+    SELECT f.bucket, 1
+    FROM duration_figures f
+    JOIN baseline_sprint b ON b.sprint_id = f.sprint_id
+    JOIN sprint_team t ON t.sprint_id = f.sprint_id
+    WHERE f.scope = 'sprint' AND f.measure = 'cycle business' AND t.delivered_suppressed <> 0
+),
+withheld AS (
+    SELECT p.point_bucket, MAX(p.suppressed) AS suppressed
+    FROM per_sprint p
+    GROUP BY p.point_bucket
 )
 SELECT business.bucket AS point_bucket,
        CASE WHEN w.suppressed = 0 THEN business.median_days END AS median_business_days,

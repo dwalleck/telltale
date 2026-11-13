@@ -133,7 +133,7 @@ public static class SprintReport
     private static void AppendCycleTime(StringBuilder report, DeliveredRow sprint, BaselineColumns baseline, IReadOnlyList<CycleTimeRow> buckets)
     {
         report.Append("\n## Cycle time by point bucket\n\n");
-        if (AppendSuppressedTable(report, sprint))
+        if (AppendSuppressedTable(report, sprint.Suppressed))
         {
             return;
         }
@@ -159,7 +159,7 @@ public static class SprintReport
     private static void AppendTimeInStatus(StringBuilder report, DeliveredRow sprint, BaselineColumns baseline, IReadOnlyList<TimeInStatusRow> rows)
     {
         report.Append("\n## Time in status\n\n");
-        if (AppendSuppressedTable(report, sprint))
+        if (AppendSuppressedTable(report, sprint.TeamSuppressed))
         {
             return;
         }
@@ -180,13 +180,15 @@ public static class SprintReport
     }
 
     /// <summary>
-    /// For a sprint that fails the team check, writes the one line that stands for a whole table and returns
-    /// true (owner decision D45): no row, and no sentence about an empty table either, because which buckets
-    /// or statuses have rows says what the sprint's few people worked on.
+    /// For a table the view withholds as a whole, writes the one line that stands for it and returns true: no
+    /// row, and no sentence about an empty table either, because which buckets or statuses have rows says
+    /// what the sprint's few people worked on (owner decision D45). <paramref name="suppressed"/> is the flag
+    /// of the check the table follows: both tables follow the team check, and the cycle time table also
+    /// follows the check of the delivered count, whose flag covers both (owner decision D54).
     /// </summary>
-    private static bool AppendSuppressedTable(StringBuilder report, DeliveredRow sprint)
+    private static bool AppendSuppressedTable(StringBuilder report, long suppressed)
     {
-        if (sprint.TeamSuppressed == 0)
+        if (suppressed == 0)
         {
             return false;
         }
@@ -206,7 +208,7 @@ public static class SprintReport
             .Append("- Cycle time runs from an issue's first entry into a work status to its last entry into a done status, for delivered issues only. It belongs to the sprint in which the issue was delivered.\n")
             .Append("- Figures are medians and P85s. The median is the middle value, or the mean of the two middle values. The P85 is the smallest value with at least 85% of the values at or below it.\n")
             .Append("- Time in status covers the statuses before done. An issue counts toward a status only if it spent more than zero business days there.\n")
-            .Append("- A figure is shown only where it cannot show one person's work. The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in it. When the team is smaller than five, the delivered count and both tables read \"suppressed\", with no rows. With a team of five or more, a row with fewer than three distinct assignees behind it keeps its issue count and reads \"suppressed\" for its figures, and the delivered count reads \"suppressed\" when fewer than three distinct assignees are among the delivered issues; the issue counts of the cycle time table then read \"suppressed\" too, because they add up to it. The footer's two counts read \"suppressed\" when the issues in the whole store have fewer than five distinct assignees, or fewer than three are among the issues counted.\n")
+            .Append("- A figure is shown only where it cannot show one person's work. The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in it. When the team is smaller than five, the delivered count and both tables read \"suppressed\", with no rows. With a team of five or more, a row with fewer than three distinct assignees behind it keeps its issue count and reads \"suppressed\" for its figures, and the delivered count reads \"suppressed\" when fewer than three distinct assignees are among the delivered issues, and the cycle time table then reads \"suppressed\" as well, with no rows, because its rows and their counts would give the count back. The time in status table of such a sprint keeps its counts: they count every issue that spent time in a status, delivered or not, so the count of a late status can be close to the withheld delivered count. The footer's two counts read \"suppressed\" when the issues in the whole store have fewer than five distinct assignees, or fewer than three are among the issues counted.\n")
             .Append("- An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. An unassigned issue counts toward nobody.\n");
 
         // Said only when there is a baseline: without one the report has no baseline column to explain.
@@ -337,16 +339,16 @@ public static class SprintReport
         public string? Ended { get; init; }
         public string? PlannedEnd { get; init; }
         public long? DeliveredCount { get; init; }
-        /// <summary>The delivered count's own flag: the team check, and three assignees among the delivered issues (owner decision D49).</summary>
+        /// <summary>The delivered count's own flag: the team check, and three assignees among the delivered issues (owner decision D49). The cycle time table follows it too (D54).</summary>
         public long Suppressed { get; init; } = 1;
-        /// <summary>The team check alone: 1 for a sprint whose tables show no rows.</summary>
+        /// <summary>The team check alone: 1 for a sprint whose tables both show no rows. The time in status table follows it.</summary>
         public long TeamSuppressed { get; init; } = 1;
     }
 
     private sealed class CycleTimeRow
     {
         public double? PointBucket { get; init; }
-        /// <summary>Null when the sprint is short of five assignees: its counts are withheld with its figures (owner decision D41).</summary>
+        /// <summary>Null in the one row of a sprint whose delivered count is withheld (short of five assignees, or of three among its delivered issues): it has no bucket rows, so the report never prints this row (owner decisions D41, D54).</summary>
         public long? IssueCount { get; init; }
         public double? MedianBusinessDays { get; init; }
         public double? P85BusinessDays { get; init; }

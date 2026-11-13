@@ -5,16 +5,15 @@
 -- The median and the P85 are duration_figures' (how each is picked is said there), for business and for
 -- calendar days, which are ranked separately.
 --
--- Minimum group size (GLOSSARY, ADR-0003): the four figures are null and suppressed is 1 when the sprint has
--- fewer than five distinct assignees (sprint_team) or the bucket has fewer than three behind it. A bucket
--- short of three keeps its issue_count (owner decision D5), unless the sprint's delivered count is withheld
--- because fewer than three assignees are among its delivered issues: then every bucket's issue_count is
--- null too, since the counts add up to the withheld count (owner decision D53). A sprint short of five has no bucket rows at
--- all: it has exactly one row, with no bucket, no count (D41: the counts of a small sprint are its people's
--- throughput, and summed they give back the delivered count that is withheld) and suppressed = 1, whether
--- or not anything was delivered in it (D45: which buckets have rows would say what its few people worked
--- on). In that row a null point_bucket does not mean unestimated. An issue counts toward its assignee at
--- the time of the sync, and an unassigned issue toward nobody.
+-- Minimum group size (GLOSSARY, ADR-0003): the four figures are null and suppressed is 1 when the bucket has
+-- fewer than three distinct assignees behind it. Such a bucket keeps its issue_count (owner decision D5).
+-- A sprint whose delivered count is withheld (sprint_team.delivered_suppressed: fewer than five assignees in
+-- the sprint, or fewer than three among its delivered issues) has no bucket rows at all: it has exactly one
+-- row, with no bucket, no count and suppressed = 1, whether or not anything was delivered in it. Bucket
+-- counts add up to the withheld delivered count (D41), the number of bucket rows bounds it from below, and
+-- which buckets have rows says what the sprint's few people worked on (D45, D54). In that row a null
+-- point_bucket does not mean unestimated. An issue counts toward its assignee at the time of the sync, and
+-- an unassigned issue toward nobody.
 CREATE VIEW cycle_time_per_sprint_and_bucket AS
 WITH bucket AS (
     SELECT c.delivery_sprint_id AS sprint_id,
@@ -29,15 +28,12 @@ WITH bucket AS (
 shown AS (
     SELECT b.sprint_id,
            b.point_bucket,
-           -- Owner decision D53: where the sprint's delivered count is withheld (delivered_per_sprint), the
-           -- bucket counts add up to it, so they are withheld with it. The rows stay.
-           CASE WHEN d.suppressed = 0 THEN b.issue_count END AS issue_count,
+           b.issue_count,
            CASE WHEN b.assignees >= (SELECT assignees_behind_a_figure FROM minimum_group_size) THEN 0 ELSE 1 END AS suppressed
     FROM bucket b
     -- An inner join: an issue delivered between sprints has no sprint, so it is in no row.
     JOIN sprint_team t ON t.sprint_id = b.sprint_id
-    JOIN delivered_per_sprint d ON d.sprint_id = b.sprint_id
-    WHERE t.suppressed = 0
+    WHERE t.delivered_suppressed = 0
 )
 SELECT s.sprint_id,
        s.point_bucket,
@@ -53,4 +49,4 @@ JOIN duration_figures calendar ON calendar.scope = 'sprint' AND calendar.measure
 UNION ALL
 SELECT t.sprint_id, NULL, NULL, NULL, NULL, NULL, NULL, 1
 FROM sprint_team t
-WHERE t.suppressed = 1;
+WHERE t.delivered_suppressed = 1;
