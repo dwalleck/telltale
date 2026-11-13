@@ -15,7 +15,8 @@ Start with `docs/context/handoff.md`: it explains where this project came from, 
 
 ## Non-negotiables
 
-- Privacy rules in ADR-0003 and ADR-0005 are hard constraints, not preferences. No feature may produce per-person results outside the two consented case studies.
+- The tool reports on the team's work, not on individuals. Person fields are pseudonymized at import (ADR-0003, ADR-0005), and no feature produces per-person results outside the two consented case studies.
+- The minimum group size (withholding figures that rest on few people) is a default, not a hard rule. The team asked for this tool, and its Jira figures aggregate what anyone with access to the board can already see. The numbers are being made configurable, zero turning the rule off: `.scratch/optional-suppression/spec.md`. Until that is built the views enforce five and three; do not weaken them by other means.
 - Metric definitions live in `docs/context/pilot-plan.md` and the glossary. Changing a definition is a commit with a reason, because the git history is the dated record that criteria were set before results existed.
 
 ## Agent skills
