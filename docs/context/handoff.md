@@ -17,6 +17,8 @@ The project owner (a senior .NET engineer) needs to justify AI plan upgrades to 
 
 ## What is open
 
+**Update, Nov 13, 2026:** the minimum group size is a configuration setting, and it is built: `minimumGroupSize`, five and three by default, zero turning a check off. The spec is `.scratch/optional-suppression/spec.md`; the decision is ADR-0008, which amends ADR-0003.
+
 **Update, Nov 12, 2026:** the first spec is built and merged. The Jira path works end to end against synthetic fixtures: `discover`, `secrets set`, `backfill`, `sync`, `derive`, `report`, `run` and `query` (see `README.md`). The owner's decisions made while building it are in `docs/decisions.md`. The next step is ticket 13, the first run against the real Jira on the work laptop: `.scratch/jira-flow-report/issues/13-first-real-run-on-work-laptop.md`. Start there.
 
 **Status-duration quality investigation, Nov 12, 2026:** [Status-duration quality handoff](status-duration-quality-handoff.md) records the implemented total-business-days column, interpretation pitfalls found during local report investigation, evidence consistent with late Jira status updates, and the unresolved anomaly-detection and PR-based timing design. It contains no operational report values or company identifiers. Read it before changing duration eligibility or adding fallback measurements.
