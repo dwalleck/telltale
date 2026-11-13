@@ -3,14 +3,20 @@ id: fin-m16
 status: active
 project: Pipeline
 filter: '/*/*/SuppressionTests/*'
-file: src/Telltale.Storage.Sqlite/Sql/Views/cycle_time_per_sprint_and_bucket.sql
-expectedMatches: 1
-find: |-
-  CASE WHEN d.suppressed = 0 THEN b.issue_count END AS issue_count,
-replace: |-
-  b.issue_count AS issue_count,
+edits:
+  - file: src/Telltale.Storage.Sqlite/Sql/Views/cycle_time_per_sprint_and_bucket.sql
+    expectedMatches: 1
+    find: |-
+      WHERE t.delivered_suppressed = 0
+    replace: |-
+      WHERE t.suppressed = 0
+  - file: src/Telltale.Storage.Sqlite/Sql/Views/cycle_time_per_sprint_and_bucket.sql
+    expectedMatches: 1
+    find: |-
+      WHERE t.delivered_suppressed = 1;
+    replace: |-
+      WHERE t.suppressed = 1;
 ---
-# fin-m16: the bucket counts of a sprint whose delivered count is withheld are shown
+# fin-m16: a sprint whose delivered count is withheld shows its bucket rows
 
-Claim (owner decision D53): where a sprint's delivered count is withheld for fewer than three delivering assignees, the issue counts of its point buckets are withheld too, in the view. The test ran red first.
-- Verified 2026-11-12 at b966865: red, 1 failed of 14 (Pipeline, filter /*/*/SuppressionTests/*); restored.
+Claim (owner decision D54, replacing the row form of D53): a sprint with a team of five whose delivered count is withheld has one suppressed row in the cycle time view and no bucket rows, whatever was delivered. The three cases ran red first.
