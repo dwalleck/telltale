@@ -266,8 +266,14 @@ public class BriefVisitCountTests
         await Assert.That(reportWithout).EndsWith("\n- Issues delivered between sprints, in the whole store: suppressed\n");
         await Assert.That(await QueryAsync(without, ViewSql)).IsEqualTo(ViewHead);
 
-        // With the setting: the same report with one line more, and the console said the same.
-        await Assert.That(await with.ReadReportAsync(41)).IsEqualTo(reportWithout + "- Fake Development: 4 issues had a visit shorter than 5 minutes\n");
+        // With the setting: the same report with one line more, and the console said the same. The method note
+        // differs in the two places that are about brief visits (ticket 05): its sentence on the footer's two
+        // counts calls them the first two, and it ends with one paragraph on brief visits.
+        var reportWith = await with.ReadReportAsync(41);
+        var paragraphs = reportWith.Split('\n');
+        await Assert.That(paragraphs.Count(paragraph => paragraph.StartsWith("- A brief visit is ", StringComparison.Ordinal))).IsEqualTo(1);
+        await Assert.That(string.Join('\n', paragraphs.Where(paragraph => !paragraph.StartsWith("- A brief visit is ", StringComparison.Ordinal))).Replace("The footer's first two counts read", "The footer's two counts read", StringComparison.Ordinal))
+            .IsEqualTo(reportWithout + "- Fake Development: 4 issues had a visit shorter than 5 minutes\n");
         await Assert.That(with.Error.ToString()).IsEqualTo(without.Error.ToString());
         await Assert.That(without.Error.ToString()).Contains("Changelog anomalies: 1 across 1 issue");
 
