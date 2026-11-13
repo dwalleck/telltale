@@ -51,6 +51,11 @@ public sealed record TelltaleConfig
     /// The statuses checked for brief visits (GLOSSARY: Brief visit), by status ID, each with its threshold: the
     /// shortest believable stay in minutes of clock time, e.g. <c>{ "10001": 5 }</c> (owner decisions D58, D59).
     /// A status not listed is not checked. The setting may be left out or empty: then nothing is checked.
+    /// <see cref="TelltaleSettings.CheckedBriefVisitThresholds"/> refuses the rest: a status that has no role in
+    /// <see cref="StatusRoles"/> or has the done role, and a threshold that is not above zero, is too large to
+    /// be a length of time, or rounds to no time at all. A threshold may be a fraction of a minute. The file's
+    /// reader also refuses a null or anything else that is not an object, a threshold that is not written as
+    /// a number, and a status listed twice.
     /// </summary>
     public IReadOnlyDictionary<string, double> BriefVisitThresholds { get; init; } = new Dictionary<string, double>();
 }

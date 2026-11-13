@@ -10,7 +10,8 @@ namespace Telltale.Cli;
 /// type gives the value's place in the file, which is the status ID it stands under, and no message may repeat
 /// a status ID: what was written there could be a secret pasted into the wrong place (owner decision D43). A
 /// <c>null</c> is refused, not read as the setting being left out. The rules on the statuses and on the
-/// numbers themselves are <see cref="TelltaleSettings.CheckedBriefVisitThresholds"/>'s.
+/// numbers themselves are <see cref="TelltaleSettings.CheckedBriefVisitThresholds"/>'s. <see cref="ConfigFile"/>
+/// binds it to the one setting and to no type, so another setting of the same type is not read by it.
 /// </summary>
 internal sealed class BriefVisitThresholdsConverter : JsonConverter<IReadOnlyDictionary<string, double>>
 {
@@ -48,15 +49,7 @@ internal sealed class BriefVisitThresholdsConverter : JsonConverter<IReadOnlyDic
         return thresholds;
     }
 
-    /// <summary>The setting as the file has it. Nothing writes it today: <c>discover</c> carries the file's own text over.</summary>
-    public override void Write(Utf8JsonWriter writer, IReadOnlyDictionary<string, double> value, JsonSerializerOptions options)
-    {
-        writer.WriteStartObject();
-        foreach (var (statusId, minutes) in value)
-        {
-            writer.WriteNumber(statusId, minutes);
-        }
-
-        writer.WriteEndObject();
-    }
+    /// <summary>Nothing writes the setting: <c>discover</c> carries over the text the file has, and no configuration is ever serialised.</summary>
+    public override void Write(Utf8JsonWriter writer, IReadOnlyDictionary<string, double> value, JsonSerializerOptions options) =>
+        throw new NotSupportedException($"{Setting} is never written by the tool.");
 }

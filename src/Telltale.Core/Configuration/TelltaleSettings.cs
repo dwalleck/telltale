@@ -91,7 +91,7 @@ public sealed record TelltaleSettings
                 string.Join(",", abandonedResolutionIds.Order(StringComparer.Ordinal)),
                 minimumGroupSize.Team,
                 minimumGroupSize.AssigneesBehindAFigure,
-                DerivedSource.BriefVisitThresholdsOf(config.BriefVisitThresholds)),
+                DerivedSource.BriefVisitThresholdsOf(briefVisitThresholds.ToDictionary(listed => listed.Key, listed => listed.Value.TotalMinutes))),
         };
     }
 
@@ -129,29 +129,40 @@ public sealed record TelltaleSettings
 
     /// <summary>
     /// <c>briefVisitThresholds</c>: status ID to threshold in minutes (owner decisions D58, D59), as the length
-    /// of time each threshold is. Every status listed must have a role in <paramref name="roles"/>, and not the
-    /// done role: a done status has no time in status row, so its line could never appear. Every threshold must
-    /// be above zero, and a length of time the tool can hold that is not nothing: one too large would stop the
-    /// command, and under one below the smallest step of time no visit is brief while the report still prints
-    /// the number. Public for <c>discover</c>, which asks this of an existing file before it calls Jira, and
-    /// passes no roles when the file has none yet. Throws <see cref="SettingRefusedException"/>; no message
-    /// repeats a status ID or a threshold (owner decision D43).
+    /// of time each threshold is. That length is the one form of a threshold from here on: derive applies it,
+    /// and a rebuild records it, so the view and the report state the threshold that was applied. Every status
+    /// listed must have a role in <paramref name="roles"/>, and not the done role: a done status has no time in
+    /// status row, so its line could never appear. Every threshold must be above zero, and a length of time the
+    /// tool can hold that is not nothing: one too large would stop the command, and under one that rounds to no
+    /// time no visit is brief. Public for <c>discover</c>, which asks this of an existing file before it calls
+    /// Jira, and passes no roles when the file has none yet. Throws <see cref="SettingRefusedException"/>; no
+    /// message repeats a status ID or a threshold (owner decision D43).
     /// </summary>
     public static IReadOnlyDictionary<string, TimeSpan> CheckedBriefVisitThresholds(IReadOnlyDictionary<string, double> thresholds, StatusRoles? roles)
     {
-        if (roles is not null && thresholds.Keys.Any(statusId => roles.RoleOf(statusId) is null))
+        if (roles is not null)
         {
-            throw new SettingRefusedException("briefVisitThresholds: every status listed must be a status in statusRoles, and one is not.");
-        }
-
-        if (roles is not null && thresholds.Keys.Any(roles.IsDone))
-        {
-            throw new SettingRefusedException("briefVisitThresholds: a status with the role done cannot be listed, and one is. A done status has no time in status row.");
+            foreach (var statusId in thresholds.Keys)
+            {
+                switch (roles.RoleOf(statusId))
+                {
+                    case null:
+                        throw new SettingRefusedException("briefVisitThresholds: every status listed must be a status in statusRoles, and one is not.");
+                    case DoneRole:
+                        throw new SettingRefusedException("briefVisitThresholds: a status with the role done cannot be listed, and one is. A done status has no time in status row.");
+                }
+            }
         }
 
         return thresholds.ToDictionary(listed => listed.Key, listed => CheckedBriefVisitThreshold(listed.Value), StringComparer.Ordinal);
     }
 
+    /// <summary>
+    /// The length of time a threshold in minutes is, to the nearest step of time the tool measures in (a
+    /// ten-millionth of a second). To the nearest, and not cut off, because a number with a fraction times the
+    /// steps in a minute can fall a hair under the whole number of steps it stands for, and cut off it would
+    /// be recorded and printed as another number than the owner wrote.
+    /// </summary>
     private static TimeSpan CheckedBriefVisitThreshold(double minutes)
     {
         // Written this way round so that a value that is not a number (built in code; JSON has none) is refused too.
@@ -160,19 +171,17 @@ public sealed record TelltaleSettings
             throw new SettingRefusedException(BriefVisitThresholdRefused);
         }
 
-        TimeSpan threshold;
-        try
+        // Less than one step is no time the tool can tell from none, so it is not rounded up to a step.
+        var steps = minutes * TimeSpan.TicksPerMinute;
+        if (steps < 1)
         {
-            threshold = TimeSpan.FromMinutes(minutes);
-        }
-        catch (OverflowException exception)
-        {
-            throw new SettingRefusedException("briefVisitThresholds: every threshold must be a length of time the tool can measure, and one is too large.", exception);
+            throw new SettingRefusedException("briefVisitThresholds: every threshold must be a length of time the tool can measure, and one is too small: it rounds to no time at all.");
         }
 
-        return threshold > TimeSpan.Zero
-            ? threshold
-            : throw new SettingRefusedException("briefVisitThresholds: every threshold must be a length of time the tool can measure, and one is too small: it rounds to no time at all.");
+        // Every number at or above this one is more steps than a length of time can hold; infinity is too.
+        return steps < long.MaxValue
+            ? TimeSpan.FromTicks((long)Math.Round(steps))
+            : throw new SettingRefusedException("briefVisitThresholds: every threshold must be a length of time the tool can measure, and one is too large.");
     }
 
     private static JiraConfig CheckedJira(JiraConfig jira)

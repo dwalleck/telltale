@@ -118,6 +118,25 @@ public class AcceptedBriefVisitThresholdsTests
         await Assert.That(await pipeline.ReadReportBytesAsync(41)).IsEqualTo(report);
     }
 
+    [Test]
+    public async Task A_threshold_rewritten_as_another_number_for_the_same_length_of_time_needs_no_derive_and_prints_as_before()
+    {
+        // The second number differs from five minutes by far less than the smallest step of time the tool
+        // measures, so the same threshold is applied, and the report states the one that is applied.
+        await using var pipeline = new PipelineHarness();
+        AddSprint41WithItsTeam(pipeline.Jira);
+        AddFourIssuesThatPassThroughInTwentySecondsEach(pipeline.Jira);
+        pipeline.Config["briefVisitThresholds"] = new JsonObject { [Workflow.Development.Id] = 5 };
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+
+        pipeline.Config["briefVisitThresholds"] = JsonNode.Parse($$"""{ "{{Workflow.Development.Id}}": 5.0000000000001 }""");
+        var exit = await pipeline.RunAsync("report", "--sprint", "41");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith("\n- Fake Development: 4 issues had a visit shorter than 5 minutes\n");
+    }
+
     /// <summary>Sprint 41 as the harness has it, and a team of five whose issues stay in New through it.</summary>
     private static void AddSprint41WithItsTeam(FakeJira jira)
     {
