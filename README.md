@@ -1,6 +1,7 @@
 # Telltale
 
 Telltale is a .NET command-line tool that collects a team's delivery data into one local SQLite store and reports team-level flow metrics per sprint.
+
 It reports on the team's work, never on individuals. Person fields are hashed before they are stored, and a figure that covers too few people is withheld.
 
 ## Status
@@ -19,7 +20,7 @@ One markdown file per sprint, with:
 - **Baseline columns:** the same figures pooled over a fixed list of earlier sprints, for comparison.
 - **Method note and data quality footer:** how the figures were computed and what was left out.
 
-Time is counted in business days in the team's time zone, skipping weekends and the configured holidays. The definitions are in [`GLOSSARY.md`](GLOSSARY.md) and [`docs/context/pilot-plan.md`](docs/context/pilot-plan.md).
+Time is counted in business days in the team's time zone, skipping weekends and the configured holidays. The definitions are in [`GLOSSARY.md`](GLOSSARY.md).
 
 ## Privacy rules
 
@@ -181,7 +182,8 @@ The main views are `delivered_per_sprint`, `cycle_time_per_sprint_and_bucket`, `
   "abandonedResolutionIds": ["10004"],
   "timeZone": "America/Chicago",
   "holidays": ["2026-11-26", "2026-12-25"],
-  // Fixed before the pilot starts. Optional; without it reports show no baseline.
+  // The earlier sprints to compare against. Choose them once and leave the list alone.
+  // Optional; without it reports show no baseline.
   "baselineSprintIds": ["41", "42", "43"]
 }
 ```
