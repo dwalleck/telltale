@@ -20,3 +20,4 @@ edits:
 # fin-m3 (control): a field the staleness check forgot is still refused, by the whole-record comparison
 
 Claim (final review R5): the check of minimumGroupSize is made never to fire (the raw digests are equal by then), which is what a field added to DerivedSource and forgotten in RequireCurrentDerivedDataAsync looks like. The comparison of the two records whole still refuses report and query, so the test that nothing is shown until derive has run passes: the record is expected to survive. fin-m4 is the same mutation with the comparison gone, and goes red.
+- Verified 2026-11-13 at b49bfeb: survived, 0 failed of 4 (Pipeline, filter /*/*/MinimumGroupSizeStalenessTests/After_one_of_the_two_numbers_changes_report_writes_no_file_and_query_prints_no_row_until_derive_has_run); restored.

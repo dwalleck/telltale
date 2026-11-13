@@ -26,3 +26,4 @@ edits:
 # fin-m4: without the whole-record comparison a forgotten field passes stale derived data
 
 Claim (final review R5): fin-m3's mutation with the whole-record comparison made never to fire as well. Report and query then answer from data derived under the old numbers. No field is forgotten today, so no test could run red first against the comparison itself.
+- Verified 2026-11-13 at b49bfeb: red, 4 failed of 4 (Pipeline, filter /*/*/MinimumGroupSizeStalenessTests/After_one_of_the_two_numbers_changes_report_writes_no_file_and_query_prints_no_row_until_derive_has_run); restored.

@@ -16,3 +16,4 @@ Claim (owner decision D56): a baseline sprint whose delivered count is withheld 
 - Verified 2026-11-12 at cf5da5b: red, 2 failed of 40 (Pipeline, filter /*/*/BaselineTests/*); restored.
 - Verified 2026-11-12 at bc92ab3: red, 29 failed of 41 (Pipeline, filter /*/*/BaselineTests/*); restored.
 - Verified 2026-11-13 at d534f7f: red, 29 failed of 41 (Pipeline, filter /*/*/BaselineTests/*); restored.
+- Verified 2026-11-13 at b49bfeb: red, 29 failed of 41 (Pipeline, filter /*/*/BaselineTests/*); restored.

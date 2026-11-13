@@ -20,3 +20,4 @@ Claim (B7): report asks the before-range rule of the baseline sprints at every r
 - Verified 2026-11-12 at bc92ab3: red, 1 failed of 41 (Pipeline, filter /*/*/BaselineTests/*); restored.
 - Verified 2026-11-12 at 1830824: red, 1 failed of 41 (Pipeline, filter /*/*/BaselineTests/*); restored.
 - Verified 2026-11-13 at d534f7f: red, 1 failed of 41 (Pipeline, filter /*/*/BaselineTests/*); restored.
+- Verified 2026-11-13 at b49bfeb: red, 1 failed of 41 (Pipeline, filter /*/*/BaselineTests/*); restored.
