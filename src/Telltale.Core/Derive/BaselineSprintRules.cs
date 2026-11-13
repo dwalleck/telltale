@@ -1,4 +1,3 @@
-using Telltale.Core.Configuration;
 using Telltale.Core.Storage;
 
 namespace Telltale.Core.Derive;
@@ -73,8 +72,9 @@ public static class BaselineSprintRules
     }
 
     /// <summary>
-    /// The baseline sprints whose delivered count is withheld (under the default numbers: fewer than five distinct
-    /// assignees, or fewer than three among the delivered issues; owner decisions D50, D56), in order, read from the metric view
+    /// The baseline sprints whose delivered count is withheld (fewer distinct assignees than a team, or fewer
+    /// than a figure needs among the delivered issues: five and three by default; owner decisions D50, D56), in
+    /// order, read from the metric view
     /// <c>baseline_sprint</c>. While there is one, the views withhold every baseline figure, and nothing stops:
     /// the console and the report name the sprints, with <see cref="WithheldOnTheConsole"/> and
     /// <see cref="WithheldInTheReport"/>. Neither says which of the two reasons applies.
@@ -85,26 +85,39 @@ public static class BaselineSprintRules
     /// <summary>
     /// The console's line about <paramref name="sprintIds"/>, the result of <see cref="ReadWithheldAsync"/> when it
     /// is not empty. It gives the numbers in force (<see cref="NumbersInForce.ReadAsync"/>; owner decision D67),
-    /// and of the two checks only those that apply: a number of zero turns its check off. With both off the
-    /// views withhold no baseline sprint; were one listed all the same, the line says what the view says.
+    /// and of the two checks only those that apply.
     /// </summary>
-    public static string WithheldOnTheConsole(IReadOnlyList<string> sprintIds, MinimumGroupSize numbers)
+    public static string WithheldOnTheConsole(IReadOnlyList<string> sprintIds, NumbersInForce numbers) =>
+        $"{SprintsNamed(sprintIds)} {ShortOf(sprintIds, numbers)}, so every baseline figure is withheld (baselineSprintIds in the configuration file).";
+
+    /// <summary>
+    /// The method note's sentence about the same sprints. Under the default numbers it is the sentence it was
+    /// before the numbers became a setting, which gives none (the sentence before it in the note does); under
+    /// other numbers it gives them as the console's line does.
+    /// </summary>
+    public static string WithheldInTheReport(IReadOnlyList<string> sprintIds, NumbersInForce numbers) =>
+        $"{SprintsNamed(sprintIds)} {(numbers.AreTheDefault ? CountWithheld(sprintIds) : ShortOf(sprintIds, numbers))}, so every baseline figure in this report reads \"suppressed\".";
+
+    /// <summary>
+    /// What the sprints are short of, by the checks that apply. With both checks off the views withhold no
+    /// baseline sprint (a list with a sprint the views would still withhold is refused by derive); were one
+    /// listed all the same, the sentence says what the view says and gives no number.
+    /// </summary>
+    private static string ShortOf(IReadOnlyList<string> sprintIds, NumbersInForce numbers)
     {
-        var one = sprintIds.Count == 1;
-        var (has, its) = (one ? "has" : "each have", one ? "its" : "their");
-        var why = numbers switch
+        var (has, its) = sprintIds.Count == 1 ? ("has", "its") : ("each have", "their");
+        return (numbers.TeamCheck, numbers.FigureCheck) switch
         {
-            { Team: 0, AssigneesBehindAFigure: 0 } => $"{has} {its} delivered count withheld",
-            { Team: 0 } => $"{has} fewer than {NumbersInForce.Assignees(numbers.AssigneesBehindAFigure)} among {its} delivered issues",
-            { AssigneesBehindAFigure: 0 } => $"{has} fewer than {NumbersInForce.Assignees(numbers.Team)}",
-            _ => $"{has} fewer than {NumbersInForce.Assignees(numbers.Team)}, or fewer than {NumbersInForce.Number(numbers.AssigneesBehindAFigure)} among {its} delivered issues",
+            (true, true) => $"{has} fewer than {numbers.TeamAssignees()}, or fewer than {numbers.BehindAFigureInWords} among {its} delivered issues",
+            (true, false) => $"{has} fewer than {numbers.TeamAssignees()}",
+            (false, true) => $"{has} fewer than {numbers.AssigneesBehindAFigure()} among {its} delivered issues",
+            (false, false) => CountWithheld(sprintIds),
         };
-        return $"{SprintsNamed(sprintIds)} {why}, so every baseline figure is withheld (baselineSprintIds in the configuration file).";
     }
 
-    /// <summary>The method note's sentence about the same sprints.</summary>
-    public static string WithheldInTheReport(IReadOnlyList<string> sprintIds) =>
-        $"{SprintsNamed(sprintIds)} {(sprintIds.Count == 1 ? "has its" : "each have their")} delivered count withheld, so every baseline figure in this report reads \"suppressed\".";
+    /// <summary>"has its delivered count withheld", or "each have their delivered count withheld".</summary>
+    private static string CountWithheld(IReadOnlyList<string> sprintIds) =>
+        $"{(sprintIds.Count == 1 ? "has its" : "each have their")} delivered count withheld";
 
     /// <summary>"Baseline sprint 41", or "Baseline sprints 41, 42 and 43".</summary>
     private static string SprintsNamed(IReadOnlyList<string> sprintIds) => sprintIds.Count == 1

@@ -120,7 +120,7 @@ public sealed class PipelineSteps
         }
 
         // The totals and the per-issue lines are written whatever the report's footer does with its count:
-        // the footer withholds it for a small store or fewer than three assignees, and this log goes to the
+        // the footer withholds it for a small store or too few assignees (three by default), and this log goes to the
         // operator, who holds the store and its per-issue derived tables anyway.
 
         var unseen = derived.Anomalies.Where(anomaly => !previous.Contains((anomaly.IssueId, anomaly.Message))).ToList();
@@ -340,8 +340,8 @@ public sealed class PipelineSteps
 
     /// <summary>
     /// What the raw data can say against the baseline sprint list: every baseline sprint is a completed sprint
-    /// with a sprint window, and none started before the start date the store was last filled from. A team of
-    /// five is the views' rule, and one that fails it is not refused (owner decision D50).
+    /// with a sprint window, and none started before the start date the store was last filled from. The smallest
+    /// team (five by default) is the views' rule, and a sprint that fails it is not refused (owner decision D50).
     /// </summary>
     private void RequireBaselineSprints(RawData raw, DateTimeOffset? completeFrom)
     {

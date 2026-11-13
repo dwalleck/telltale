@@ -24,7 +24,10 @@ public class NumbersInForceTests
     private const string WhoCountsAsAnAssignee =
         "- An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. An unassigned issue counts toward nobody.\n";
 
-    private const string Sprint41WithholdsTheBaseline = "- Baseline sprint 41 has its delivered count withheld, so every baseline figure in this report reads \"suppressed\".\n";
+    // The two things the line under the heading says follow from a number below its default.
+    private const string ASmallTeam = "A sprint whose team is smaller than the default allows is not withheld as a whole";
+
+    private const string FewPeople = "figure may rest on the work of fewer people than the default allows";
 
     private const string TheBaselineColumnsPool =
         "- The baseline columns pool every issue of the baseline sprints, a list fixed in the configuration (sprints 41), each a completed sprint.";
@@ -89,13 +92,17 @@ public class NumbersInForceTests
     }
 
     [Test]
-    [Arguments(4, 2, "a minimum team of four (the default is five) and a minimum of two assignees behind a figure (the default is three)")]
-    [Arguments(5, 1, "a minimum team of five (the default is five) and a minimum of one assignee behind a figure (the default is three)")]
-    [Arguments(0, 3, "no minimum team (the default is five) and a minimum of three assignees behind a figure (the default is three)")]
-    [Arguments(5, 0, "a minimum team of five (the default is five) and no minimum of assignees behind a figure (the default is three)")]
-    [Arguments(13, 2, "a minimum team of 13 (the default is five) and a minimum of two assignees behind a figure (the default is three)")]
-    public async Task With_either_number_below_its_default_and_not_both_zero_the_line_under_the_heading_gives_the_two_numbers_in_force(int team, int assigneesBehindAFigure, string numbers)
+    [Arguments(4, 2, "a minimum team of four (below the default of five) and a minimum of two assignees behind a figure (below the default of three). " + ASmallTeam + ", and a " + FewPeople)]
+    [Arguments(5, 1, "a minimum team of five (the default) and a minimum of one assignee behind a figure (below the default of three). A " + FewPeople)]
+    [Arguments(5, 0, "a minimum team of five (the default) and no minimum of assignees behind a figure (below the default of three). A " + FewPeople)]
+    [Arguments(13, 2, "a minimum team of 13 (above the default of five) and a minimum of two assignees behind a figure (below the default of three). A " + FewPeople)]
+    [Arguments(0, 3, "no minimum team (below the default of five) and a minimum of three assignees behind a figure (the default). " + ASmallTeam)]
+    [Arguments(0, 6, "no minimum team (below the default of five) and a minimum of six assignees behind a figure (above the default of three). " + ASmallTeam)]
+    [Arguments(4, 4, "a minimum team of four (below the default of five) and a minimum of four assignees behind a figure (above the default of three). " + ASmallTeam)]
+    public async Task With_either_number_below_its_default_and_not_both_zero_the_line_under_the_heading_gives_the_two_numbers_and_what_follows_from_each_one_that_is_below(int team, int assigneesBehindAFigure, string line)
     {
+        // Only a number of assignees behind a figure below three lets a figure rest on fewer people than the
+        // default allows; a team number below five lets a smaller sprint through, and no more than that.
         await using var pipeline = new PipelineHarness();
         AddSprint41WithATeamOfFive(pipeline.Jira);
         pipeline.Config["minimumGroupSize"] = MinimumGroupSize(team, assigneesBehindAFigure);
@@ -104,7 +111,7 @@ public class NumbersInForceTests
 
         await Assert.That(await pipeline.ReadReportAsync(41)).StartsWith(
             Heading
-            + $"Small-group suppression is below its default numbers in this report: {numbers}. A figure may rest on the work of fewer people than the default allows.\n\n"
+            + $"Minimum group size in this report: {line}.\n\n"
             + "Delivered issues: ");
     }
 
@@ -167,8 +174,8 @@ public class NumbersInForceTests
 
     [Test]
     [Arguments(4, 2, "four", "two", "")]
-    [Arguments(8, 4, "eight", "four", Sprint41WithholdsTheBaseline)]
-    [Arguments(13, 12, "13", "twelve", Sprint41WithholdsTheBaseline)]
+    [Arguments(8, 4, "eight", "four", "- Baseline sprint 41 has fewer than eight assignees, or fewer than four among its delivered issues, so every baseline figure in this report reads \"suppressed\".\n")]
+    [Arguments(13, 12, "13", "twelve", "- Baseline sprint 41 has fewer than 13 assignees, or fewer than twelve among its delivered issues, so every baseline figure in this report reads \"suppressed\".\n")]
     public async Task With_other_numbers_the_method_note_states_them_wherever_it_states_five_and_three_under_the_defaults(int team, int assigneesBehindAFigure, string teamInWords, string figureInWords, string baselineSprintNamed)
     {
         // Sprint 41 has a team of five: under a team number above five it is itself withheld, and the note names it as a baseline sprint.
@@ -193,15 +200,16 @@ public class NumbersInForceTests
     {
         var report = await ReportOfSprint41AsItsOwnBaselineAsync(team: 4, assigneesBehindAFigure: 0);
 
-        // No assignee need be behind a figure, so a figure can be one person's work: the opening sentence says the rule and not that.
+        // No assignee need be behind a figure, so a figure can be one person's work: the opening sentence says the
+        // rule and not that. And no row is suppressed in a sprint's own report, so the baseline paragraph does not speak of one.
         await Assert.That(report).Contains(
             "Totals and medians use the same privacy rules.\n"
             + "- A figure is shown only for a group of at least the minimum group size." + TheTeamOfASprintIs
             + " When the team is smaller than four, the delivered count and both tables read \"suppressed\", with no rows."
-            + " With a team of four or more, every figure is shown, whatever the number of assignees behind it."
+            + " With a team of four or more, every figure of the sprint itself is shown, whatever the number of assignees behind it."
             + " The footer's two counts read \"suppressed\" when the issues in the whole store have fewer than four distinct assignees.\n"
             + WhoCountsAsAnAssignee
-            + TheBaselineColumnsPool + ABaselineFigureReadsSuppressedOrNone
+            + TheBaselineColumnsPool + " A baseline figure reads \"none\" when no issue of the baseline sprints is in the row."
             + " Every baseline figure reads \"suppressed\" when a baseline sprint has its delivered count withheld: its team is smaller than four.\n"
             + "- An interval that is still open");
     }
@@ -248,7 +256,7 @@ public class NumbersInForceTests
     [Arguments(0, 6, "41", "Baseline sprint 41 has fewer than six assignees among its delivered issues")]
     [Arguments(6, 0, "41,42", "Baseline sprints 41 and 42 each have fewer than six assignees")]
     [Arguments(0, 6, "41,42", "Baseline sprints 41 and 42 each have fewer than six assignees among their delivered issues")]
-    public async Task The_console_names_a_baseline_sprint_that_withholds_the_baseline_with_the_configured_numbers_and_only_the_checks_that_apply(int team, int assigneesBehindAFigure, string baseline, string named)
+    public async Task The_console_and_the_report_name_a_baseline_sprint_that_withholds_the_baseline_with_the_configured_numbers_and_only_the_checks_that_apply(int team, int assigneesBehindAFigure, string baseline, string named)
     {
         // Each sprint has five people, and the five deliver: short of every number here that is not zero.
         await using var pipeline = new PipelineHarness();
@@ -269,6 +277,8 @@ public class NumbersInForceTests
         await Assert.That(exit).IsEqualTo(0);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
             $"{named}, so every baseline figure is withheld (baselineSprintIds in the configuration file).\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(
+            $".\n- {named}, so every baseline figure in this report reads \"suppressed\".\n- An interval that is still open");
     }
 
     [Test]
