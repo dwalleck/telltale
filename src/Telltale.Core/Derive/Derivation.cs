@@ -105,7 +105,7 @@ public static class Derivation
             var memberOf = membership.Intervals.Select(interval => interval.SprintId).ToHashSet(StringComparer.Ordinal);
 
             // The issue's stays are the same for every sprint, and are not worked out when no status is listed.
-            IReadOnlyList<StatusInterval> stays = settings.BriefVisitThresholds.Count == 0 ? [] : BriefVisits.Stays(timeline);
+            IReadOnlyList<Stay> stays = settings.BriefVisitThresholds.Count == 0 ? [] : BriefVisits.Stays(timeline);
             foreach (var window in windows.Where(counted => memberOf.Contains(counted.SprintId)))
             {
                 // The time this sprint counts of this issue, worked out once for the time in status and the brief visits.

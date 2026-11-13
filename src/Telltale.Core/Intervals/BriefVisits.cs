@@ -1,6 +1,15 @@
 namespace Telltale.Core.Intervals;
 
 /// <summary>
+/// One unbroken stay of an issue in a status, over its whole history (<see cref="BriefVisits.Stays"/>): from the
+/// moment the issue entered the status to the moment it next entered another one. A null <see cref="End"/>
+/// means the issue is still in the status. It is not a <see cref="StatusInterval"/>: the timeline's intervals
+/// are cut at every change, also one from a status to itself, and hold no stay of no length, so the brief
+/// visit rule takes stays and nothing else.
+/// </summary>
+public sealed record Stay(string StatusId, DateTimeOffset Start, DateTimeOffset? End);
+
+/// <summary>
 /// The brief visit rule (GLOSSARY: Brief visit; owner decisions D58 to D60). A visit is one unbroken stay in
 /// a status: one <see cref="StatusInterval"/> of the issue's whole history, not clipped to a sprint window or
 /// to sprint membership. It is brief when it ended and lasted less than the status's threshold, in clock time:
@@ -13,7 +22,7 @@ public static class BriefVisits
     /// Whether <paramref name="stay"/> is a brief visit under <paramref name="threshold"/>. A stay the issue
     /// is still in is not a visit for this rule, however short it is so far.
     /// </summary>
-    public static bool IsBrief(StatusInterval stay, TimeSpan threshold) =>
+    public static bool IsBrief(Stay stay, TimeSpan threshold) =>
         stay.End is { } left && left - stay.Start < threshold;
 
     /// <summary>
@@ -25,10 +34,10 @@ public static class BriefVisits
     /// created, since it has no length only because the timeline treats that change as made at the creation.
     /// It is a changelog anomaly and not a visit (decision bv-D5).
     /// </summary>
-    public static IReadOnlyList<StatusInterval> Stays(StatusTimeline timeline)
+    public static IReadOnlyList<Stay> Stays(StatusTimeline timeline)
     {
         var entries = timeline.Entries;
-        var stays = new List<StatusInterval>();
+        var stays = new List<Stay>();
         for (int entered = 0, left; entered < entries.Count; entered = left)
         {
             left = entered + 1;
@@ -37,7 +46,7 @@ public static class BriefVisits
                 left++;
             }
 
-            var stay = new StatusInterval(entries[entered].StatusId, entries[entered].At, left < entries.Count ? entries[left].At : null);
+            var stay = new Stay(entries[entered].StatusId, entries[entered].At, left < entries.Count ? entries[left].At : null);
             var onlyByAMovedChange = stay.End == stay.Start && (entries[entered].MovedToCreation || entries[left].MovedToCreation);
             if (!onlyByAMovedChange)
             {
@@ -54,13 +63,13 @@ public static class BriefVisits
     /// owner decision D58) that overlaps <paramref name="countedTime"/>, the time the sprint's time in status
     /// counts: inside the sprint's window, while the issue was a member (<see cref="TimeInStatus.CountedTime"/>).
     /// A brief visit made in an earlier sprint, or before the issue joined, does not count toward this one.
-    /// <paramref name="statuses"/> are the issue's stays (<see cref="Stays"/>).
+    /// <paramref name="stays"/> are the issue's stays (<see cref="Stays"/>).
     /// Whether the issue is in the status's time in status row for the sprint is not asked here: the metric
     /// view asks it. With no status listed nothing is looked at.
     /// </summary>
     public static IReadOnlySet<string> During(
         IReadOnlyList<Interval> countedTime,
-        IEnumerable<StatusInterval> statuses,
+        IEnumerable<Stay> stays,
         IReadOnlyDictionary<string, TimeSpan> thresholds)
     {
         if (thresholds.Count == 0)
@@ -68,7 +77,7 @@ public static class BriefVisits
             return NoStatuses;
         }
 
-        return statuses
+        return stays
             .Where(stay => thresholds.TryGetValue(stay.StatusId, out var threshold) && IsBrief(stay, threshold))
             .Where(stay => countedTime.Any(period => Overlaps(stay, period)))
             .Select(stay => stay.StatusId)
@@ -81,7 +90,7 @@ public static class BriefVisits
     /// ended by the period's start. So a stay of no length on the instant a period starts overlaps it, and one
     /// on the instant it ends does not (decision bv-D6), as time in status counts the one instant and not the other.
     /// </summary>
-    private static bool Overlaps(StatusInterval stay, Interval period) =>
+    private static bool Overlaps(Stay stay, Interval period) =>
         period.Contains(stay.Start) || (stay.Start < period.Start && !(stay.End <= period.Start));
 
     private static readonly IReadOnlySet<string> NoStatuses = new HashSet<string>();
