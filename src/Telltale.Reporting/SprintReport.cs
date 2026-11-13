@@ -45,12 +45,12 @@ public static class SprintReport
     /// is the baseline sprint list the derived data was built with, in order: when it is not empty, both tables
     /// get baseline columns and the method note says what the baseline is. <paramref name="numbers"/> are the
     /// minimum group size's numbers the derived data was built under (<see cref="NumbersInForce.Of"/>): the
-    /// caller reads them once, and the report states them and decides nothing by them.
-    /// <paramref name="briefVisitsChecked"/> says whether the derived data was built with at least one status
-    /// listed under <c>briefVisitThresholds</c>: the method note then explains the footer's brief visit lines,
-    /// also for a sprint that has none. Without it the report is what it was before brief visits were counted.
+    /// caller reads them once, and the report states them and decides nothing by them. The same record says
+    /// whether a status was listed under <c>briefVisitThresholds</c> (<see cref="NumbersInForce.BriefVisitsChecked"/>):
+    /// the method note then explains the footer's brief visit lines, also for a sprint that has none. With no
+    /// status listed the report is what it was before brief visits were counted.
     /// </summary>
-    public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, IReadOnlyList<string> baselineSprintIds, NumbersInForce numbers, bool briefVisitsChecked = false, CancellationToken cancellationToken = default)
+    public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, IReadOnlyList<string> baselineSprintIds, NumbersInForce numbers, CancellationToken cancellationToken = default)
     {
         // Owner decisions D50, D56: while a baseline sprint has its delivered count withheld, every baseline figure is
         // withheld. The baseline views have no rows then, so the cells are written from this list.
@@ -84,7 +84,7 @@ public static class SprintReport
             cancellationToken));
         AppendTimeInStatus(report, baseline, await ReadTimeInStatusAsync(store, sprintId, cancellationToken));
         var quality = await ReadDataQualityAsync(store, cancellationToken);
-        AppendMethodNote(report, quality, numbers, baselineSprintIds, withheldBaselineSprints, briefVisitsChecked);
+        AppendMethodNote(report, quality, numbers, baselineSprintIds, withheldBaselineSprints);
         AppendFooter(report, quality);
         AppendBriefVisits(report, await store.QueryViewsAsync<BriefVisitsRow>(
             "SELECT status_name, threshold_minutes, brief_visit_issue_count, suppressed FROM brief_visits_per_sprint WHERE sprint_id = @sprintId ORDER BY board_position;",
@@ -112,9 +112,9 @@ public static class SprintReport
         (await store.QueryViewsAsync<DataQualityRow>("SELECT as_of, time_zone, anomaly_issue_count, delivered_between_sprints_count, suppressed FROM data_quality;", cancellationToken: cancellationToken)).Single();
 
     /// <summary>Renders the report and writes it into <paramref name="directory"/>. Returns the file's path.</summary>
-    public static async Task<string> WriteAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, IReadOnlyList<string> baselineSprintIds, NumbersInForce numbers, string directory, bool briefVisitsChecked = false, CancellationToken cancellationToken = default)
+    public static async Task<string> WriteAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, IReadOnlyList<string> baselineSprintIds, NumbersInForce numbers, string directory, CancellationToken cancellationToken = default)
     {
-        var text = await RenderAsync(store, sprintId, teamTimeZone, baselineSprintIds, numbers, briefVisitsChecked, cancellationToken);
+        var text = await RenderAsync(store, sprintId, teamTimeZone, baselineSprintIds, numbers, cancellationToken);
 
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, FileName(sprintId));
@@ -243,14 +243,14 @@ public static class SprintReport
     /// built under (<see cref="AppendMinimumGroupSize"/>). The time zone is the one derive stored. The paragraph
     /// on brief visits is its last, and is there only when a status is listed (<see cref="AppendBriefVisitsExplained"/>).
     /// </summary>
-    private static void AppendMethodNote(StringBuilder report, DataQualityRow quality, NumbersInForce numbers, IReadOnlyList<string> baselineSprintIds, IReadOnlyList<string> withheldBaselineSprints, bool briefVisitsChecked)
+    private static void AppendMethodNote(StringBuilder report, DataQualityRow quality, NumbersInForce numbers, IReadOnlyList<string> baselineSprintIds, IReadOnlyList<string> withheldBaselineSprints)
     {
         report.Append("\n## Method\n\n")
             .Append("- Durations are in business days: days that are neither a weekend nor a company holiday, each counted in full (24 hours) in the team's time zone (").Append(quality.TimeZone).Append("). Calendar days are shown alongside: elapsed time divided by 24 hours.\n")
             .Append("- Cycle time runs from an issue's first entry into a work status to its last entry into a done status, for delivered issues only. It belongs to the sprint in which the issue was delivered.\n")
             .Append("- The median is the middle value, or the mean of the two middle values. The P85 is the smallest value with at least 85% of the values at or below it.\n")
             .Append("- Time in status includes delivered and unfinished issues in statuses before done, clipped to the sprint window and each issue's membership intervals. An issue counts toward a status only if it spent more than zero business days there. Total business days sum that time across all contributing issues, including repeated visits; this is accumulated issue time, not effort or the sprint's elapsed duration. Totals and medians use the same privacy rules.\n");
-        AppendMinimumGroupSize(report, numbers, briefVisitsChecked);
+        AppendMinimumGroupSize(report, numbers);
 
         // Said only when there is a baseline: without one the report has no baseline column to explain.
         if (baselineSprintIds.Count > 0)
@@ -267,7 +267,7 @@ public static class SprintReport
 
         report.Append("- An interval that is still open (an issue still in a status, a sprint not yet completed) ends at the as-of time below.\n")
             .Append("- Work that has since been removed from Jira stays in the figures until the next backfill.\n");
-        if (briefVisitsChecked)
+        if (numbers.BriefVisitsChecked)
         {
             AppendBriefVisitsExplained(report, numbers);
         }
@@ -311,11 +311,11 @@ public static class SprintReport
     /// The method note's paragraphs on the minimum group size and on who counts as an assignee, with the numbers
     /// in force (owner decision D67). Each sentence is about one of the two checks and is written only while
     /// that check applies: a number of zero turns its check off (D65). With both off, the two paragraphs give
-    /// way to one that says so. With <paramref name="briefVisitsChecked"/> the footer has brief visit lines after
-    /// its two counts of the whole store, withheld by their own rule (<see cref="AppendBriefVisitsExplained"/>),
-    /// so the sentence on those two calls them the footer's first two.
+    /// way to one that says so. With a status listed for brief visits the footer can have brief visit lines
+    /// after its two counts of the whole store, withheld by their own rule (<see cref="AppendBriefVisitsExplained"/>),
+    /// so the sentence on those two says which they are, whether or not this sprint has such a line.
     /// </summary>
-    private static void AppendMinimumGroupSize(StringBuilder report, NumbersInForce numbers, bool briefVisitsChecked)
+    private static void AppendMinimumGroupSize(StringBuilder report, NumbersInForce numbers)
     {
         if (!numbers.TeamCheck && !numbers.FigureCheck)
         {
@@ -349,7 +349,7 @@ public static class SprintReport
             report.Append(" With a team of ").Append(team).Append(" or more, every figure of the sprint itself is shown, whatever the number of assignees behind it.");
         }
 
-        report.Append(briefVisitsChecked ? " The footer's first two counts" : " The footer's two counts").Append(" read \"suppressed\" when ");
+        report.Append(numbers.BriefVisitsChecked ? " The footer's two counts of the whole store" : " The footer's two counts").Append(" read \"suppressed\" when ");
         if (numbers.TeamCheck)
         {
             report.Append("the issues in the whole store have fewer than ").Append(numbers.TeamAssignees(distinct: true))
@@ -413,7 +413,7 @@ public static class SprintReport
     {
         foreach (var row in rows)
         {
-            var threshold = $"{row.ThresholdMinutes.ToString("R", CultureInfo.InvariantCulture)} {(row.ThresholdMinutes == 1 ? "minute" : "minutes")}";
+            var threshold = $"{Minutes(row.ThresholdMinutes)} {(row.ThresholdMinutes == 1 ? "minute" : "minutes")}";
             report.Append("- ").Append(Markdown.Text(row.StatusName)).Append(": ");
             if (row.Suppressed == 0 && row.BriefVisitIssueCount is { } issues)
             {
@@ -424,6 +424,20 @@ public static class SprintReport
                 report.Append("issues with a visit shorter than ").Append(threshold).Append(": ").Append(Suppressed).Append('\n');
             }
         }
+    }
+
+    /// <summary>
+    /// A threshold in minutes as the footer writes it: the shortest digits that identify the number, as it was
+    /// written in the configuration file for a threshold of a few decimals (5, 0.5, 0.69), and always in plain
+    /// decimal digits. The round-trip format alone turns to an exponent below 0.0001 (1E-05), which a reader of
+    /// a report should not have to decode; its digits are kept and only the notation changes.
+    /// </summary>
+    private static string Minutes(double minutes)
+    {
+        var shortest = minutes.ToString("R", CultureInfo.InvariantCulture);
+        return shortest.Contains('E', StringComparison.Ordinal)
+            ? decimal.Parse(shortest, NumberStyles.Float, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture)
+            : shortest;
     }
 
     /// <summary>

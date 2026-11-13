@@ -317,7 +317,7 @@ public class BriefVisitSmallGroupTests
             FridayEvening(pipeline.Jira, "FAKE-1", People.One, briefly: true);
             FridayEvening(pipeline.Jira, "FAKE-2", People.Two, briefly: false);
             FridayEvening(pipeline.Jira, "FAKE-3", assignee: null, briefly: true);
-            CaughtUpInSprint42(pipeline.Jira, "FAKE-4", assignee: null);
+            Scenarios.CaughtUp(pipeline.Jira, "FAKE-4", assignee: null, sprintId: 42);
             pipeline.Config["briefVisitThresholds"] = new JsonObject { [Workflow.Development.Id] = 5, [Workflow.Review.Id] = 2 };
             await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"], ["report", "--sprint", "42"]);
         }
@@ -437,7 +437,7 @@ public class BriefVisitSmallGroupTests
     /// <item>Sprint 41, Review: those eight, which stayed there over the weekend and on, and three more
     /// people's issues that went from New through Review in twenty seconds. So three people are behind a count
     /// of three.</item>
-    /// <item>Sprint 42: three people's issues, each <see cref="CaughtUpInSprint42"/>. So three people are behind
+    /// <item>Sprint 42: three people's issues, each <see cref="Scenarios.CaughtUp"/> in sprint 42. So three people are behind
     /// a Development count of three, and nobody had a brief visit to Review.</item>
     /// </list>
     /// </summary>
@@ -456,7 +456,7 @@ public class BriefVisitSmallGroupTests
             jira.AddIssue($"FAKE-{number}", Local(2026, 1, 5, 9)).AssignedTo(person).InSprints(41)
                 .Moved(Local(2026, 1, 7, 10), Workflow.Review)
                 .Moved(Local(2026, 1, 7, 10).AddSeconds(20), Workflow.Done);
-            CaughtUpInSprint42(jira, $"FAKE-{number + 10}", person);
+            Scenarios.CaughtUp(jira, $"FAKE-{number + 10}", person, sprintId: 42);
         }
 
         pipeline.Config["briefVisitThresholds"] = new JsonObject { [Workflow.Development.Id] = 5, [Workflow.Review.Id] = 2 };
@@ -476,20 +476,6 @@ public class BriefVisitSmallGroupTests
             .Moved(midnight.AddSeconds(-20), Workflow.Development)
             .Moved(briefly ? midnight : midnight.AddHours(10), Workflow.Review)
             .Moved(Local(2026, 1, 13, 10), Workflow.Done);
-        return assignee is null ? issue : issue.AssignedTo(assignee);
-    }
-
-    /// <summary>
-    /// An issue of sprint 42 that was caught up in one go on Wednesday 21 January at 10:00: twenty seconds in
-    /// Development, then Review for two days before it was done. A null <paramref name="assignee"/> leaves it unassigned.
-    /// </summary>
-    private static FakeIssue CaughtUpInSprint42(FakeJira jira, string key, FakePerson? assignee)
-    {
-        var caughtUp = Local(2026, 1, 21, 10);
-        var issue = jira.AddIssue(key, Local(2026, 1, 19, 11)).InSprints(42)
-            .Moved(caughtUp, Workflow.Development)
-            .Moved(caughtUp.AddSeconds(20), Workflow.Review)
-            .Moved(Local(2026, 1, 23, 10), Workflow.Done);
         return assignee is null ? issue : issue.AssignedTo(assignee);
     }
 }

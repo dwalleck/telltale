@@ -1,5 +1,8 @@
 using System.Text.Json.Nodes;
+using Telltale.Core.Derive;
 using Telltale.Pipeline.Tests.Harness;
+using Telltale.Reporting;
+using Telltale.Storage.Sqlite;
 using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
@@ -71,20 +74,39 @@ public class BriefVisitsExplainedTests
     }
 
     [Test]
-    public async Task With_a_status_listed_the_method_note_calls_the_whole_store_counts_the_footers_first_two_counts()
+    [Arguments(5, 3, " The footer's two counts of the whole store read \"suppressed\" when the issues in the whole store have fewer than five distinct assignees, or fewer than three are among the issues counted.\n")]
+    [Arguments(0, 3, " The footer's two counts of the whole store read \"suppressed\" when fewer than three distinct assignees are among the issues counted. No figure is withheld for the size of a sprint's team.\n")]
+    [Arguments(5, 0, " The footer's two counts of the whole store read \"suppressed\" when the issues in the whole store have fewer than five distinct assignees.\n")]
+    public async Task With_a_status_listed_the_method_note_says_which_two_counts_of_the_footer_its_sentence_is_about(int team, int assigneesBehindAFigure, string sentence)
     {
         // The footer then has more counts than two, and the brief visit counts are withheld by another rule
-        // than the one this sentence gives (review finding F6 of ticket 01).
+        // than the one this sentence gives (review finding F6 of ticket 01; decision bv-D14 for the words).
         await using var pipeline = new PipelineHarness();
         AddSprint41WithFourCaughtUpIssuesInADevelopmentRowOfFive(pipeline.Jira);
         pipeline.Config["briefVisitThresholds"] = new JsonObject { [Workflow.Development.Id] = 5 };
+        pipeline.Config["minimumGroupSize"] = Scenarios.MinimumGroupSize(team, assigneesBehindAFigure);
 
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
 
         var report = await pipeline.ReadReportAsync(41);
-        await Assert.That(report).Contains(
-            " The footer's first two counts read \"suppressed\" when the issues in the whole store have fewer than five distinct assignees, or fewer than three are among the issues counted.\n");
-        await Assert.That(report).DoesNotContain("The footer's two counts");
+        await Assert.That(report).Contains(sentence);
+        await Assert.That(report).DoesNotContain("The footer's two counts read");
+    }
+
+    [Test]
+    public async Task A_sprint_with_no_brief_visit_line_has_the_same_sentence_on_the_two_counts_when_a_status_is_listed()
+    {
+        // Review is listed and nobody of sprint 41 was ever in Review here, so the footer has no brief visit line.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.AddSprint41();
+        pipeline.Jira.AddIdleTeam(Local(2026, 1, 2, 9), 41);
+        pipeline.Config["briefVisitThresholds"] = new JsonObject { [Workflow.Review.Id] = 5 };
+
+        await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
+
+        var report = await pipeline.ReadReportAsync(41);
+        await Assert.That(report).EndsWith(WhenTheRuleWasAdded + Footer.ReplaceLineEndings("\n"));
+        await Assert.That(report).Contains(" The footer's two counts of the whole store read \"suppressed\" when the issues in the whole store have fewer than five distinct assignees, or fewer than three are among the issues counted.\n");
     }
 
     [Test]
@@ -135,7 +157,7 @@ public class BriefVisitsExplainedTests
         pipeline.Jira.AddSprint41();
         foreach (var (person, number) in People.Team.Take(4).Select((person, index) => (person, index + 1)))
         {
-            CaughtUp(pipeline.Jira, $"FAKE-{number}", person, 41, Local(2026, 1, 7, 10));
+            Scenarios.CaughtUp(pipeline.Jira, $"FAKE-{number}", person);
         }
 
         pipeline.Config["briefVisitThresholds"] = new JsonObject { [Workflow.Development.Id] = 5 };
@@ -179,7 +201,7 @@ public class BriefVisitsExplainedTests
         pipeline.Jira.AddIdleTeam(Local(2026, 1, 19, 11), 42);
         foreach (var (person, number) in People.Team.Take(3).Select((person, index) => (person, index + 21)))
         {
-            CaughtUp(pipeline.Jira, $"FAKE-{number}", person, 42, Local(2026, 1, 21, 10));
+            Scenarios.CaughtUp(pipeline.Jira, $"FAKE-{number}", person, sprintId: 42);
         }
 
         pipeline.Config["baselineSprintIds"] = new JsonArray("41");
@@ -219,7 +241,7 @@ public class BriefVisitsExplainedTests
             pipeline.Jira.AddIdleTeam(Local(2026, 1, 2, 9), 41);
             foreach (var (person, number) in People.Team.Take(4).Select((person, index) => (person, index + 1)))
             {
-                CaughtUp(pipeline.Jira, $"FAKE-{number}", person, 41, Local(2026, 1, 7, 10), secondsInDevelopment);
+                Scenarios.CaughtUp(pipeline.Jira, $"FAKE-{number}", person, secondsInDevelopment: secondsInDevelopment);
             }
 
             foreach (var (person, number) in People.Team.Take(3).Select((person, index) => (person, index + 11)))
@@ -258,12 +280,54 @@ public class BriefVisitsExplainedTests
         }
     }
 
+    [Test]
+    [Arguments(0.00001, "0.00001", 0)]
+    [Arguments(0.000000005, "0.000000005", 0)]
+    [Arguments(0.5, "0.5", 4)]
+    [Arguments(0.69, "0.69", 4)]
+    [Arguments(2.5, "2.5", 4)]
+    [Arguments(5, "5", 4)]
+    public async Task The_footer_prints_a_threshold_in_plain_digits_never_with_an_exponent_and_the_view_holds_the_same_number(double minutes, string printed, int counted)
+    {
+        // The four visits lasted twenty seconds. No assignee is needed behind a figure, so a count of nothing is printed too.
+        await using var pipeline = new PipelineHarness();
+        AddSprint41WithFourCaughtUpIssuesInADevelopmentRowOfFive(pipeline.Jira);
+        pipeline.Config["briefVisitThresholds"] = new JsonObject { [Workflow.Development.Id] = minutes };
+        pipeline.Config["minimumGroupSize"] = Scenarios.MinimumGroupSize(team: 5, assigneesBehindAFigure: 0);
+
+        await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith($"\n- Fake Development: {counted} issues had a visit shorter than {printed} minutes\n");
+        await Assert.That(await HarnessSteps.QueryAsync(pipeline, $"SELECT threshold_minutes = {printed} AS the_same_number FROM brief_visits_per_sprint WHERE sprint_id = '41';"))
+            .IsEqualTo("| the_same_number |\n| --- |\n| 1 |\n");
+    }
+
+    [Test]
+    public async Task The_report_takes_whether_a_status_is_listed_from_the_record_of_the_derived_data_as_it_takes_the_numbers()
+    {
+        // A caller of the report hands it what the derived data was built under, and nothing about brief visits
+        // besides: the paragraph is there because the record says a status was listed, as the lines are.
+        await using var pipeline = new PipelineHarness();
+        AddSprint41WithFourCaughtUpIssuesInADevelopmentRowOfFive(pipeline.Jira);
+        pipeline.Config["briefVisitThresholds"] = new JsonObject { [Workflow.Development.Id] = 5 };
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+
+        var store = new SqliteStore(pipeline.DatabasePath);
+        var derivedFrom = await store.ReadDerivedSourceAsync();
+        var report = await SprintReport.RenderAsync(store, "41", TimeZoneInfo.FindSystemTimeZoneById(ZoneId), baselineSprintIds: [], NumbersInForce.Of(derivedFrom!));
+
+        await Assert.That(report).EndsWith(
+            WhenTheRuleWasAdded
+            + Footer.ReplaceLineEndings("\n")
+            + "- Fake Development: 4 issues had a visit shorter than 5 minutes\n");
+    }
+
     /// <summary>What a harness's console writer holds, with the harness's own temporary directory taken out so that two harnesses can be compared.</summary>
     private static string ConsoleOf(StringWriter console, PipelineHarness pipeline) =>
         console.ToString().ReplaceLineEndings("\n").Replace(pipeline.Directory, "<directory>", StringComparison.Ordinal);
 
     /// <summary>
-    /// Sprint 41 with its team of five idle in New, four issues <see cref="CaughtUp"/> of four people, and a
+    /// Sprint 41 with its team of five idle in New, four issues <see cref="Scenarios.CaughtUp"/> of four people, and a
     /// fifth person's issue that did two days in Development: a Development row of five issues, four of them
     /// with a brief visit.
     /// </summary>
@@ -273,21 +337,11 @@ public class BriefVisitsExplainedTests
         jira.AddIdleTeam(Local(2026, 1, 2, 9), 41);
         foreach (var (person, number) in People.Team.Take(4).Select((person, index) => (person, index + 1)))
         {
-            CaughtUp(jira, $"FAKE-{number}", person, 41, Local(2026, 1, 7, 10));
+            Scenarios.CaughtUp(jira, $"FAKE-{number}", person);
         }
 
         jira.AddIssue("FAKE-5", Local(2026, 1, 5, 9)).AssignedTo(People.Five).InSprints(41)
             .Moved(Local(2026, 1, 6, 9), Workflow.Development)
             .Moved(Local(2026, 1, 8, 9), Workflow.Done);
     }
-
-    /// <summary>
-    /// An issue that was caught up in one go at <paramref name="at"/>: in New until then, moved to Development
-    /// and, after <paramref name="secondsInDevelopment"/>, to Review, where it stayed two days before it was done.
-    /// </summary>
-    private static FakeIssue CaughtUp(FakeJira jira, string key, FakePerson assignee, long sprintId, DateTimeOffset at, int secondsInDevelopment = 20) =>
-        jira.AddIssue(key, at.AddDays(-2)).AssignedTo(assignee).InSprints(sprintId)
-            .Moved(at, Workflow.Development)
-            .Moved(at.AddSeconds(secondsInDevelopment), Workflow.Review)
-            .Moved(at.AddDays(2), Workflow.Done);
 }
