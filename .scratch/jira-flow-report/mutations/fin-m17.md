@@ -1,6 +1,8 @@
 ---
 id: fin-m17
-status: active
+status: stale
+staleReason: |-
+  Owner decision D56 replaced the baseline sentence of D54. The branch that counted the buckets of a withheld baseline sprint as suppressed is removed, and such a sprint withholds the whole baseline through baseline_sprint.suppressed, which fin-m19 mutates.
 project: Pipeline
 filter: '/*/*/BaselineTests/*'
 file: src/Telltale.Storage.Sqlite/Sql/Views/baseline_cycle_time_per_bucket.sql
