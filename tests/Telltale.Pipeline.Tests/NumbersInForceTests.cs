@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Telltale.Pipeline.Tests.Harness;
+using static Telltale.Pipeline.Tests.Harness.Scenarios;
 using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
@@ -316,9 +317,6 @@ public class NumbersInForceTests
 
         return await pipeline.ReadReportAsync(41);
     }
-
-    private static JsonObject MinimumGroupSize(int team, int assigneesBehindAFigure) =>
-        new() { ["team"] = team, ["assigneesBehindAFigure"] = assigneesBehindAFigure };
 
     /// <summary>
     /// Sprint 41 with five people, one delivered 3-point issue each: created as the sprint starts (Monday

@@ -1,5 +1,7 @@
 using System.Text.Json.Nodes;
 using Telltale.Pipeline.Tests.Harness;
+using static Telltale.Pipeline.Tests.Harness.HarnessSteps;
+using static Telltale.Pipeline.Tests.Harness.Scenarios;
 using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
@@ -167,18 +169,6 @@ public class DiscoverMinimumGroupSizeTests
             .IsEquivalentTo(before.OrderBy(file => file.Key, StringComparer.Ordinal).Select(file => $"{file.Key}\n{file.Value}"));
     }
 
-    /// <summary>Sprint 41 with four assignees, each delivering one issue: fewer than the default team of five.</summary>
-    private static void AddSprint41WithFourAssignees(FakeJira jira)
-    {
-        jira.AddSprint41();
-        foreach (var (person, number) in People.Team.Take(4).Select((person, index) => (person, index + 1)))
-        {
-            jira.AddIssue($"FAKE-{number}", Local(2026, 1, 5, 9)).AssignedTo(person).Estimated(3).InSprints(41)
-                .Moved(Local(2026, 1, 6, 9), Workflow.Development)
-                .Moved(Local(2026, 1, 8, 9), Workflow.Done);
-        }
-    }
-
     /// <summary>A discover that only prepares the test: it must succeed, so a failed setup is reported where it happens.</summary>
     private static async Task DiscoverAsSetupAsync(PipelineHarness pipeline, string[] args)
     {
@@ -187,15 +177,4 @@ public class DiscoverMinimumGroupSizeTests
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
     }
-
-    /// <summary>Changes the file on disk as the owner would in an editor.</summary>
-    private static async Task EditWrittenConfigAsync(PipelineHarness pipeline, Action<JsonNode> edit)
-    {
-        var config = await ReadWrittenConfigAsync(pipeline);
-        edit(config);
-        await File.WriteAllTextAsync(pipeline.ConfigPath, config.ToJsonString());
-    }
-
-    private static async Task<JsonNode> ReadWrittenConfigAsync(PipelineHarness pipeline) =>
-        JsonNode.Parse(await File.ReadAllTextAsync(pipeline.ConfigPath))!;
 }

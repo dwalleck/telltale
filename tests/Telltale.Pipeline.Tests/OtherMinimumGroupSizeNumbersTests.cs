@@ -1,5 +1,8 @@
 using System.Text.Json.Nodes;
 using Telltale.Pipeline.Tests.Harness;
+using static Telltale.Pipeline.Tests.Harness.HarnessSteps;
+using static Telltale.Pipeline.Tests.Harness.ReportText;
+using static Telltale.Pipeline.Tests.Harness.Scenarios;
 using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
@@ -15,27 +18,6 @@ namespace Telltale.Pipeline.Tests;
 /// </summary>
 public class OtherMinimumGroupSizeNumbersTests
 {
-    private const string CycleTimeHeader =
-        "\n## Cycle time by point bucket\n\n"
-        + "| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |\n"
-        + "| --- | ---: | ---: | ---: | ---: | ---: |\n";
-
-    private const string TimeInStatusHeader =
-        "\n## Time in status\n\n"
-        + "| Status | Issues | Median (business days) | Total (business days) |\n| --- | ---: | ---: | ---: |\n";
-
-    private const string CycleTimeHeaderWithBaseline =
-        "\n## Cycle time by point bucket\n\n"
-        + "| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) | Baseline median (business days) | Baseline P85 (business days) |\n"
-        + "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n";
-
-    private const string TimeInStatusHeaderWithBaseline =
-        "\n## Time in status\n\n"
-        + "| Status | Issues | Median (business days) | Total (business days) | Baseline median (business days) |\n| --- | ---: | ---: | ---: | ---: |\n";
-
-    /// <summary>What follows the two tables.</summary>
-    private const string MethodHeading = "\n## Method\n";
-
     /// <summary>A sprint that shows nothing: no delivered count, and one line in place of each table's rows.</summary>
     private const string WholeSprintWithheld =
         "\nDelivered issues: suppressed\n\n## Cycle time by point bucket\n\nsuppressed\n\n## Time in status\n\nsuppressed\n" + MethodHeading;
@@ -686,28 +668,6 @@ public class OtherMinimumGroupSizeNumbersTests
             """.ReplaceLineEndings("\n"));
     }
 
-    private static JsonObject MinimumGroupSize(int team, int assigneesBehindAFigure) =>
-        new() { ["team"] = team, ["assigneesBehindAFigure"] = assigneesBehindAFigure };
-
-    /// <summary>What <c>query</c> prints for each statement in turn, with LF line endings.</summary>
-    private static async Task<string> QueryAsync(PipelineHarness pipeline, params string[] statements)
-    {
-        pipeline.Out.GetStringBuilder().Clear();
-        await pipeline.RunAllAsync([.. statements.Select(sql => new[] { "query", sql })]);
-        return pipeline.Out.ToString().ReplaceLineEndings("\n");
-    }
-
-    /// <summary>Sprint 41 alone, as two working weeks: Monday 09:00 to the second Friday 17:00, completed as planned.</summary>
-    private static void AddSprintFortyOneOfTwoWorkingWeeks(FakeJira jira) =>
-        jira.AddSprint41(plannedEnd: Local(2026, 1, 16, 17), completed: Local(2026, 1, 16, 17));
-
-    /// <summary>Sprint 41 and 42 as two working weeks each: Monday 09:00 to the second Friday 17:00, completed as planned.</summary>
-    private static void AddTwoSprintsOfTwoWorkingWeeks(FakeJira jira)
-    {
-        AddSprintFortyOneOfTwoWorkingWeeks(jira);
-        jira.AddSprint42(start: Local(2026, 1, 19, 9), plannedEnd: Local(2026, 1, 30, 17), completed: Local(2026, 1, 30, 17));
-    }
-
     /// <summary>Sprint 42 with four people, one delivered 3-point issue each, a day in Development.</summary>
     private static void AddSprintFortyTwoWithFourAssigneesInBucketThree(FakeJira jira)
     {
@@ -757,6 +717,4 @@ public class OtherMinimumGroupSizeNumbersTests
     /// </summary>
     private static void LeftInNew(FakeJira jira, long sprintId, int number, FakePerson assignee) =>
         jira.AddIssue($"FAKE-{number}", MondayOf(sprintId)).InSprints(sprintId).AssignedTo(assignee);
-
-    private static DateTimeOffset MondayOf(long sprintId) => sprintId == 41 ? Local(2026, 1, 5, 9) : Local(2026, 1, 19, 9);
 }

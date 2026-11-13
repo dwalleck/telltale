@@ -1,5 +1,9 @@
 using System.Text.Json.Nodes;
 using Telltale.Pipeline.Tests.Harness;
+using static Telltale.Pipeline.Tests.Harness.HarnessSteps;
+using static Telltale.Pipeline.Tests.Harness.PrivacyScan;
+using static Telltale.Pipeline.Tests.Harness.ReportText;
+using static Telltale.Pipeline.Tests.Harness.Scenarios;
 using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
@@ -15,27 +19,6 @@ namespace Telltale.Pipeline.Tests;
 /// </summary>
 public class SuppressionOffTests
 {
-    private const string CycleTimeHeader =
-        "\n## Cycle time by point bucket\n\n"
-        + "| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |\n"
-        + "| --- | ---: | ---: | ---: | ---: | ---: |\n";
-
-    private const string CycleTimeHeaderWithBaseline =
-        "\n## Cycle time by point bucket\n\n"
-        + "| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) | Baseline median (business days) | Baseline P85 (business days) |\n"
-        + "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n";
-
-    private const string TimeInStatusHeader =
-        "\n## Time in status\n\n"
-        + "| Status | Issues | Median (business days) | Total (business days) |\n| --- | ---: | ---: | ---: |\n";
-
-    private const string TimeInStatusHeaderWithBaseline =
-        "\n## Time in status\n\n"
-        + "| Status | Issues | Median (business days) | Total (business days) | Baseline median (business days) |\n| --- | ---: | ---: | ---: | ---: |\n";
-
-    /// <summary>What follows the two tables.</summary>
-    private const string MethodHeading = "\n## Method\n";
-
     private const string DeliveredSql = "SELECT sprint_id, delivered_count, suppressed, team_suppressed FROM delivered_per_sprint ORDER BY sprint_id;";
 
     private const string CycleTimeSql =
@@ -630,7 +613,7 @@ public class SuppressionOffTests
         // delivered, so the default numbers withhold every figure of the sprint, and here each is in the report
         // and in what query prints of every metric view. The scan reads standard output, where query prints.
         await using var pipeline = SuppressionOff();
-        PrivacyTests.AddScenario(pipeline.Jira);
+        AddScenario(pipeline.Jira);
 
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
         foreach (var view in MetricViews)
@@ -645,7 +628,7 @@ public class SuppressionOffTests
         await Assert.That(printed).Contains("| sprint_id | sprint_name | state | started | ended | planned_end | delivered_count | suppressed | team_suppressed |\n");
         await Assert.That(printed).Contains(" | 2 | 0 | 0 |\n");
         await Assert.That(printed).Contains("| sprint_id | team_suppressed | delivered_suppressed |\n| --- | --- | --- |\n| 41 | 0 | 0 |\n");
-        await PrivacyTests.AssertNothingForbiddenWasWrittenAsync(pipeline);
+        await AssertNothingForbiddenWasWrittenAsync(pipeline);
     }
 
     [Test]
@@ -684,21 +667,6 @@ public class SuppressionOffTests
                     where blocks[view].Contains(person, StringComparison.OrdinalIgnoreCase)
                     select view).ToList();
         await Assert.That(held).IsEmpty();
-    }
-
-    private static PipelineHarness SuppressionOff(DateTimeOffset? now = null)
-    {
-        var pipeline = new PipelineHarness(now);
-        pipeline.Config["minimumGroupSize"] = new JsonObject { ["team"] = 0, ["assigneesBehindAFigure"] = 0 };
-        return pipeline;
-    }
-
-    /// <summary>What the <c>query</c> command prints for <paramref name="sql"/>, with line endings normalised to <c>\n</c>.</summary>
-    private static async Task<string> QueryAsync(PipelineHarness pipeline, string sql)
-    {
-        pipeline.Out.GetStringBuilder().Clear();
-        await pipeline.RunAllAsync(["query", sql]);
-        return pipeline.Out.ToString().ReplaceLineEndings("\n");
     }
 
     /// <summary>A report without its method note: from the heading to the end of the tables, and the footer.</summary>
@@ -775,74 +743,4 @@ public class SuppressionOffTests
 
         jira.AddIssue("FAKE-90", Local(2026, 1, 8, 9), createdIn: Workflow.Done).AssignedTo(People.One);
     }
-
-    /// <summary>
-    /// Sprint 42 with a team of six: three people's 3-point issues, a day in Development and 1, 2 and 3 in Review
-    /// (cycle times 2, 3 and 4; the last ends after a weekend, 6 calendar days), and three more people's
-    /// 5-point issues, two days each.
-    /// </summary>
-    private static void AddSprintFortyTwoWithThreeAssigneesInEveryRow(FakeJira jira)
-    {
-        Delivered(jira, 42, "FAKE-11", points: 3, People.One, days: 1, reviewDays: 1);
-        Delivered(jira, 42, "FAKE-12", points: 3, People.Two, days: 1, reviewDays: 2);
-        Delivered(jira, 42, "FAKE-13", points: 3, People.Three, days: 1, reviewDays: 3);
-        foreach (var (person, number) in new[] { (People.Four, 21), (People.Five, 22), (People.Six, 23) })
-        {
-            Delivered(jira, 42, $"FAKE-{number}", points: 5, person, days: 2);
-        }
-    }
-
-    /// <summary>
-    /// An issue of sprint 41, 42 or 43, created as the sprint starts (Monday 09:00) and in Development from
-    /// Tuesday 09:00 for <paramref name="days"/> business days; then, with <paramref name="reviewDays"/>, in
-    /// Review for that many; then done. So it spends a day in New, and its cycle time is the two together (at
-    /// most eight business days, so it is done inside the sprint). Null <paramref name="points"/> leaves it
-    /// unestimated and a null <paramref name="assignee"/> unassigned.
-    /// </summary>
-    private static FakeIssue Delivered(FakeJira jira, long sprintId, string key, double? points, FakePerson? assignee, int days, int reviewDays = 0)
-    {
-        var tuesday = MondayOf(sprintId).AddDays(1);
-
-        // Tuesday plus four business days is the next Monday: a weekend lies between.
-        DateTimeOffset After(int businessDays) => tuesday.AddDays(businessDays < 4 ? businessDays : businessDays + 2);
-
-        var issue = StillInDevelopment(jira, sprintId, key, assignee);
-        if (points is { } estimate)
-        {
-            issue.Estimated(estimate);
-        }
-
-        if (reviewDays > 0)
-        {
-            issue.Moved(After(days), Workflow.Review);
-        }
-
-        return issue.Moved(After(days + reviewDays), Workflow.Done);
-    }
-
-    /// <summary>
-    /// An issue of the sprint, created as it starts (Monday 09:00) and moved to Development on Tuesday 09:00,
-    /// where it still is. A null <paramref name="assignee"/> leaves it unassigned.
-    /// </summary>
-    private static FakeIssue StillInDevelopment(FakeJira jira, long sprintId, string key, FakePerson? assignee)
-    {
-        var monday = MondayOf(sprintId);
-        var issue = jira.AddIssue(key, monday).InSprints(sprintId).Moved(monday.AddDays(1), Workflow.Development);
-        return assignee is null ? issue : issue.AssignedTo(assignee);
-    }
-
-    /// <summary>Sprints 41 and 42 as two working weeks each: Monday 09:00 to the second Friday 17:00, completed as planned.</summary>
-    private static void AddTwoSprintsOfTwoWorkingWeeks(FakeJira jira)
-    {
-        jira.AddSprint41(plannedEnd: Local(2026, 1, 16, 17), completed: Local(2026, 1, 16, 17));
-        jira.AddSprint42(start: Local(2026, 1, 19, 9), plannedEnd: Local(2026, 1, 30, 17), completed: Local(2026, 1, 30, 17));
-    }
-
-    private static DateTimeOffset MondayOf(long sprintId) => sprintId switch
-    {
-        41 => Local(2026, 1, 5, 9),
-        42 => Local(2026, 1, 19, 9),
-        43 => Local(2026, 2, 2, 9),
-        _ => throw new ArgumentOutOfRangeException(nameof(sprintId), sprintId, "The fixtures have sprints 41, 42 and 43."),
-    };
 }

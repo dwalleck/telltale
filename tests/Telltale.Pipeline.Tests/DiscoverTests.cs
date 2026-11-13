@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using Telltale.Cli;
 using Telltale.Core.Secrets;
 using Telltale.Pipeline.Tests.Harness;
+using static Telltale.Pipeline.Tests.Harness.HarnessSteps;
 using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Pipeline.Tests;
@@ -1304,15 +1305,4 @@ public class DiscoverTests
     }
 
     private static string Output(PipelineHarness pipeline) => pipeline.Out.ToString().ReplaceLineEndings("\n");
-
-    /// <summary>Changes the file on disk as the owner would in an editor.</summary>
-    private static async Task EditWrittenConfigAsync(PipelineHarness pipeline, Action<JsonNode> edit)
-    {
-        var config = await ReadWrittenConfigAsync(pipeline);
-        edit(config);
-        await File.WriteAllTextAsync(pipeline.ConfigPath, config.ToJsonString());
-    }
-
-    private static async Task<JsonNode> ReadWrittenConfigAsync(PipelineHarness pipeline) =>
-        JsonNode.Parse(await File.ReadAllTextAsync(pipeline.ConfigPath))!;
 }
