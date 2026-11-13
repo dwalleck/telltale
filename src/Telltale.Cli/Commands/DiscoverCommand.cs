@@ -182,11 +182,7 @@ internal static class DiscoverCommand
         // owner's, absent or present: leaving it out there is a choice, and discover does not undo it.
         if (previous is null)
         {
-            root["minimumGroupSize"] = new JsonObject
-            {
-                ["team"] = MinimumGroupSize.Default.Team,
-                ["assigneesBehindAFigure"] = MinimumGroupSize.Default.AssigneesBehindAFigure,
-            };
+            root["minimumGroupSize"] = ConfigFile.Written(MinimumGroupSize.Default);
         }
 
         foreach (var change in changes)

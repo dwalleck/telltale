@@ -7,7 +7,7 @@ namespace Telltale.Pipeline.Tests;
 /// <summary>
 /// <c>discover</c> and the <c>minimumGroupSize</c> setting (owner decision D69): the first discover writes it with
 /// five and three, and a rerun leaves it as the file has it, absent included. A rerun on a file whose numbers
-/// <c>run</c> would refuse stops, as for every other setting (owner, 2026-11-13).
+/// <c>run</c> would refuse stops, as for every other setting (owner decision D70).
 /// </summary>
 public class DiscoverMinimumGroupSizeTests
 {
@@ -28,6 +28,24 @@ public class DiscoverMinimumGroupSizeTests
     }
 
     [Test]
+    public async Task A_first_discover_that_completes_a_file_made_by_hand_leaves_it_without_the_setting()
+    {
+        // Owner decision D69: the setting is written into a new file. In a file that exists, leaving it out is the owner's.
+        await using var pipeline = new PipelineHarness();
+        await File.WriteAllTextAsync(pipeline.ConfigPath, """{ "holidays": ["2026-01-19"] }""");
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(DiscoverTests.FirstDiscover);
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        var written = await ReadWrittenConfigAsync(pipeline);
+        await Assert.That(written["holidays"]!.ToJsonString()).IsEqualTo("""["2026-01-19"]""");
+        await Assert.That(written["statusRoles"]![Workflow.Done.Id]!.GetValue<string>()).IsEqualTo("done");
+        await Assert.That(written["abandonedResolutionIds"]!.ToJsonString()).IsEqualTo("[]");
+        await Assert.That(written.AsObject().ContainsKey("minimumGroupSize")).IsFalse();
+    }
+
+    [Test]
     public async Task The_file_discover_wrote_loads_and_its_report_is_the_one_the_same_file_gives_without_the_setting()
     {
         // Four assignees: a sprint the default numbers withhold whole, so the report shows whether they are in force.
@@ -36,7 +54,7 @@ public class DiscoverMinimumGroupSizeTests
         foreach (var pipeline in new[] { withTheSetting, withoutTheSetting })
         {
             AddSprint41WithFourAssignees(pipeline.Jira);
-            await pipeline.RunWithFilesAsTheyAreAsync(DiscoverTests.FirstDiscover);
+            await DiscoverAsSetupAsync(pipeline, DiscoverTests.FirstDiscover);
         }
 
         await EditWrittenConfigAsync(withoutTheSetting, config => config.AsObject().Remove("minimumGroupSize"));
@@ -62,7 +80,7 @@ public class DiscoverMinimumGroupSizeTests
     public async Task A_rerun_keeps_the_numbers_of_the_file_and_says_nothing_about_them(int team, int assigneesBehindAFigure)
     {
         await using var pipeline = new PipelineHarness();
-        await pipeline.RunWithFilesAsTheyAreAsync(DiscoverTests.FirstDiscover);
+        await DiscoverAsSetupAsync(pipeline, DiscoverTests.FirstDiscover);
         await EditWrittenConfigAsync(pipeline, config => config["minimumGroupSize"] = new JsonObject { ["team"] = team, ["assigneesBehindAFigure"] = assigneesBehindAFigure });
         pipeline.Out.GetStringBuilder().Clear();
 
@@ -80,7 +98,7 @@ public class DiscoverMinimumGroupSizeTests
     public async Task A_rerun_on_a_file_without_the_setting_leaves_it_without_the_setting_and_says_nothing_about_it()
     {
         await using var pipeline = new PipelineHarness();
-        await pipeline.RunWithFilesAsTheyAreAsync(DiscoverTests.FirstDiscover);
+        await DiscoverAsSetupAsync(pipeline, DiscoverTests.FirstDiscover);
         await EditWrittenConfigAsync(pipeline, config => config.AsObject().Remove("minimumGroupSize"));
         pipeline.Out.GetStringBuilder().Clear();
 
@@ -98,7 +116,7 @@ public class DiscoverMinimumGroupSizeTests
     public async Task A_rerun_with_nothing_to_change_does_not_rewrite_a_file_without_the_setting()
     {
         await using var pipeline = new PipelineHarness();
-        await pipeline.RunWithFilesAsTheyAreAsync(DiscoverTests.FirstDiscover);
+        await DiscoverAsSetupAsync(pipeline, DiscoverTests.FirstDiscover);
         await EditWrittenConfigAsync(pipeline, config => config.AsObject().Remove("minimumGroupSize"));
         var edited = await File.ReadAllTextAsync(pipeline.ConfigPath);
 
@@ -114,7 +132,7 @@ public class DiscoverMinimumGroupSizeTests
     {
         // The harness clock reads 3 February 2026, noon in Chicago: 18:00 UTC.
         await using var pipeline = new PipelineHarness();
-        await pipeline.RunWithFilesAsTheyAreAsync(DiscoverTests.FirstDiscover);
+        await DiscoverAsSetupAsync(pipeline, DiscoverTests.FirstDiscover);
         await EditWrittenConfigAsync(pipeline, config => config["minimumGroupSize"] = new JsonObject { ["team"] = 0, ["assigneesBehindAFigure"] = 0 });
         var edited = await File.ReadAllTextAsync(pipeline.ConfigPath);
         var backup = pipeline.ConfigPath + ".20260203T180000Z.bak";
@@ -132,17 +150,17 @@ public class DiscoverMinimumGroupSizeTests
     [Test]
     public async Task A_rerun_on_a_file_whose_numbers_run_would_refuse_stops_and_leaves_the_file_and_its_backups_as_they_are()
     {
-        // Owner, 2026-11-13: as for every other setting run would refuse. The first rerun leaves a backup to be left alone.
+        // Owner decision D70: as for every other setting run would refuse. The first rerun leaves a backup to be left alone.
         await using var pipeline = new PipelineHarness();
-        await pipeline.RunWithFilesAsTheyAreAsync(DiscoverTests.FirstDiscover);
-        await pipeline.RunWithFilesAsTheyAreAsync(RerunThatChangesTheTimeZone);
+        await DiscoverAsSetupAsync(pipeline, DiscoverTests.FirstDiscover);
+        await DiscoverAsSetupAsync(pipeline, RerunThatChangesTheTimeZone);
         await EditWrittenConfigAsync(pipeline, config => config["minimumGroupSize"] = new JsonObject { ["team"] = -1, ["assigneesBehindAFigure"] = 3 });
         var before = await pipeline.ReadAllFilesAsync();
 
         var exit = await pipeline.RunWithFilesAsTheyAreAsync("discover", "--time-zone", "Europe/Paris");
 
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString()).IsNotEmpty();
+        await Assert.That(pipeline.Error.ToString()).Contains("run would refuse it").And.Contains("minimumGroupSize.team");
         var after = await pipeline.ReadAllFilesAsync();
         await Assert.That(before.Keys).IsEquivalentTo(["telltale.json", "telltale.json.20260203T180000Z.bak"]);
         await Assert.That(after.OrderBy(file => file.Key, StringComparer.Ordinal).Select(file => $"{file.Key}\n{file.Value}"))
@@ -159,6 +177,15 @@ public class DiscoverMinimumGroupSizeTests
                 .Moved(Local(2026, 1, 6, 9), Workflow.Development)
                 .Moved(Local(2026, 1, 8, 9), Workflow.Done);
         }
+    }
+
+    /// <summary>A discover that only prepares the test: it must succeed, so a failed setup is reported where it happens.</summary>
+    private static async Task DiscoverAsSetupAsync(PipelineHarness pipeline, string[] args)
+    {
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(args);
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
     }
 
     /// <summary>Changes the file on disk as the owner would in an editor.</summary>
