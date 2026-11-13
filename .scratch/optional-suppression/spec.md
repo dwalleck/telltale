@@ -83,11 +83,11 @@ Only the minimum group size rule becomes optional. Person fields are still hashe
 
 ## Implementation Decisions
 
-### Proposed owner decisions
+### Owner decisions (2026-11-12)
 
-The owner asked for suppression to be optional and kept for others. The points below are this spec's recommended answers to what that leaves open. They continue the numbering of the owner decisions list (D58 to D63 belong to the brief status visits spec) and are recorded there, in the "Suppression" section, once the owner has confirmed them. An implementer who finds one does not fit treats it as a decision needed.
+The owner asked for suppression to be optional and kept for others, and for the thresholds to be configurable. The owner confirmed the decisions below as written on 2026-11-12. They continue the numbering of the owner decisions list (D58 to D63 belong to the brief status visits spec), and the implementation records them there, in the "Suppression" section. An implementer who finds one does not fit the code treats it as a decision needed, not as theirs to settle.
 
-- **D64.** The minimum group size is one optional configuration setting, `minimumGroupSize`, with two whole numbers: `team` and `assigneesBehindAFigure`. Absent means five and three. (Owner, 2026-11-12: the thresholds are configurable.)
+- **D64.** The minimum group size is one optional configuration setting, `minimumGroupSize`, with two whole numbers: `team` and `assigneesBehindAFigure`. Absent means five and three.
 - **D65.** A number of zero turns that check off. With both zero, no figure or count is withheld for the size of the group behind it. This covers every rule in the "Suppression" section of the decisions list and the data quality footer's counts.
 - **D66.** Every existing rule applies with the configured numbers in place of five and three. The rules themselves (what is withheld when a check fails) do not change. The file is refused when `assigneesBehindAFigure` is greater than `team` and `team` is not zero.
 - **D67.** Every report's method note states the numbers in force. A report written with either number below its default also says so in a line under its heading.

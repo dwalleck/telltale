@@ -81,9 +81,9 @@ These continue the numbering of the owner decisions list. The implementation add
 - **D62.** The count is withheld when the row's median is withheld, and also when fewer than three distinct assignees are behind the counted issues.
 - **D63.** There is no baseline count. A baseline sprint's counts are seen by reporting on that sprint.
 
-### Readings this spec adds to the decisions
+### Readings of the decisions, confirmed by the owner
 
-Each is a narrowing the decisions' words do not settle. They are put to the owner with the spec; an implementer who finds one does not fit treats it as a decision needed, not as theirs to settle.
+Each narrows something the decisions' words do not settle. The owner confirmed all four as written on 2026-11-12, so they bind as the decisions do. An implementer who finds one does not fit the code treats it as a decision needed, not as theirs to settle.
 
 - **Which visits count toward a sprint.** An issue is counted for a sprint and a status when it is in that status's time in status row for the sprint and one of its brief visits to that status overlaps the time the row counts (inside the sprint window, while a member). A brief visit made in an earlier sprint does not flag the issue in a later one.
 - **Zero.** A count of zero is withheld like a count with too few assignees behind it, as the existing data quality counts are.
