@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Telltale.Core.Configuration;
+using Telltale.Core.Derive;
 
 namespace Telltale.Cli;
 
@@ -24,7 +25,8 @@ internal sealed class MinimumGroupSizeConverter : JsonConverter<MinimumGroupSize
     {
         if (reader.TokenType != JsonTokenType.StartObject)
         {
-            throw new JsonException($"{Setting} must be an object with the two numbers team and assigneesBehindAFigure; leave the setting out for five and three.");
+            var byDefault = new NumbersInForce(MinimumGroupSize.Default);
+            throw new JsonException($"{Setting} must be an object with the two numbers {TeamName} and {AssigneesBehindAFigureName}; leave the setting out for {byDefault.TeamInWords} and {byDefault.BehindAFigureInWords}.");
         }
 
         int? team = null;

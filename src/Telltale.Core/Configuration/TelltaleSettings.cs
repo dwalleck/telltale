@@ -99,9 +99,10 @@ public sealed record TelltaleSettings
     /// <summary>
     /// Each number is zero or more: zero turns its check off (owner decision D65), and a number below zero means
     /// nothing. Any two such numbers are accepted (owner decision D66): the team number is a minimum, not the
-    /// size of the team, so a figure may need more assignees than it.
+    /// size of the team, so a figure may need more assignees than it. Public for <c>discover</c>, which asks
+    /// this of the numbers in an existing file before it calls Jira; throws <see cref="SettingRefusedException"/>.
     /// </summary>
-    private static MinimumGroupSize CheckedMinimumGroupSize(MinimumGroupSize minimumGroupSize)
+    public static MinimumGroupSize CheckedMinimumGroupSize(MinimumGroupSize minimumGroupSize)
     {
         if (minimumGroupSize.Team < 0)
         {
