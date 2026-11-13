@@ -77,14 +77,15 @@ public static class BaselineSprintRules
     /// order, read from the metric view
     /// <c>baseline_sprint</c>. While there is one, the views withhold every baseline figure, and nothing stops:
     /// the console and the report name the sprints, with <see cref="WithheldOnTheConsole"/> and
-    /// <see cref="WithheldInTheReport"/>. Neither says which of the two reasons applies.
+    /// <see cref="WithheldInTheReport"/>. With both checks in force neither says which of the two reasons
+    /// applies; with one check turned off (a number of zero) the one left is the reason, and each says so.
     /// </summary>
     public static Task<IReadOnlyList<string>> ReadWithheldAsync(ITelltaleStore store, CancellationToken cancellationToken = default) =>
         store.QueryViewsAsync<string>("SELECT sprint_id FROM baseline_sprint WHERE suppressed <> 0 ORDER BY sprint_id;", cancellationToken: cancellationToken);
 
     /// <summary>
     /// The console's line about <paramref name="sprintIds"/>, the result of <see cref="ReadWithheldAsync"/> when it
-    /// is not empty. It gives the numbers in force (<see cref="NumbersInForce.ReadAsync"/>; owner decision D67),
+    /// is not empty. It gives the numbers in force (<see cref="NumbersInForce.Of"/>; owner decision D67),
     /// and of the two checks only those that apply.
     /// </summary>
     public static string WithheldOnTheConsole(IReadOnlyList<string> sprintIds, NumbersInForce numbers) =>

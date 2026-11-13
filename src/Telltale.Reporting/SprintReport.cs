@@ -43,9 +43,11 @@ public static class SprintReport
     /// <summary>
     /// Renders the report. Dates are shown in <paramref name="teamTimeZone"/>. <paramref name="baselineSprintIds"/>
     /// is the baseline sprint list the derived data was built with, in order: when it is not empty, both tables
-    /// get baseline columns and the method note says what the baseline is.
+    /// get baseline columns and the method note says what the baseline is. <paramref name="numbers"/> are the
+    /// minimum group size's numbers the derived data was built under (<see cref="NumbersInForce.Of"/>): the
+    /// caller reads them once, and the report states them and decides nothing by them.
     /// </summary>
-    public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, IReadOnlyList<string> baselineSprintIds, CancellationToken cancellationToken = default)
+    public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, IReadOnlyList<string> baselineSprintIds, NumbersInForce numbers, CancellationToken cancellationToken = default)
     {
         // Owner decisions D50, D56: while a baseline sprint has its delivered count withheld, every baseline figure is
         // withheld. The baseline views have no rows then, so the cells are written from this list.
@@ -62,7 +64,6 @@ public static class SprintReport
         }
 
         // Each section is one block of the report, in order. A new section is a new method and a line here.
-        var numbers = await NumbersInForce.ReadAsync(store, cancellationToken);
         var report = new StringBuilder();
         AppendTitle(report, sprint, teamTimeZone);
         AppendNumbersBelowTheDefault(report, numbers);
@@ -104,9 +105,9 @@ public static class SprintReport
         (await store.QueryViewsAsync<DataQualityRow>("SELECT as_of, time_zone, anomaly_issue_count, delivered_between_sprints_count, suppressed FROM data_quality;", cancellationToken: cancellationToken)).Single();
 
     /// <summary>Renders the report and writes it into <paramref name="directory"/>. Returns the file's path.</summary>
-    public static async Task<string> WriteAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, IReadOnlyList<string> baselineSprintIds, string directory, CancellationToken cancellationToken = default)
+    public static async Task<string> WriteAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, IReadOnlyList<string> baselineSprintIds, NumbersInForce numbers, string directory, CancellationToken cancellationToken = default)
     {
-        var text = await RenderAsync(store, sprintId, teamTimeZone, baselineSprintIds, cancellationToken);
+        var text = await RenderAsync(store, sprintId, teamTimeZone, baselineSprintIds, numbers, cancellationToken);
 
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, FileName(sprintId));

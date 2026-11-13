@@ -4,10 +4,9 @@ status: active
 project: Pipeline
 filter: '/*/*/BaselineTests/*'
 file: src/Telltale.Pipeline/PipelineSteps.cs
-expectedMatches: 2
-occurrence: 2
+expectedMatches: 1
 find: |-
-          await NameWithheldBaselineSprintsAsync(cancellationToken);
+          await NameWithheldBaselineSprintsAsync(numbers, cancellationToken);
 replace: |-
           await Task.CompletedTask;
 ---
@@ -17,3 +16,4 @@ Claim (review round 4, finding 27): report names a baseline sprint whose deliver
 - Verified 2026-11-12 at bc92ab3: red, 2 failed of 41 (Pipeline, filter /*/*/BaselineTests/*); restored.
 - Verified 2026-11-12 at 1830824: red, 2 failed of 41 (Pipeline, filter /*/*/BaselineTests/*); restored.
 - Verified 2026-11-13 at d534f7f: red, 2 failed of 41 (Pipeline, filter /*/*/BaselineTests/*); restored.
+- Re-pointed 2026-11-13 in the final fix pass of optional-suppression (finding R7): the report step now passes the numbers it read once, so its call differs from derive's and is the only match; the behaviour mutated is the same.
