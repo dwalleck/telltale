@@ -13,3 +13,4 @@ replace: |-
 # fin-m17: the buckets of a baseline sprint whose delivered count is withheld do not count as suppressed
 
 Claim (owner decision D54; review round 2, finding 14): the baseline fails closed. A baseline sprint whose delivered count is withheld has no bucket rows of its own, and every bucket it has a cycle time in is withheld from the baseline. The test passed when written, because the row form of D53 still had the rows.
+- Verified 2026-11-12 at a198e06: red, 1 failed of 39 (Pipeline, filter /*/*/BaselineTests/*); restored.

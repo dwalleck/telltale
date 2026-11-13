@@ -20,3 +20,4 @@ edits:
 # fin-m16: a sprint whose delivered count is withheld shows its bucket rows
 
 Claim (owner decision D54, replacing the row form of D53): a sprint with a team of five whose delivered count is withheld has one suppressed row in the cycle time view and no bucket rows, whatever was delivered. The three cases ran red first.
+- Verified 2026-11-12 at a198e06: red, 3 failed of 17 (Pipeline, filter /*/*/SuppressionTests/*); restored.

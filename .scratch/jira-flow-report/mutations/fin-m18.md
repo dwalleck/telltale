@@ -13,3 +13,4 @@ replace: |-
 # fin-m18: the time-in-status table follows the check of the delivered count
 
 Claim (owner decision D55): the time-in-status counts of a sprint whose delivered count is withheld stay. The test ran red first on the method note; this pins the table.
+- Verified 2026-11-12 at a198e06: red, 1 failed of 17 (Pipeline, filter /*/*/SuppressionTests/*); restored.

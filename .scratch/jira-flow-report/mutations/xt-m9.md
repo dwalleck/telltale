@@ -18,3 +18,4 @@ Expected red: the sprintFieldId and storyPointFieldId cases of `A_bad_value_in_t
 - Re-pointed 2026-11-12 by fin (final fix pass): discover asks SettingRules.CustomFieldIdProblem (A6).
 - Verified 2026-11-12 at 5c4f1d9: red, 4 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.
 - Verified 2026-11-12 at 741dd98: red, 4 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.
+- Verified 2026-11-12 at a198e06: red, 4 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.
