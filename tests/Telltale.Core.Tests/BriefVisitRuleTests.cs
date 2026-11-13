@@ -170,7 +170,14 @@ public class BriefVisitRuleTests
 
         var stays = BriefVisits.Stays(timeline);
 
-        await Assert.That(stays).IsEquivalentTo(new[] { new Stay(Development, Created, null) });
+        // Both stays are bounded by the moved change, and say so (decision bv-D15): the one of no length is
+        // listed and is not a brief visit under any threshold.
+        await Assert.That(stays).IsEquivalentTo(new[]
+        {
+            new Stay(New, Created, Created) { BoundedByAnAnomaly = true },
+            new Stay(Development, Created, null) { BoundedByAnAnomaly = true },
+        }, CollectionOrdering.Matching);
+        await Assert.That(BriefVisits.IsBrief(stays[0], TimeSpan.MaxValue)).IsFalse();
         await Assert.That(timeline.Anomalies).HasSingleItem();
     }
 

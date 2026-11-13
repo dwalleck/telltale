@@ -7,7 +7,16 @@ namespace Telltale.Core.Intervals;
 /// are cut at every change, also one from a status to itself, and hold no stay of no length, so the brief
 /// visit rule takes stays and nothing else.
 /// </summary>
-public sealed record Stay(string StatusId, DateTimeOffset Start, DateTimeOffset? End);
+public sealed record Stay(string StatusId, DateTimeOffset Start, DateTimeOffset? End)
+{
+    /// <summary>
+    /// True when the stay begins or ends with a change that is a changelog anomaly
+    /// (<see cref="StatusEntry.IsAnomaly"/>): one dated before the issue was created, or one whose from-status
+    /// is not the status the issue was in. The stay's real length is then unknown, and it is never a brief
+    /// visit (decision bv-D15 of the brief-status-visits run, 2026-11-13).
+    /// </summary>
+    public bool BoundedByAnAnomaly { get; init; }
+}
 
 /// <summary>
 /// The brief visit rule (GLOSSARY: Brief visit; owner decisions D58 to D60). A visit is one unbroken stay in
@@ -20,19 +29,23 @@ public static class BriefVisits
 {
     /// <summary>
     /// Whether <paramref name="stay"/> is a brief visit under <paramref name="threshold"/>. A stay the issue
-    /// is still in is not a visit for this rule, however short it is so far.
+    /// is still in is not a visit for this rule, however short it is so far, and neither is a stay that
+    /// begins or ends with a changelog anomaly, however short it looks (<see cref="Stay.BoundedByAnAnomaly"/>).
     /// </summary>
     public static bool IsBrief(Stay stay, TimeSpan threshold) =>
+        !stay.BoundedByAnAnomaly &&
         stay.End is { } left && left - stay.Start < threshold;
 
     /// <summary>
     /// Every stay of an issue's history, in order, read from the timeline's entries alone. A stay begins when
     /// the issue enters a status and ends when it next enters another one: a change from a status to itself
-    /// does not end it. The last stay has no end. A status entered and left at the same instant is a stay of no
+    /// does not end it. A change into the status the issue is in that names another from-status does end it,
+    /// and begins a new stay: the issue left and came back, and the change that took it out is missing. The
+    /// last stay has no end. A status entered and left at the same instant is a stay of no
     /// length (the same start and end), which the timeline's intervals do not hold because it took no time.
-    /// One stay of no length is left out: one that begins or ends with a change dated before the issue was
-    /// created, since it has no length only because the timeline treats that change as made at the creation.
-    /// It is a changelog anomaly and not a visit (decision bv-D5).
+    /// A stay that begins or ends with a change that is a changelog anomaly is marked
+    /// (<see cref="Stay.BoundedByAnAnomaly"/>; decisions bv-D5 and bv-D15): where such a change puts the
+    /// stay's start or end is not where the issue is known to have entered or left the status.
     /// </summary>
     public static IReadOnlyList<Stay> Stays(StatusTimeline timeline)
     {
@@ -41,17 +54,15 @@ public static class BriefVisits
         for (int entered = 0, left; entered < entries.Count; entered = left)
         {
             left = entered + 1;
-            while (left < entries.Count && entries[left].StatusId == entries[entered].StatusId)
+            while (left < entries.Count && entries[left].StatusId == entries[entered].StatusId && !entries[left].FromAnotherStatus)
             {
                 left++;
             }
 
-            var stay = new Stay(entries[entered].StatusId, entries[entered].At, left < entries.Count ? entries[left].At : null);
-            var onlyByAMovedChange = stay.End == stay.Start && (entries[entered].MovedToCreation || entries[left].MovedToCreation);
-            if (!onlyByAMovedChange)
+            stays.Add(new Stay(entries[entered].StatusId, entries[entered].At, left < entries.Count ? entries[left].At : null)
             {
-                stays.Add(stay);
-            }
+                BoundedByAnAnomaly = entries[entered].IsAnomaly || (left < entries.Count && entries[left].IsAnomaly),
+            });
         }
 
         return stays;
