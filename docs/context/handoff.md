@@ -9,7 +9,7 @@ The project owner (a senior .NET engineer) needs to justify AI plan upgrades to 
 ## Read in this order
 
 1. `GLOSSARY.md` — the project's language. Settled.
-2. `docs/adr/` — seven decisions with real trade-offs. Settled unless the owner reopens one.
+2. `docs/adr/` — eight decisions with real trade-offs. Settled unless the owner reopens one.
 3. `docs/context/pilot-plan.md` — the story, the metrics, the evaluation. The "why".
 4. `docs/context/system-design.md` — the working technical design and source-system details. The "how", including what is already built.
 5. `docs/context/confluence-page.md` — the report layout.
