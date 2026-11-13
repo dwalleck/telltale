@@ -177,6 +177,18 @@ internal static class DiscoverCommand
         Set(root, "timeZone", timeZone!, "timeZone", changes);
         root["holidays"] ??= new JsonArray();
 
+        // The minimum group size is written only into a new file, with its default numbers, so the owner sees
+        // the rule and where to change it (owner decision D69). In a file that exists the setting is the
+        // owner's, absent or present: leaving it out there is a choice, and discover does not undo it.
+        if (previous is null)
+        {
+            root["minimumGroupSize"] = new JsonObject
+            {
+                ["team"] = MinimumGroupSize.Default.Team,
+                ["assigneesBehindAFigure"] = MinimumGroupSize.Default.AssigneesBehindAFigure,
+            };
+        }
+
         foreach (var change in changes)
         {
             await output.WriteLineAsync(change);
