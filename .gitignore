@@ -488,6 +488,10 @@ $RECYCLE.BIN/
 .ipe-logs/
 .worktrees/
 
+# The store and the reports Telltale writes when it is run from the repository root: never committed.
+/data/
+/reports/
+
 # Agent working files at a worktree root: never committed, and not a dirty tree for the full check
 # Backups discover keeps of the configuration file before it rewrites it.
 /config/*.bak
