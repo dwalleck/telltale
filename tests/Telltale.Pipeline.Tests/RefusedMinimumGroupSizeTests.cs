@@ -6,10 +6,10 @@ namespace Telltale.Pipeline.Tests;
 
 /// <summary>
 /// A configuration file whose <c>minimumGroupSize</c> cannot be right is refused when it is loaded, before
-/// anything is fetched or stored, with a message that names the file and the setting (owner decisions D64 and
-/// D66). A typo must not leave suppression in another state than the owner meant: a missing number, a quoted
+/// anything is fetched or stored, with a message that names the file and the setting (owner decision D64). A typo must not leave suppression in another state than the owner meant: a missing number, a quoted
 /// one, <c>false</c> or <c>null</c> could each be read as "off" or as the default. A negative number is in
-/// <see cref="OptionalSuppressionTests"/>.
+/// <see cref="OptionalSuppressionTests"/>. Any two whole numbers of zero or more are accepted, also more
+/// assignees behind a figure than the team minimum: <see cref="OtherMinimumGroupSizeNumbersTests"/>.
 /// </summary>
 public class RefusedMinimumGroupSizeTests
 {
@@ -38,8 +38,13 @@ public class RefusedMinimumGroupSizeTests
     [Arguments("""{ "team": 5, "assigneesBehindAFigure": null }""", "assigneesBehindAFigure")]
     [Arguments("""{ "team": false, "assigneesBehindAFigure": 3 }""", "team")]
     [Arguments("""{ "team": 5, "assigneesBehindAFigure": true }""", "assigneesBehindAFigure")]
-    public async Task A_number_that_is_fractional_quoted_null_or_a_boolean_is_refused(string setting, string refused)
+    [Arguments("""{ "team": 5.0, "assigneesBehindAFigure": 3 }""", "team")]
+    [Arguments("""{ "team": 1e1, "assigneesBehindAFigure": 3 }""", "team")]
+    [Arguments("""{ "team": 3000000000, "assigneesBehindAFigure": 3 }""", "team")]
+    public async Task A_number_that_is_not_written_as_a_whole_number_that_fits_an_integer_is_refused(string setting, string refused)
     {
+        // Fractional, quoted, null or a boolean; and also 5.0, 1e1 and three thousand million, which are
+        // whole numbers but not written as one the tool reads.
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.AddSprint41();
         pipeline.Config["minimumGroupSize"] = JsonNode.Parse(setting);
@@ -47,7 +52,7 @@ public class RefusedMinimumGroupSizeTests
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            $"The configuration file {pipeline.ConfigPath} is not valid: minimumGroupSize.{refused} must be a whole number of zero or more.\n");
+            $"The configuration file {pipeline.ConfigPath} is not valid: minimumGroupSize.{refused} must be written as a whole number of zero or more.\n");
         await AssertNothingWasFetchedOrStoredAsync(pipeline, exit);
     }
 
@@ -68,25 +73,6 @@ public class RefusedMinimumGroupSizeTests
 
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
             $"The configuration file {pipeline.ConfigPath} is not valid: minimumGroupSize must be an object with the two numbers team and assigneesBehindAFigure; leave the setting out for five and three.\n");
-        await AssertNothingWasFetchedOrStoredAsync(pipeline, exit);
-    }
-
-    [Test]
-    [Arguments(5, 6)]
-    [Arguments(2, 3)]
-    [Arguments(1, 2)]
-    public async Task More_assignees_behind_a_figure_than_a_team_that_is_not_zero_is_refused(int team, int assigneesBehindAFigure)
-    {
-        // No figure could ever be shown: a sprint that passes the team check with the fewest people it may
-        // have would still be short of what one figure needs.
-        await using var pipeline = new PipelineHarness();
-        pipeline.Jira.AddSprint41();
-        pipeline.Config["minimumGroupSize"] = new JsonObject { ["team"] = team, ["assigneesBehindAFigure"] = assigneesBehindAFigure };
-
-        var exit = await pipeline.RunAsync("run", "--sprint", "41");
-
-        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            $"The configuration file {pipeline.ConfigPath} is not valid: minimumGroupSize.assigneesBehindAFigure must not be greater than minimumGroupSize.team, unless team is zero.\n");
         await AssertNothingWasFetchedOrStoredAsync(pipeline, exit);
     }
 
@@ -123,7 +109,7 @@ public class RefusedMinimumGroupSizeTests
     }
 
     [Test]
-    public async Task More_assignees_behind_a_figure_than_a_team_of_zero_is_accepted_and_only_the_figure_check_applies()
+    public async Task With_a_team_of_zero_any_number_behind_a_figure_is_accepted_and_only_the_figure_check_applies()
     {
         // Five people in the sprint, each with one delivered issue; the 3-point bucket has four people behind
         // it and the 5-point bucket one. With no team check and four assignees needed behind a figure, the

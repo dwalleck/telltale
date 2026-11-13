@@ -309,6 +309,60 @@ public class OtherMinimumGroupSizeNumbersTests
     }
 
     [Test]
+    public async Task With_a_team_minimum_of_three_and_four_behind_a_figure_a_sprint_of_five_shows_a_row_with_four_assignees_and_withholds_a_row_with_three()
+    {
+        // The team number is a minimum, not the size of the team, so a figure may need more people than it
+        // (owner decision D66 as changed on 2026-11-13). Five people: four behind bucket 3, three behind
+        // bucket 5 and Review.
+        await using var pipeline = new PipelineHarness();
+        AddSprintFortyOneOfTwoWorkingWeeks(pipeline.Jira);
+        pipeline.Config["minimumGroupSize"] = MinimumGroupSize(team: 3, assigneesBehindAFigure: 4);
+        foreach (var (person, number) in People.Team.Take(4).Select((person, index) => (person, index + 1)))
+        {
+            Delivered(pipeline.Jira, 41, number, points: 3, person, development: 2);
+        }
+
+        foreach (var (person, number) in new[] { (People.Five, 5), (People.One, 6), (People.Two, 7) })
+        {
+            Delivered(pipeline.Jira, 41, number, points: 5, person, development: 1, review: 1);
+        }
+
+        await pipeline.RunAllAsync(["run", "--sprint", "41"]);
+        var queried = await QueryAsync(pipeline, "SELECT team, assignees_behind_a_figure FROM minimum_group_size;", DeliveredSql, CycleTimeSql, TimeInStatusSql);
+
+        // Development is 1, 1, 1, 2, 2, 2, 2.
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(
+            "\nDelivered issues: 7\n"
+            + CycleTimeHeader
+            + "| 3 | 4 | 2.0 | 2.0 | 2.0 | 2.0 |\n"
+            + "| 5 | 3 | suppressed | suppressed | suppressed | suppressed |\n"
+            + TimeInStatusHeader
+            + "| Fake New | 7 | 1.0 | 7.0 |\n"
+            + "| Fake Development | 7 | 2.0 | 11.0 |\n"
+            + "| Fake Review | 3 | suppressed | suppressed |\n"
+            + MethodHeading);
+        await Assert.That(queried).IsEqualTo(
+            """
+            | team | assignees_behind_a_figure |
+            | --- | --- |
+            | 3 | 4 |
+            | sprint_id | delivered_count | suppressed | team_suppressed |
+            | --- | --- | --- | --- |
+            | 41 | 7 | 0 | 0 |
+            | sprint_id | point_bucket | issue_count | median_business_days | suppressed |
+            | --- | --- | --- | --- | --- |
+            | 41 | 3 | 4 | 2 | 0 |
+            | 41 | 5 | 3 | NULL | 1 |
+            | sprint_id | status_name | issue_count | median_business_days | total_business_days | suppressed |
+            | --- | --- | --- | --- | --- | --- |
+            | 41 | Fake New | 7 | 1 | 7 | 0 |
+            | 41 | Fake Development | 7 | 2 | 11 | 0 |
+            | 41 | Fake Review | 3 | NULL | NULL | 1 |
+
+            """.ReplaceLineEndings("\n"));
+    }
+
+    [Test]
     public async Task With_four_and_two_a_delivered_count_with_one_assignee_behind_it_is_withheld_with_its_cycle_time_rows_and_one_with_two_is_shown()
     {
         // Owner decisions D49 and D54 at four and two. Both sprints have a team of four, which the default

@@ -9,12 +9,13 @@ namespace Telltale.Cli;
 /// <c>team</c> and <c>assigneesBehindAFigure</c> (owner decision D64). Anything else is refused with a message
 /// that names the setting, because a value that loaded as something else would leave suppression in a state
 /// the owner did not choose: <c>null</c> or <c>false</c> read as the default, a missing number read as zero.
-/// The rules on the numbers themselves (zero or more, and their order) are
-/// <see cref="TelltaleSettings.From"/>'s.
+/// The rule on the numbers themselves (zero or more) is <see cref="TelltaleSettings.From"/>'s.
 /// </summary>
 internal sealed class MinimumGroupSizeConverter : JsonConverter<MinimumGroupSize>
 {
     private const string Setting = "minimumGroupSize";
+    private const string TeamName = "team";
+    private const string AssigneesBehindAFigureName = "assigneesBehindAFigure";
 
     /// <summary>A <c>null</c> is refused here, not read as the setting being left out.</summary>
     public override bool HandleNull => true;
@@ -34,10 +35,10 @@ internal sealed class MinimumGroupSizeConverter : JsonConverter<MinimumGroupSize
             reader.Read();
             switch (name)
             {
-                case "team":
+                case TeamName:
                     team = WholeNumber(ref reader, name, written: team is not null);
                     break;
-                case "assigneesBehindAFigure":
+                case AssigneesBehindAFigureName:
                     assigneesBehindAFigure = WholeNumber(ref reader, name, written: assigneesBehindAFigure is not null);
                     break;
                 default:
@@ -47,16 +48,24 @@ internal sealed class MinimumGroupSizeConverter : JsonConverter<MinimumGroupSize
 
         return new MinimumGroupSize
         {
-            Team = team ?? throw Missing("team"),
-            AssigneesBehindAFigure = assigneesBehindAFigure ?? throw Missing("assigneesBehindAFigure"),
+            Team = team ?? throw Missing(TeamName),
+            AssigneesBehindAFigure = assigneesBehindAFigure ?? throw Missing(AssigneesBehindAFigureName),
         };
     }
 
-    /// <summary>The file is never written from the configuration type: <c>discover</c> edits the file's JSON.</summary>
-    public override void Write(Utf8JsonWriter writer, MinimumGroupSize value, JsonSerializerOptions options) =>
-        throw new NotSupportedException("The configuration file is not written from TelltaleConfig.");
+    /// <summary>The setting as the file has it, for <c>discover</c> to write into a new file: the two numbers under the names <see cref="Read"/> reads.</summary>
+    public override void Write(Utf8JsonWriter writer, MinimumGroupSize value, JsonSerializerOptions options)
+    {
+        writer.WriteStartObject();
+        writer.WriteNumber(TeamName, value.Team);
+        writer.WriteNumber(AssigneesBehindAFigureName, value.AssigneesBehindAFigure);
+        writer.WriteEndObject();
+    }
 
-    /// <summary>A JSON number without a fraction or an exponent. A quoted number, a boolean and a null are not numbers.</summary>
+    /// <summary>
+    /// A JSON number written without a fraction or an exponent that fits an integer: 5, not 5.0, 1e1 or
+    /// 3000000000. A quoted number, a boolean and a null are not numbers.
+    /// </summary>
     private static int WholeNumber(ref Utf8JsonReader reader, string name, bool written)
     {
         if (written)
@@ -66,7 +75,7 @@ internal sealed class MinimumGroupSizeConverter : JsonConverter<MinimumGroupSize
 
         return reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out var number)
             ? number
-            : throw new JsonException($"{Setting}.{name} must be a whole number of zero or more.");
+            : throw new JsonException(MinimumGroupSize.NumberRefused(name));
     }
 
     private static JsonException Missing(string name) =>
