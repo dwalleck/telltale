@@ -172,6 +172,69 @@ public class OptionalSuppressionTests
         await Assert.That(off.Out.ToString()).IsEqualTo(byDefault.Out.ToString());
     }
 
+    [Test]
+    [Arguments(-1, 0, "team")]
+    [Arguments(0, -1, "assigneesBehindAFigure")]
+    [Arguments(5, -3, "assigneesBehindAFigure")]
+    public async Task A_negative_number_is_refused_and_the_message_names_the_file_and_the_setting(int team, int assigneesBehindAFigure, string refused)
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprint41WithFourAssignees(pipeline.Jira);
+        pipeline.Config["minimumGroupSize"] = MinimumGroupSize(team, assigneesBehindAFigure);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"The configuration file {pipeline.ConfigPath} is not valid: minimumGroupSize.{refused} must be a whole number of zero or more.\n");
+        await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(0);
+        await Assert.That(File.Exists(pipeline.DatabasePath)).IsFalse();
+    }
+
+    [Test]
+    [Arguments(4, 2, "every figure is shown")]
+    [Arguments(4, 3, "the bucket figures are withheld")]
+    [Arguments(5, 2, "the sprint is withheld")]
+    public async Task Each_of_the_two_numbers_is_applied_to_its_own_check(int team, int assigneesBehindAFigure, string expected)
+    {
+        // Four assignees in the sprint, two behind each point bucket, four behind each status row and the
+        // delivered count. So a team number of four passes the sprint and five does not, and a figure number
+        // of two passes a bucket and three does not: a check that read the other number gives another report.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.AddSprint41();
+        foreach (var (person, points, number) in new[] { (People.One, 3, 1), (People.Two, 3, 2), (People.Three, 5, 3), (People.Four, 5, 4) })
+        {
+            pipeline.Jira.AddIssue($"FAKE-{number}", Local(2026, 1, 5, 9)).AssignedTo(person).Estimated(points).InSprints(41)
+                .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+                .Moved(Local(2026, 1, 8, 9), Workflow.Done);
+        }
+
+        pipeline.Config["minimumGroupSize"] = MinimumGroupSize(team, assigneesBehindAFigure);
+
+        await pipeline.RunAllAsync(["run", "--sprint", "41"]);
+
+        const string CycleTimeHead =
+            "\n## Cycle time by point bucket\n\n"
+            + "| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |\n"
+            + "| --- | ---: | ---: | ---: | ---: | ---: |\n";
+        const string TimeInStatus =
+            "\n## Time in status\n"
+            + "\n| Status | Issues | Median (business days) | Total (business days) |\n| --- | ---: | ---: | ---: |\n"
+            + "| Fake New | 4 | 1.0 | 4.0 |\n"
+            + "| Fake Development | 4 | 2.0 | 8.0 |\n"
+            + "\n## Method\n";
+        var figures = expected switch
+        {
+            "every figure is shown" =>
+                "\nDelivered issues: 4\n" + CycleTimeHead + "| 3 | 2 | 2.0 | 2.0 | 2.0 | 2.0 |\n| 5 | 2 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + TimeInStatus,
+            "the bucket figures are withheld" =>
+                "\nDelivered issues: 4\n" + CycleTimeHead
+                + "| 3 | 2 | suppressed | suppressed | suppressed | suppressed |\n| 5 | 2 | suppressed | suppressed | suppressed | suppressed |\n" + TimeInStatus,
+            _ => "\nDelivered issues: suppressed\n\n## Cycle time by point bucket\n\nsuppressed\n\n## Time in status\n\nsuppressed\n\n## Method\n",
+        };
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(figures);
+    }
+
     private static JsonObject MinimumGroupSize(int team, int assigneesBehindAFigure) =>
         new() { ["team"] = team, ["assigneesBehindAFigure"] = assigneesBehindAFigure };
 

@@ -35,11 +35,8 @@ public sealed record TelltaleSettings
 
     public required IReadOnlyList<DateOnly> Holidays { get; init; }
 
-    /// <summary>The minimum group size's numbers in force: the configured ones, or the defaults when the setting is absent.</summary>
-    public required MinimumGroupSize MinimumGroupSize { get; init; }
-
     /// <summary>The settings as a rebuild records them, apart from the raw data's digest: see <see cref="DerivedFrom"/>.</summary>
-    private DerivedSource Recorded { get; init; } = new("", "", "", "", "", "");
+    private DerivedSource Recorded { get; init; } = new("", "", "", "", "", "", MinimumGroupSize.Default.Team, MinimumGroupSize.Default.AssigneesBehindAFigure);
 
     /// <summary>Everything a rebuild is decided with besides the raw data and the as-of time.</summary>
     public DerivationSettings Derivation => new(new DeliveryRules(StatusRoles, AbandonedResolutionIds), new BusinessCalendar(TimeZone, Holidays));
@@ -69,11 +66,10 @@ public sealed record TelltaleSettings
         var baselineSprintIds = CheckedIds(config.BaselineSprintIds, "baselineSprintIds", "sprint");
         var timeZone = SettingRules.FindTimeZone(config.TimeZone)
             ?? throw new SettingRefusedException($"timeZone: '{config.TimeZone}' is not a known IANA time zone ID.");
-        var minimumGroupSize = config.MinimumGroupSize ?? MinimumGroupSize.Default;
+        var minimumGroupSize = CheckedMinimumGroupSize(config.MinimumGroupSize ?? MinimumGroupSize.Default);
 
         return new TelltaleSettings
         {
-            MinimumGroupSize = minimumGroupSize,
             Jira = jira,
             StatusRoles = roles,
             AbandonedResolutionIds = abandonedResolutionIds,
@@ -86,10 +82,9 @@ public sealed record TelltaleSettings
                 string.Join(",", config.Holidays.Order().Select(day => day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))),
                 DerivedSource.BaselineSprintIdsOf(baselineSprintIds),
                 string.Join(",", config.StatusRoles.Select(status => $"{status.Key}={status.Value}")),
-                string.Join(",", abandonedResolutionIds.Order(StringComparer.Ordinal)))
-            {
-                MinimumGroupSize = minimumGroupSize,
-            },
+                string.Join(",", abandonedResolutionIds.Order(StringComparer.Ordinal)),
+                minimumGroupSize.Team,
+                minimumGroupSize.AssigneesBehindAFigure),
         };
     }
 
@@ -99,6 +94,22 @@ public sealed record TelltaleSettings
         {
             throw new SettingRefusedException($"{setting} must not be null.");
         }
+    }
+
+    /// <summary>Each number is zero or more: zero turns its check off (owner decision D65), and a number below zero means nothing.</summary>
+    private static MinimumGroupSize CheckedMinimumGroupSize(MinimumGroupSize minimumGroupSize)
+    {
+        if (minimumGroupSize.Team < 0)
+        {
+            throw new SettingRefusedException("minimumGroupSize.team must be a whole number of zero or more.");
+        }
+
+        if (minimumGroupSize.AssigneesBehindAFigure < 0)
+        {
+            throw new SettingRefusedException("minimumGroupSize.assigneesBehindAFigure must be a whole number of zero or more.");
+        }
+
+        return minimumGroupSize;
     }
 
     private static JiraConfig CheckedJira(JiraConfig jira)

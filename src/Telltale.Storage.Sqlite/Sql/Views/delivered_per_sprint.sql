@@ -3,8 +3,9 @@
 -- while the sprint is not completed. When a sprint ends is decided by derive alone (SprintWindows.cs).
 -- planned_end is Jira's planned end, for information only: no figure is counted to it.
 -- Minimum group size (GLOSSARY, ADR-0003; owner decision D49): delivered_count is null and suppressed is 1
--- when sprint_team says so (delivered_suppressed): the sprint has fewer than five distinct assignees, or
--- fewer than three are among the delivered issues. team_suppressed is the team check alone
+-- when sprint_team says so (delivered_suppressed): the sprint has fewer distinct assignees than a team, or
+-- fewer than a figure needs are among the delivered issues (minimum_group_size's two numbers: the
+-- configured ones, five and three by default). team_suppressed is the team check alone
 -- (sprint_team.team_suppressed): 1 for a sprint whose tables both show no rows.
 CREATE VIEW delivered_per_sprint AS
 SELECT w.sprint_id,

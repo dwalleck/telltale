@@ -6,15 +6,16 @@
 --
 -- Minimum group size (GLOSSARY, ADR-0003; owner decisions D44, D50, D56). Two rules, neither written here:
 -- 1. The whole baseline: while a baseline sprint has its delivered count withheld (baseline_sprint.suppressed:
---    fewer than five distinct assignees, or fewer than three among its delivered issues), this view has no
+--    fewer distinct assignees than a team, or fewer than a figure needs among its delivered issues;
+--    minimum_group_size's two numbers, the configured ones, five and three by default), this view has no
 --    rows at all. Rows, even with withheld figures, would say which buckets that sprint has issues in.
 -- 2. One row: with every baseline sprint's delivered count shown, each has its bucket rows in
 --    cycle_time_per_sprint_and_bucket, and a pooled figure is withheld (the four figures null, suppressed 1)
---    when any of them has the bucket suppressed there, that is, short of three assignees. Otherwise the pooled
+--    when any of them has the bucket suppressed there, that is, short of the assignees a figure needs. Otherwise the pooled
 --    figure and the shown ones would give the withheld one away: with three shown cycle times and one
 --    withheld, the pooled P85 is the withheld cycle time itself. A baseline sprint with no issue in the bucket
 --    does not suppress it.
--- So a row that is shown is pooled from buckets of three or more in sprints that pass both per-sprint checks.
+-- So a row that is shown is pooled from buckets with the assignees a figure needs in sprints that pass both per-sprint checks.
 -- There is no issue count: the pooled count less the sprints' shown counts would be a withheld count.
 CREATE VIEW baseline_cycle_time_per_bucket AS
 -- One row per bucket: 1 when any baseline sprint's own view has the bucket suppressed (rule 2).

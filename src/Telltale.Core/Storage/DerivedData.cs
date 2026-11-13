@@ -1,4 +1,3 @@
-using Telltale.Core.Configuration;
 using Telltale.Core.Workflow;
 
 namespace Telltale.Core.Storage;
@@ -129,14 +128,18 @@ public sealed record IssueAnomaly(string IssueId, ChangelogAnomalyKind Kind)
 /// <param name="BaselineSprintIds">The baseline sprint list the baseline views pool over, as a JSON array of the IDs in order, e.g. <c>["41","42"]</c>; <c>[]</c> when there is no baseline.</param>
 /// <param name="StatusRoles">Each status and its role in board order, e.g. <c>10001=work,10002=done</c>.</param>
 /// <param name="AbandonedResolutionIds">The abandoned resolution IDs in order, separated by commas.</param>
-public sealed record DerivedSource(string RawDigest, string TimeZone, string Holidays, string BaselineSprintIds, string StatusRoles, string AbandonedResolutionIds)
+/// <param name="MinimumTeam">The minimum group size's team number (GLOSSARY: Minimum group size): the metric views read it from the rebuild's record and never from the configuration.</param>
+/// <param name="MinimumAssigneesBehindAFigure">The minimum group size's number of assignees behind a figure, read by the views in the same way.</param>
+public sealed record DerivedSource(
+    string RawDigest,
+    string TimeZone,
+    string Holidays,
+    string BaselineSprintIds,
+    string StatusRoles,
+    string AbandonedResolutionIds,
+    long MinimumTeam,
+    long MinimumAssigneesBehindAFigure)
 {
-    /// <summary>
-    /// The minimum group size's numbers the metric views apply (GLOSSARY: Minimum group size): the views read
-    /// them from the rebuild's record and never from the configuration. The defaults unless a rebuild is given others.
-    /// </summary>
-    public MinimumGroupSize MinimumGroupSize { get; init; } = MinimumGroupSize.Default;
-
     /// <summary><see cref="BaselineSprintIds"/> for a list of sprint IDs: the form the store keeps and the views read.</summary>
     public static string BaselineSprintIdsOf(IEnumerable<string> sprintIds) =>
         System.Text.Json.JsonSerializer.Serialize(sprintIds.Order(StringComparer.Ordinal));

@@ -51,13 +51,15 @@ public class TelltaleSettingsTests
     }
 
     [Test]
-    public async Task Without_a_minimum_group_size_the_numbers_in_force_are_five_and_three_and_configured_numbers_are_kept()
+    public async Task Without_a_minimum_group_size_a_rebuild_is_recorded_under_five_and_three_and_with_one_under_its_numbers()
     {
-        var absent = TelltaleSettings.From(Config());
-        var off = TelltaleSettings.From(Config() with { MinimumGroupSize = new MinimumGroupSize { Team = 0, AssigneesBehindAFigure = 0 } });
+        var absent = TelltaleSettings.From(Config()).DerivedFrom("synthetic-digest");
+        var configured = TelltaleSettings.From(Config() with { MinimumGroupSize = new MinimumGroupSize { Team = 4, AssigneesBehindAFigure = 2 } }).DerivedFrom("synthetic-digest");
+        var off = TelltaleSettings.From(Config() with { MinimumGroupSize = new MinimumGroupSize { Team = 0, AssigneesBehindAFigure = 0 } }).DerivedFrom("synthetic-digest");
 
-        await Assert.That((absent.MinimumGroupSize.Team, absent.MinimumGroupSize.AssigneesBehindAFigure)).IsEqualTo((5, 3));
-        await Assert.That((off.MinimumGroupSize.Team, off.MinimumGroupSize.AssigneesBehindAFigure)).IsEqualTo((0, 0));
+        await Assert.That((absent.MinimumTeam, absent.MinimumAssigneesBehindAFigure)).IsEqualTo((5L, 3L));
+        await Assert.That((configured.MinimumTeam, configured.MinimumAssigneesBehindAFigure)).IsEqualTo((4L, 2L));
+        await Assert.That((off.MinimumTeam, off.MinimumAssigneesBehindAFigure)).IsEqualTo((0L, 0L));
     }
 
     [Test]

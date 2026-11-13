@@ -3,7 +3,8 @@
 -- over these rows and never read the list themselves.
 -- suppressed is the one condition under which the whole baseline is withheld (GLOSSARY: Minimum group size;
 -- owner decisions D50, D56): 1 when the sprint's delivered count is withheld (sprint_team.delivered_suppressed:
--- fewer than five distinct assignees, or fewer than three among its delivered issues), or it is not a sprint
+-- fewer distinct assignees than a team, or fewer than a figure needs among its delivered issues, by the
+-- configured numbers, five and three by default), or it is not a sprint
 -- that counts. While any row here has suppressed = 1, every baseline figure is withheld, and the baseline
 -- views have no rows at all: rows for some buckets or statuses would say what such a sprint has, which its
 -- own report withholds. The console and the report name the sprint.

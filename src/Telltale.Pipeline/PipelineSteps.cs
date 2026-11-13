@@ -330,7 +330,7 @@ public sealed class PipelineSteps
         // The views withhold by the numbers the last derive recorded (minimum_group_size). Under other numbers
         // they would show, or withhold, what the configuration no longer says. Deriving again is all it takes:
         // the numbers decide nothing about what is fetched.
-        if (derivedFrom.MinimumGroupSize != current.MinimumGroupSize)
+        if (derivedFrom.MinimumTeam != current.MinimumTeam || derivedFrom.MinimumAssigneesBehindAFigure != current.MinimumAssigneesBehindAFigure)
         {
             throw new UserFacingException("minimumGroupSize in the configuration file changed since the derived data was built. Run derive first.");
         }
