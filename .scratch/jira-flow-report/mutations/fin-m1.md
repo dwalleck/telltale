@@ -21,3 +21,4 @@ Claim (B14): the view-query connection is read-only. `A_query_over_the_views_ope
 - Verified 2026-11-12 at 1830824: red, 1 failed of 25 (Pipeline, filter /*/*/StoreTests/*); restored.
 - Verified 2026-11-13 at d534f7f: red, 1 failed of 25 (Pipeline, filter /*/*/StoreTests/*); restored.
 - Verified 2026-11-13 at b49bfeb: red, 1 failed of 25 (Pipeline, filter /*/*/StoreTests/*); restored.
+- Verified 2026-11-13 at 788e289: red, 1 failed of 25 (Pipeline, filter /*/*/StoreTests/*); restored.
