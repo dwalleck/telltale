@@ -1,8 +1,8 @@
--- Per sprint and status: how many issues spent time in the status during the sprint, and the median
--- business days they spent (duration_figures' median). A status no issue spent business time in has no row. Order by board_position for board order.
+-- Per sprint and status: how many issues spent time in the status during the sprint, their median
+-- business days (duration_figures' median), and their total business days. A status no issue spent business time in has no row. Order by board_position for board order.
 -- Statuses with the done role are left out: an issue in one is not waiting on the team. Their time
 -- stays in sprint_status_time and status_interval.
--- Minimum group size (GLOSSARY, ADR-0003): the median is null and suppressed is 1 when the sprint has fewer
+-- Minimum group size (GLOSSARY, ADR-0003): the median and total are null and suppressed is 1 when the sprint has fewer
 -- than five distinct assignees (sprint_team) or fewer than three are behind the row's issues. A row short
 -- of three keeps its issue_count (owner decision D5). A sprint short of five has no status rows at all: it
 -- has exactly one row, with no status, no count (D41) and suppressed = 1, whether or not an issue spent
@@ -17,11 +17,12 @@ WITH status_time AS (
     SELECT t.sprint_id,
            t.status_id,
            COUNT(*) AS issue_count,
+           SUM(t.business_days) AS total_business_days,
            COUNT(DISTINCT i.assignee_hash) AS assignees
     FROM sprint_status_time t
     LEFT JOIN issue i ON i.issue_id = t.issue_id
     -- An issue counts toward a status only if it spent business time there (owner decision D21): one that
-    -- was in the status only over a weekend or a holiday is in neither the count nor the median.
+    -- was in the status only over a weekend or a holiday is in neither the count nor the median and adds no total.
     WHERE t.business_days > 0
     GROUP BY t.sprint_id, t.status_id
 )
@@ -31,6 +32,7 @@ SELECT st.sprint_id,
        b.position                     AS board_position,
        st.issue_count,
        CASE WHEN st.assignees >= (SELECT assignees_behind_a_figure FROM minimum_group_size) THEN f.median_days END AS median_business_days,
+       CASE WHEN st.assignees >= (SELECT assignees_behind_a_figure FROM minimum_group_size) THEN st.total_business_days END AS total_business_days,
        CASE WHEN st.assignees >= (SELECT assignees_behind_a_figure FROM minimum_group_size) THEN 0 ELSE 1 END      AS suppressed
 FROM status_time st
 JOIN sprint_team t ON t.sprint_id = st.sprint_id
@@ -40,6 +42,6 @@ LEFT JOIN status s ON s.status_id = st.status_id
 WHERE b.is_done = 0
   AND t.team_suppressed = 0
 UNION ALL
-SELECT t.sprint_id, NULL, NULL, NULL, NULL, NULL, 1
+SELECT t.sprint_id, NULL, NULL, NULL, NULL, NULL, NULL, 1
 FROM sprint_team t
 WHERE t.team_suppressed = 1;

@@ -104,9 +104,9 @@ public class SuppressionTests
         await Assert.That(cycleTime.Select(row => (row.PointBucket, row.IssueCount, row.Suppressed, row.MedianBusinessDays, row.P85BusinessDays, row.MedianCalendarDays, row.P85CalendarDays)))
             .IsEquivalentTo(new (double?, long?, long, double?, double?, double?, double?)[] { (null, null, 1, null, null, null, null) });
 
-        var timeInStatus = await pipeline.QueryAsync<(string? StatusId, string? StatusName, long? BoardPosition, long? IssueCount, long Suppressed, double? MedianBusinessDays)>(
-            "SELECT status_id, status_name, board_position, issue_count, suppressed, median_business_days FROM time_in_status_per_sprint WHERE sprint_id = '41';");
-        await Assert.That(timeInStatus).IsEquivalentTo(new (string?, string?, long?, long?, long, double?)[] { (null, null, null, null, 1, null) });
+        var timeInStatus = await pipeline.QueryAsync<(string? StatusId, string? StatusName, long? BoardPosition, long? IssueCount, long Suppressed, double? MedianBusinessDays, double? TotalBusinessDays)>(
+            "SELECT status_id, status_name, board_position, issue_count, suppressed, median_business_days, total_business_days FROM time_in_status_per_sprint WHERE sprint_id = '41';");
+        await Assert.That(timeInStatus).IsEquivalentTo(new (string?, string?, long?, long?, long, double?, double?)[] { (null, null, null, null, 1, null, null) });
 
         // Owner decision D41: nothing countable is left either. The counts of a small sprint are its people's
         // throughput, and summed they would give back the delivered count that is withheld.
@@ -190,9 +190,9 @@ public class SuppressionTests
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).Contains(
             "\nDelivered issues: suppressed\n" + SuppressedCycleTime
-            + "\n| Status | Issues | Median (business days) |\n| --- | ---: | ---: |\n"
-            + "| Fake New | 5 | 1.0 |\n"
-            + "| Fake Development | 5 | 9.0 |\n"
+            + "\n| Status | Issues | Median (business days) | Total (business days) |\n| --- | ---: | ---: | ---: |\n"
+            + "| Fake New | 5 | 1.0 | 5.0 |\n"
+            + "| Fake Development | 5 | 9.0 | 31.1 |\n"
             + MethodHeading);
         await Assert.That(report).Contains(
             "the delivered count reads \"suppressed\" when fewer than three distinct assignees are among the delivered issues, and the cycle time table then reads \"suppressed\" as well, with no rows, because the number of its rows and their counts (the delivered issues that have a cycle time) would each give a lower bound of the withheld count. "
@@ -288,17 +288,17 @@ public class SuppressionTests
 
         await Assert.That(await pipeline.ReadReportAsync(41)).Contains(
             TimeInStatusHeading
-            + "\n| Status | Issues | Median (business days) |\n| --- | ---: | ---: |\n"
-            + "| Fake New | 7 | 1.0 |\n"
-            + "| Fake Development | 7 | 2.0 |\n"
-            + "| Fake Review | 4 | suppressed |\n"
-            + "| Fake QE | 3 | 1.0 |\n"
+            + "\n| Status | Issues | Median (business days) | Total (business days) |\n| --- | ---: | ---: | ---: |\n"
+            + "| Fake New | 7 | 1.0 | 7.0 |\n"
+            + "| Fake Development | 7 | 2.0 | 14.0 |\n"
+            + "| Fake Review | 4 | suppressed | suppressed |\n"
+            + "| Fake QE | 3 | 1.0 | 3.0 |\n"
             + MethodHeading);
 
-        var rows = await pipeline.QueryAsync<(string StatusName, long IssueCount, long Suppressed, double? MedianBusinessDays)>(
-            "SELECT status_name, issue_count, suppressed, median_business_days FROM time_in_status_per_sprint WHERE sprint_id = '41' ORDER BY board_position;");
+        var rows = await pipeline.QueryAsync<(string StatusName, long IssueCount, long Suppressed, double? MedianBusinessDays, double? TotalBusinessDays)>(
+            "SELECT status_name, issue_count, suppressed, median_business_days, total_business_days FROM time_in_status_per_sprint WHERE sprint_id = '41' ORDER BY board_position;");
         await Assert.That(rows).IsEquivalentTo(
-            new (string, long, long, double?)[] { ("Fake New", 7, 0, 1), ("Fake Development", 7, 0, 2), ("Fake Review", 4, 1, null), ("Fake QE", 3, 0, 1) },
+            new (string, long, long, double?, double?)[] { ("Fake New", 7, 0, 1, 7), ("Fake Development", 7, 0, 2, 14), ("Fake Review", 4, 1, null, null), ("Fake QE", 3, 0, 1, 3) },
             CollectionOrdering.Matching);
     }
 
@@ -367,7 +367,7 @@ public class SuppressionTests
         var rows = await pipeline.QueryAsync<(long InBuckets, long InStatuses)>(
             """
             SELECT (SELECT COUNT(*) FROM cycle_time_per_sprint_and_bucket WHERE sprint_id = '41' AND suppressed = 1 AND point_bucket IS NULL AND issue_count IS NULL),
-                   (SELECT COUNT(*) FROM time_in_status_per_sprint WHERE sprint_id = '41' AND suppressed = 1 AND status_id IS NULL AND issue_count IS NULL);
+                   (SELECT COUNT(*) FROM time_in_status_per_sprint WHERE sprint_id = '41' AND suppressed = 1 AND status_id IS NULL AND issue_count IS NULL AND total_business_days IS NULL);
             """);
         await Assert.That(rows).IsEquivalentTo(new[] { (1L, 1L) });
     }
@@ -428,7 +428,7 @@ public class SuppressionTests
             DROP VIEW time_in_status_per_sprint;
             CREATE VIEW time_in_status_per_sprint AS
             SELECT '41' AS sprint_id, {{status}} AS status_id, {{statusName}} AS status_name, {{position}} AS board_position, {{count}} AS issue_count,
-                   2.0 AS median_business_days, 1 AS suppressed;
+                   2.0 AS median_business_days, 10.0 AS total_business_days, 1 AS suppressed;
             DROP VIEW delivered_per_sprint;
             CREATE VIEW delivered_per_sprint AS
             SELECT '41' AS sprint_id, 'Fake Sprint 41' AS sprint_name, 'closed' AS state, '2026-01-05T15:00:00.000Z' AS started,
@@ -445,8 +445,8 @@ public class SuppressionTests
                 + CycleTimeHeader
                 + "| 3 | 5 | suppressed | suppressed | suppressed | suppressed |\n"
                 + TimeInStatusHeading
-                + "\n| Status | Issues | Median (business days) |\n| --- | ---: | ---: |\n"
-                + "| Fake Development | 5 | suppressed |\n";
+                + "\n| Status | Issues | Median (business days) | Total (business days) |\n| --- | ---: | ---: | ---: |\n"
+                + "| Fake Development | 5 | suppressed | suppressed |\n";
         await Assert.That(await pipeline.ReadReportAsync(41)).StartsWith("# Fake Sprint 41 (2026-01-05 to 2026-01-19)\n\n" + expected + MethodHeading);
     }
 

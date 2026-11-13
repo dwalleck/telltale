@@ -16,8 +16,8 @@ One markdown file per sprint, with:
 
 - **Delivered issues:** how many issues the sprint delivered.
 - **Cycle time by point bucket:** median and 85th percentile, in business days, for issues grouped by story points.
-- **Time in status:** how many issues spent time in each workflow status, and the median time there.
-- **Baseline columns:** the same figures pooled over a fixed list of earlier sprints, for comparison.
+- **Time in status:** how many issues spent time in each workflow status, their median time and total business days. Totals sum issue time within the sprint and membership windows, not effort.
+- **Baseline columns:** cycle-time medians and P85s and time-in-status medians pooled over a fixed list of earlier sprints, for comparison.
 - **Method note and data quality footer:** how the figures were computed and what was left out.
 
 Time is counted in business days in the team's time zone, skipping weekends and the configured holidays. The definitions are in [`GLOSSARY.md`](GLOSSARY.md).

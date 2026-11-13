@@ -85,7 +85,7 @@ public static class SprintReport
     private static Task<IReadOnlyList<TimeInStatusRow>> ReadTimeInStatusAsync(ITelltaleStore store, string sprintId, CancellationToken cancellationToken) =>
         store.QueryViewsAsync<TimeInStatusRow>(
             """
-            SELECT v.status_name, v.issue_count, v.median_business_days, v.suppressed,
+            SELECT v.status_name, v.issue_count, v.median_business_days, v.total_business_days, v.suppressed,
                    b.median_business_days AS baseline_median_business_days, b.suppressed AS baseline_suppressed
             FROM time_in_status_per_sprint v
             LEFT JOIN baseline_time_in_status b ON b.status_id = v.status_id
@@ -171,11 +171,11 @@ public static class SprintReport
         }
 
         string[] baselineHead = baseline == BaselineColumns.None ? [] : ["Baseline median (business days)"];
-        AppendTableHead(report, ["Status", "Issues", "Median (business days)", .. baselineHead]);
+        AppendTableHead(report, ["Status", "Issues", "Median (business days)", "Total (business days)", .. baselineHead]);
         foreach (var row in rows)
         {
             string[] baselineCells = baseline == BaselineColumns.None ? [] : [BaselineDays(baseline, row.BaselineSuppressed, row.BaselineMedianBusinessDays)];
-            AppendTableRow(report, [row.StatusName, Count(row.IssueCount), Days(row.Suppressed, row.MedianBusinessDays), .. baselineCells]);
+            AppendTableRow(report, [row.StatusName, Count(row.IssueCount), Days(row.Suppressed, row.MedianBusinessDays), Days(row.Suppressed, row.TotalBusinessDays), .. baselineCells]);
         }
     }
 
@@ -196,8 +196,8 @@ public static class SprintReport
         report.Append("\n## Method\n\n")
             .Append("- Durations are in business days: days that are neither a weekend nor a company holiday, each counted in full (24 hours) in the team's time zone (").Append(quality.TimeZone).Append("). Calendar days are shown alongside: elapsed time divided by 24 hours.\n")
             .Append("- Cycle time runs from an issue's first entry into a work status to its last entry into a done status, for delivered issues only. It belongs to the sprint in which the issue was delivered.\n")
-            .Append("- Figures are medians and P85s. The median is the middle value, or the mean of the two middle values. The P85 is the smallest value with at least 85% of the values at or below it.\n")
-            .Append("- Time in status covers the statuses before done. An issue counts toward a status only if it spent more than zero business days there.\n")
+            .Append("- The median is the middle value, or the mean of the two middle values. The P85 is the smallest value with at least 85% of the values at or below it.\n")
+            .Append("- Time in status includes delivered and unfinished issues in statuses before done, clipped to the sprint window and each issue's membership intervals. An issue counts toward a status only if it spent more than zero business days there. Total business days sum that time across all contributing issues, including repeated visits; this is accumulated issue time, not effort or the sprint's elapsed duration. Totals and medians use the same privacy rules.\n")
             .Append("- A figure is shown only where it cannot show one person's work. The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in it. When the team is smaller than five, the delivered count and both tables read \"suppressed\", with no rows. With a team of five or more, a row with fewer than three distinct assignees behind it keeps its issue count and reads \"suppressed\" for its figures, and the delivered count reads \"suppressed\" when fewer than three distinct assignees are among the delivered issues, and the cycle time table then reads \"suppressed\" as well, with no rows, because the number of its rows and their counts (the delivered issues that have a cycle time) would each give a lower bound of the withheld count. The time in status table of such a sprint keeps its counts: they count every issue that spent time in a status, delivered or not, so the count of a late status can be close to the withheld delivered count. The footer's two counts read \"suppressed\" when the issues in the whole store have fewer than five distinct assignees, or fewer than three are among the issues counted.\n")
             .Append("- An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. An unassigned issue counts toward nobody.\n");
 
@@ -306,6 +306,7 @@ public static class SprintReport
         /// <summary>Null in the one row of a sprint short of five assignees: it has no status rows, and that one row is how the report knows to write the "suppressed" line (owner decisions D41, D45).</summary>
         public long? IssueCount { get; init; }
         public double? MedianBusinessDays { get; init; }
+        public double? TotalBusinessDays { get; init; }
         public long Suppressed { get; init; } = 1;
         public double? BaselineMedianBusinessDays { get; init; }
         /// <summary>Null when the baseline has no row for the status.</summary>

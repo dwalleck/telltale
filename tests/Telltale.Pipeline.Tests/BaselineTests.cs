@@ -22,7 +22,7 @@ public class BaselineTests
 
     private const string TimeInStatusHeader =
         "\n## Time in status\n\n"
-        + "| Status | Issues | Median (business days) | Baseline median (business days) |\n| --- | ---: | ---: | ---: |\n";
+        + "| Status | Issues | Median (business days) | Total (business days) | Baseline median (business days) |\n| --- | ---: | ---: | ---: | ---: |\n";
 
     [Test]
     public async Task With_baseline_sprints_configured_both_tables_show_figures_pooled_over_all_issues_of_those_sprints()
@@ -57,8 +57,8 @@ public class BaselineTests
             + "| 3 | 3 | 7.0 | 8.0 | 9.0 | 10.0 | 4.5 | 7.0 |\n"
             + "| 5 | 3 | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 |\n"
             + TimeInStatusHeader
-            + "| Fake New | 6 | 1.0 | 1.0 |\n"
-            + "| Fake Development | 6 | 3.5 | 3.0 |\n" + AfterTheTables);
+            + "| Fake New | 6 | 1.0 | 6.0 | 1.0 |\n"
+            + "| Fake Development | 6 | 3.5 | 24.0 | 3.0 |\n" + AfterTheTables);
     }
 
     [Test]
@@ -92,9 +92,9 @@ public class BaselineTests
             + "| --- | ---: | ---: | ---: | ---: | ---: |\n"
             + "| 3 | 5 | 3.0 | 5.0 | 3.0 | 7.0 |\n"
             + "\n## Time in status\n\n"
-            + "| Status | Issues | Median (business days) |\n| --- | ---: | ---: |\n"
-            + "| Fake New | 5 | 1.0 |\n"
-            + "| Fake Development | 5 | 3.0 |\n" + AfterTheTables);
+            + "| Status | Issues | Median (business days) | Total (business days) |\n| --- | ---: | ---: | ---: |\n"
+            + "| Fake New | 5 | 1.0 | 5.0 |\n"
+            + "| Fake Development | 5 | 3.0 | 15.0 |\n" + AfterTheTables);
 
         await Assert.That(await pipeline.QueryAsync<long>("SELECT suppressed FROM baseline_cycle_time_per_bucket;")).IsEmpty();
         await Assert.That(await pipeline.QueryAsync<long>("SELECT suppressed FROM baseline_time_in_status;")).IsEmpty();
@@ -151,8 +151,8 @@ public class BaselineTests
             CycleTimeHeader
             + "| 3 | 5 | 3.0 | 5.0 | 3.0 | 7.0 | 3.0 | 5.0 |\n"
             + TimeInStatusHeader
-            + "| Fake New | 5 | 1.0 | 1.0 |\n"
-            + "| Fake Development | 5 | 3.0 | 3.0 |\n" + AfterTheTables);
+            + "| Fake New | 5 | 1.0 | 5.0 | 1.0 |\n"
+            + "| Fake Development | 5 | 3.0 | 15.0 | 3.0 |\n" + AfterTheTables);
     }
 
     [Test]
@@ -250,9 +250,9 @@ public class BaselineTests
             + "| 5 | 3 | 2.0 | 2.0 | 2.0 | 2.0 | suppressed | suppressed |\n"
             + "| 8 | 3 | 3.0 | 3.0 | 3.0 | 3.0 | none | none |\n"
             + TimeInStatusHeader
-            + "| Fake New | 9 | 1.0 | 1.0 |\n"
-            + "| Fake Development | 9 | 2.0 | 1.5 |\n"
-            + "| Fake Review | 3 | 1.0 | none |\n" + AfterTheTables);
+            + "| Fake New | 9 | 1.0 | 9.0 | 1.0 |\n"
+            + "| Fake Development | 9 | 2.0 | 15.0 | 1.5 |\n"
+            + "| Fake Review | 3 | 1.0 | 3.0 | none |\n" + AfterTheTables);
 
         var cycleTime = await pipeline.QueryAsync<BaselineCycleTimeRow>("SELECT * FROM baseline_cycle_time_per_bucket ORDER BY point_bucket;");
         await Assert.That(cycleTime.Select(row => (row.PointBucket, row.Suppressed, row.MedianBusinessDays, row.P85BusinessDays, row.MedianCalendarDays, row.P85CalendarDays)))
@@ -289,9 +289,9 @@ public class BaselineTests
             + "| 3 | 3 | 3.0 | 4.0 | 3.0 | 6.0 | suppressed | suppressed |\n"
             + "| 5 | 3 | 2.0 | 2.0 | 2.0 | 2.0 | 3.0 | 3.0 |\n"
             + TimeInStatusHeader
-            + "| Fake New | 6 | 1.0 | 1.0 |\n"
-            + "| Fake Development | 6 | 1.5 | 2.0 |\n"
-            + "| Fake Review | 3 | 2.0 | suppressed |\n" + AfterTheTables);
+            + "| Fake New | 6 | 1.0 | 6.0 | 1.0 |\n"
+            + "| Fake Development | 6 | 1.5 | 9.0 | 2.0 |\n"
+            + "| Fake Review | 3 | 2.0 | 6.0 | suppressed |\n" + AfterTheTables);
 
         var cycleTime = await pipeline.QueryAsync<BaselineCycleTimeRow>("SELECT * FROM baseline_cycle_time_per_bucket ORDER BY point_bucket;");
         await Assert.That(cycleTime.Select(row => (row.PointBucket, row.Suppressed, row.MedianBusinessDays, row.P85BusinessDays, row.MedianCalendarDays, row.P85CalendarDays)))
@@ -447,9 +447,9 @@ public class BaselineTests
             + "| 5 | 3 | 2.0 | 2.0 | 2.0 | 2.0 | suppressed | suppressed |\n");
         await Assert.That(report).Contains(
             TimeInStatusHeader
-            + "| Fake New | 6 | 1.0 | suppressed |\n"
-            + "| Fake Development | 6 | 1.5 | suppressed |\n"
-            + "| Fake Review | 3 | 2.0 | suppressed |\n");
+            + "| Fake New | 6 | 1.0 | 6.0 | suppressed |\n"
+            + "| Fake Development | 6 | 1.5 | 9.0 | suppressed |\n"
+            + "| Fake Review | 3 | 2.0 | 6.0 | suppressed |\n");
         await Assert.That(report).Contains(
             "- The baseline columns pool every issue of the baseline sprints, a list fixed in the configuration (sprints 41, 42), each a completed sprint. "
             + "A baseline figure reads \"suppressed\" when any baseline sprint has that row suppressed in its own report, so that a pooled figure cannot give back a withheld one. "
@@ -554,9 +554,9 @@ public class BaselineTests
             + "| 5 | 3 | 2.0 | 2.0 | 2.0 | 2.0 | suppressed | suppressed |\n");
         await Assert.That(other).Contains(
             TimeInStatusHeader
-            + "| Fake New | 6 | 1.0 | suppressed |\n"
-            + "| Fake Development | 6 | 1.5 | suppressed |\n"
-            + "| Fake Review | 3 | 2.0 | suppressed |\n");
+            + "| Fake New | 6 | 1.0 | 6.0 | suppressed |\n"
+            + "| Fake Development | 6 | 1.5 | 9.0 | suppressed |\n"
+            + "| Fake Review | 3 | 2.0 | 6.0 | suppressed |\n");
         await Assert.That(other).Contains("- Baseline sprint 41 has its delivered count withheld, so every baseline figure in this report reads \"suppressed\".\n");
 
         // Its own report: no cycle time rows (D54), and its time in status rows with a withheld baseline.
@@ -650,9 +650,9 @@ public class BaselineTests
             + "| 3 | 3 | 3.0 | 4.0 | 3.0 | 6.0 | 3.0 | 4.0 |\n"
             + "| 5 | 3 | 2.0 | 2.0 | 2.0 | 2.0 | 2.0 | 2.0 |\n"
             + TimeInStatusHeader
-            + "| Fake New | 6 | 1.0 | 1.0 |\n"
-            + "| Fake Development | 6 | 1.5 | 1.5 |\n"
-            + "| Fake Review | 3 | 2.0 | 2.0 |\n" + AfterTheTables);
+            + "| Fake New | 6 | 1.0 | 6.0 | 1.0 |\n"
+            + "| Fake Development | 6 | 1.5 | 9.0 | 1.5 |\n"
+            + "| Fake Review | 3 | 2.0 | 6.0 | 2.0 |\n" + AfterTheTables);
 
         // Adding sprint 41 changes a baseline figure only where sprint 41's own row is shown.
         await Assert.That(underBothSprints).Contains(
@@ -660,9 +660,9 @@ public class BaselineTests
             + "| 3 | 3 | 3.0 | 4.0 | 3.0 | 6.0 | suppressed | suppressed |\n"
             + "| 5 | 3 | 2.0 | 2.0 | 2.0 | 2.0 | 3.0 | 3.0 |\n"
             + TimeInStatusHeader
-            + "| Fake New | 6 | 1.0 | 1.0 |\n"
-            + "| Fake Development | 6 | 1.5 | 2.0 |\n"
-            + "| Fake Review | 3 | 2.0 | suppressed |\n" + AfterTheTables);
+            + "| Fake New | 6 | 1.0 | 6.0 | 1.0 |\n"
+            + "| Fake Development | 6 | 1.5 | 9.0 | 2.0 |\n"
+            + "| Fake Review | 3 | 2.0 | 6.0 | suppressed |\n" + AfterTheTables);
     }
 
     [Test]

@@ -42,6 +42,7 @@ Some numbers are missing because the decision was about the build run itself and
 | D37 | `derive` and `run` log changelog anomalies; `sync` alone logs nothing. | ticket 07 |
 | D39 | Abandoned issues still count in time in status. | ticket 06 |
 | D51 | A closed sprint with neither a completion time nor a planned end has no window. The run names it and carries on. Such a sprint cannot be reported or used as a baseline sprint. | this list |
+| D57 | Add total business days to each time-in-status row, summing the existing clipped issue durations before rounding. This complements the median with accumulated issue time, not effort, and uses the same privacy suppression. Baseline status columns remain medians. | Owner request, 2026-11-12 |
 
 ## Suppression (minimum group size)
 

@@ -390,7 +390,7 @@ public class RealJiraCollectionTests
 
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).Contains("\nDelivered issues: 5\n");
-        await Assert.That(report).Contains("\n| Fake Development | 5 | 2.0 |\n");
+        await Assert.That(report).Contains("\n| Fake Development | 5 | 2.0 | 10.0 |\n");
     }
 
     [Test]

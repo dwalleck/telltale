@@ -24,6 +24,7 @@ _Avoid_: Sprint assignment
 
 **Time in status**:
 How long an issue spent in a status during a sprint: its status intervals clipped to the sprint window and its membership intervals. Reported for statuses before delivery only (not Done or Shipped), and an issue counts toward a status only if it spent more than zero business days there.
+The report shows the issue count, median business days and total business days for each status. The total sums each contributing issue's clipped business time, including repeated visits, before rounding. It includes delivered and unfinished issues; it measures accumulated issue time, not person-days of effort. The total is withheld under the same privacy rules as the median. Baseline status comparisons remain pooled medians.
 
 **Business day**:
 A day that is neither a weekend nor a company holiday, counted in full (24 hours) in the team's time zone.

@@ -157,7 +157,7 @@ public class BackfillRebuildTests
         pipeline.Jira.DeleteStatus(Workflow.Review);
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\n| Fake Review | 5 | 2.0 |\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\n| Fake Review | 5 | 2.0 | 10.0 |\n");
     }
 
     [Test]

@@ -10,11 +10,11 @@ namespace Telltale.Pipeline.Tests;
 
 /// <summary>
 /// The report's time in status table: per status, how many issues spent time in it during the sprint
-/// and the median business days they spent, counting only time inside the sprint window and while
-/// the issue was a member of the sprint (GLOSSARY: Time in status).
+/// and the median and total business days they spent, counting only time inside the sprint window and
+/// while the issue was a member of the sprint (GLOSSARY: Time in status).
 /// A figure is shown only for a team of five with three assignees behind it (SuppressionTests), so most tests
-/// here have the fake serve each issue once per team member: a count is five times the issues the test adds,
-/// and a median is what it is for those issues alone.
+/// here have the fake serve each issue once per team member: a count and total are five times those
+/// of the issues the test adds, and a median is what it is for those issues alone.
 /// </summary>
 public class TimeInStatusTableTests
 {
@@ -41,12 +41,16 @@ public class TimeInStatusTableTests
 
             ## Time in status
 
-            | Status | Issues | Median (business days) |
-            | --- | ---: | ---: |
-            | Fake New | 5 | 1.0 |
-            | Fake Development | 5 | 2.0 |
+            | Status | Issues | Median (business days) | Total (business days) |
+            | --- | ---: | ---: | ---: |
+            | Fake New | 5 | 1.0 | 5.0 |
+            | Fake Development | 5 | 2.0 | 10.0 |
 
             """.ReplaceLineEndings("\n"));
+        var totals = await pipeline.QueryAsync<(string StatusId, double TotalBusinessDays)>(
+            "SELECT status_id, total_business_days FROM time_in_status_per_sprint WHERE sprint_id = '41' ORDER BY board_position;");
+        await Assert.That(totals).IsEquivalentTo(
+            new[] { (Workflow.New.Id, 5.0), (Workflow.Development.Id, 10.0) }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -65,7 +69,9 @@ public class TimeInStatusTableTests
 
         // Wednesday 09:00 to Friday 09:00. From the sprint's start it would be 4.0.
         await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(
-            new[] { "| Fake Development | 5 | 2.0 |" }, CollectionOrdering.Matching);
+            new[] { "| Fake Development | 5 | 2.0 | 10.0 |" }, CollectionOrdering.Matching);
+        await Assert.That(await pipeline.QueryAsync<double>(
+            "SELECT total_business_days FROM time_in_status_per_sprint WHERE sprint_id = '41';")).IsEquivalentTo(new[] { 10.0 });
     }
 
     [Test]
@@ -84,7 +90,9 @@ public class TimeInStatusTableTests
 
         // Monday 09:00 (the sprint's start) to Thursday 09:00. Up to the move to Done it would be 7.0.
         await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(
-            new[] { "| Fake Development | 5 | 3.0 |" }, CollectionOrdering.Matching);
+            new[] { "| Fake Development | 5 | 3.0 | 15.0 |" }, CollectionOrdering.Matching);
+        await Assert.That(await pipeline.QueryAsync<double>(
+            "SELECT total_business_days FROM time_in_status_per_sprint WHERE sprint_id = '41';")).IsEquivalentTo(new[] { 15.0 });
     }
 
     [Test]
@@ -109,11 +117,22 @@ public class TimeInStatusTableTests
         // Sprint 41: New from Monday 5 January 09:00 to Thursday 15 January 09:00 (8 business days), then Development
         // to the sprint's completion (Thursday 09:00 to Monday 09:00, over a weekend).
         await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(
-            new[] { "| Fake New | 5 | 8.0 |", "| Fake Development | 5 | 2.0 |" }, CollectionOrdering.Matching);
+            new[] { "| Fake New | 5 | 8.0 | 40.0 |", "| Fake Development | 5 | 2.0 | 10.0 |" }, CollectionOrdering.Matching);
 
         // Sprint 42: Development from the sprint's start (Monday 12:00) to Wednesday 12:00, then Review to Friday 00:00.
         await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(42))).IsEquivalentTo(
-            new[] { "| Fake Development | 5 | 2.0 |", "| Fake Review | 5 | 1.5 |" }, CollectionOrdering.Matching);
+            new[] { "| Fake Development | 5 | 2.0 | 10.0 |", "| Fake Review | 5 | 1.5 | 7.5 |" }, CollectionOrdering.Matching);
+        var totals = await pipeline.QueryAsync<(string SprintId, string StatusId, double TotalBusinessDays)>(
+            "SELECT sprint_id, status_id, total_business_days FROM time_in_status_per_sprint WHERE sprint_id IN ('41', '42') ORDER BY sprint_id, board_position;");
+        await Assert.That(totals).IsEquivalentTo(
+            new[]
+            {
+                ("41", Workflow.New.Id, 40.0),
+                ("41", Workflow.Development.Id, 10.0),
+                ("42", Workflow.Development.Id, 10.0),
+                ("42", Workflow.Review.Id, 7.5),
+            },
+            CollectionOrdering.Matching);
     }
 
     [Test]
@@ -159,16 +178,17 @@ public class TimeInStatusTableTests
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        // Committed: 1, 2, 3 and 4, median 2.5. Blocked: 1, 1 and 2, median 1. Development: 2, 1, 4, 1 and 3, median 2.
+        // Committed: 1, 2, 3 and 4, median 2.5 and total 10. Blocked: 1, 1 and 2, median 1 and total 4.
+        // Development: 2, 1, 4, 1 and 3, median 2 and total 11; the first issue's two visits count as one issue.
         // Nobody was in New, Approved, Review or QE.
         await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(
-            new[] { "| Fake Committed | 4 | 2.5 |", "| Fake Blocked | 3 | 1.0 |", "| Fake Development | 5 | 2.0 |" }, CollectionOrdering.Matching);
+            new[] { "| Fake Committed | 4 | 2.5 | 10.0 |", "| Fake Blocked | 3 | 1.0 | 4.0 |", "| Fake Development | 5 | 2.0 | 11.0 |" }, CollectionOrdering.Matching);
 
         // The same figures from the metric view with ad hoc SQL.
-        var rows = await pipeline.QueryAsync<(string StatusId, long IssueCount, double MedianBusinessDays)>(
-            "SELECT status_id, issue_count, ROUND(median_business_days, 6) FROM time_in_status_per_sprint WHERE sprint_id = '41' ORDER BY board_position;");
+        var rows = await pipeline.QueryAsync<(string StatusId, long IssueCount, double MedianBusinessDays, double TotalBusinessDays)>(
+            "SELECT status_id, issue_count, ROUND(median_business_days, 6), ROUND(total_business_days, 6) FROM time_in_status_per_sprint WHERE sprint_id = '41' ORDER BY board_position;");
         await Assert.That(rows).IsEquivalentTo(
-            new[] { (Workflow.Committed.Id, 4L, 2.5), (Workflow.Blocked.Id, 3L, 1.0), (Workflow.Development.Id, 5L, 2.0) }, CollectionOrdering.Matching);
+            new[] { (Workflow.Committed.Id, 4L, 2.5, 10.0), (Workflow.Blocked.Id, 3L, 1.0, 4.0), (Workflow.Development.Id, 5L, 2.0, 11.0) }, CollectionOrdering.Matching);
 
         FakeIssue InCommitted(FakePerson person) =>
             pipeline.Jira.AddIssue($"FAKE-{person.AccountId[^1]}", Local(2026, 1, 2, 9), createdIn: Workflow.Committed).InSprints(41).AssignedTo(person);
@@ -201,13 +221,14 @@ public class TimeInStatusTableTests
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        // Development: 4.625, 1, 1, 1 and 2, median 1. Review: the three issues that were there on a business day.
+        // Development: 4.625, 1, 1, 1 and 2, median 1 and total 9.625. Review: only the three issues that
+        // were there on a business day, so its total is 3 and the weekend-only issue does not add to its count.
         await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(
-            new[] { "| Fake Development | 5 | 1.0 |", "| Fake Review | 3 | 1.0 |" }, CollectionOrdering.Matching);
-        var rows = await pipeline.QueryAsync<(string StatusId, long IssueCount, double MedianBusinessDays)>(
-            "SELECT status_id, issue_count, ROUND(median_business_days, 6) FROM time_in_status_per_sprint WHERE sprint_id = '41' ORDER BY board_position;");
+            new[] { "| Fake Development | 5 | 1.0 | 9.6 |", "| Fake Review | 3 | 1.0 | 3.0 |" }, CollectionOrdering.Matching);
+        var rows = await pipeline.QueryAsync<(string StatusId, long IssueCount, double MedianBusinessDays, double TotalBusinessDays)>(
+            "SELECT status_id, issue_count, ROUND(median_business_days, 6), ROUND(total_business_days, 6) FROM time_in_status_per_sprint WHERE sprint_id = '41' ORDER BY board_position;");
         await Assert.That(rows).IsEquivalentTo(
-            new[] { (Workflow.Development.Id, 5L, 1.0), (Workflow.Review.Id, 3L, 1.0) }, CollectionOrdering.Matching);
+            new[] { (Workflow.Development.Id, 5L, 1.0, 9.625), (Workflow.Review.Id, 3L, 1.0, 3.0) }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -228,7 +249,7 @@ public class TimeInStatusTableTests
             "SELECT DISTINCT measure, typeof(bucket), typeof(status_id) FROM duration_figures WHERE scope = 'sprint' ORDER BY measure;");
         await Assert.That(keys).IsEquivalentTo(
             new[] { ("cycle business", "real", "null"), ("cycle calendar", "real", "null"), ("status", "null", "text") }, CollectionOrdering.Matching);
-        await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(new[] { "| Fake Development | 5 | 2.0 |" }, CollectionOrdering.Matching);
+        await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(new[] { "| Fake Development | 5 | 2.0 | 10.0 |" }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -249,9 +270,11 @@ public class TimeInStatusTableTests
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(new[] { "| Fake Development | 5 | 1.4 |" }, CollectionOrdering.Matching);
-        var median = await pipeline.QueryAsync<double>("SELECT median_business_days FROM time_in_status_per_sprint WHERE sprint_id = '41';");
-        await Assert.That(median).IsEquivalentTo(new[] { 1.375 });
+        // The sum is 7.375, not the median times five (6.875) or a sum of individually rounded days (7.4).
+        await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(new[] { "| Fake Development | 5 | 1.4 | 7.4 |" }, CollectionOrdering.Matching);
+        var figures = await pipeline.QueryAsync<(double MedianBusinessDays, double TotalBusinessDays)>(
+            "SELECT median_business_days, total_business_days FROM time_in_status_per_sprint WHERE sprint_id = '41';");
+        await Assert.That(figures).IsEquivalentTo(new[] { (1.375, 7.375) });
     }
 
     [Test]
@@ -281,7 +304,7 @@ public class TimeInStatusTableTests
 
         // Done and Shipped are not waiting on the team, so the table leaves them out.
         await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(
-            new[] { "| Fake New | 5 | 1.0 |", "| Fake Development | 5 | 1.0 |" }, CollectionOrdering.Matching);
+            new[] { "| Fake New | 5 | 1.0 | 5.0 |", "| Fake Development | 5 | 1.0 | 5.0 |" }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -342,7 +365,9 @@ public class TimeInStatusTableTests
             },
             CollectionOrdering.Matching);
         await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(
-            new[] { "| Fake Development | 5 | 5.0 |" }, CollectionOrdering.Matching);
+            new[] { "| Fake Development | 5 | 5.0 | 25.0 |" }, CollectionOrdering.Matching);
+        await Assert.That(await pipeline.QueryAsync<double>(
+            "SELECT total_business_days FROM time_in_status_per_sprint WHERE sprint_id = '41';")).IsEquivalentTo(new[] { 25.0 });
     }
 
     [Test]
@@ -541,7 +566,7 @@ public class TimeInStatusTableTests
         await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(
-            new[] { @"| Fake Dev \| Build | 5 | 2.0 |" }, CollectionOrdering.Matching);
+            new[] { @"| Fake Dev \| Build | 5 | 2.0 | 10.0 |" }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -562,7 +587,7 @@ public class TimeInStatusTableTests
         await Assert.That(report).StartsWith(
             @"# Fake \*Sprint\* \[41\](https\://example.invalid/x) \<b\>\_y\_\</b\> \`z\` \# \~q\~ \!\\ \&amp; (2026-01-05 to 2026-01-19)" + "\n\n");
         await Assert.That(TimeInStatusRows(report)).IsEquivalentTo(
-            new[] { @"| Fake \<i\>Dev\</i\> \!\[x\](https\://example.invalid/y) \| \*Build\* | 5 | 2.0 |" }, CollectionOrdering.Matching);
+            new[] { @"| Fake \<i\>Dev\</i\> \!\[x\](https\://example.invalid/y) \| \*Build\* | 5 | 2.0 | 10.0 |" }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -585,7 +610,7 @@ public class TimeInStatusTableTests
 
         await pipeline.RunAsync("run", "--sprint", "41");
 
-        await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(new[] { $"| {shown} | 5 | 2.0 |" }, CollectionOrdering.Matching);
+        await Assert.That(TimeInStatusRows(await pipeline.ReadReportAsync(41))).IsEquivalentTo(new[] { $"| {shown} | 5 | 2.0 | 10.0 |" }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -625,8 +650,8 @@ public class TimeInStatusTableTests
 
         // The scan means something only if the sprint data went through: the report has the status's row.
         // The sprint has a team, so its rows are shown (owner decision D45); one person's row keeps its count
-        // and withholds its figure.
-        await Assert.That(files[Path.Combine("reports", "sprint-41.md")]).Contains("| Fake Development | 1 | suppressed |");
+        // and withholds both its median and total.
+        await Assert.That(files[Path.Combine("reports", "sprint-41.md")]).Contains("| Fake Development | 1 | suppressed | suppressed |");
         await Assert.That(pipeline.Jira.ForbiddenText).Contains(People.Two.AccountId).And.Contains("Synthetic goal of sprint 41 that must never be stored");
         var found = pipeline.Jira.ForbiddenText.Where(text => files.Values.Any(content => content.Contains(text, StringComparison.Ordinal))).ToList();
         await Assert.That(found).IsEmpty();

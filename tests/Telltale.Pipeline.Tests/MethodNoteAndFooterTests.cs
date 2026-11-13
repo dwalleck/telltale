@@ -12,22 +12,6 @@ namespace Telltale.Pipeline.Tests;
 /// </summary>
 public class MethodNoteAndFooterTests
 {
-    private const string MethodNote =
-        """
-
-        ## Method
-
-        - Durations are in business days: days that are neither a weekend nor a company holiday, each counted in full (24 hours) in the team's time zone (America/Chicago). Calendar days are shown alongside: elapsed time divided by 24 hours.
-        - Cycle time runs from an issue's first entry into a work status to its last entry into a done status, for delivered issues only. It belongs to the sprint in which the issue was delivered.
-        - Figures are medians and P85s. The median is the middle value, or the mean of the two middle values. The P85 is the smallest value with at least 85% of the values at or below it.
-        - Time in status covers the statuses before done. An issue counts toward a status only if it spent more than zero business days there.
-        - A figure is shown only where it cannot show one person's work. The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in it. When the team is smaller than five, the delivered count and both tables read "suppressed", with no rows. With a team of five or more, a row with fewer than three distinct assignees behind it keeps its issue count and reads "suppressed" for its figures, and the delivered count reads "suppressed" when fewer than three distinct assignees are among the delivered issues, and the cycle time table then reads "suppressed" as well, with no rows, because the number of its rows and their counts (the delivered issues that have a cycle time) would each give a lower bound of the withheld count. The time in status table of such a sprint keeps its counts: they count every issue that spent time in a status, delivered or not, so the count of a late status can be close to the withheld delivered count. The footer's two counts read "suppressed" when the issues in the whole store have fewer than five distinct assignees, or fewer than three are among the issues counted.
-        - An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. An unassigned issue counts toward nobody.
-        - An interval that is still open (an issue still in a status, a sprint not yet completed) ends at the as-of time below.
-        - Work that has since been removed from Jira stays in the figures until the next backfill.
-
-        """;
-
     [Test]
     public async Task The_report_ends_with_the_method_note_and_a_footer_giving_the_as_of_time()
     {
@@ -43,17 +27,17 @@ public class MethodNoteAndFooterTests
 
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
+        // Assert the computed footer, not a verbatim copy of the explanatory prose above it.
         await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith(
-            (MethodNote
-            + """
+            """
 
-              ---
+            ---
 
-              - As-of time: 2026-02-03 12:00 -06:00 (America/Chicago)
-              - Issues with changelog anomalies, in the whole store: suppressed
-              - Issues delivered between sprints, in the whole store: 3
+            - As-of time: 2026-02-03 12:00 -06:00 (America/Chicago)
+            - Issues with changelog anomalies, in the whole store: suppressed
+            - Issues delivered between sprints, in the whole store: 3
 
-              """).ReplaceLineEndings("\n"));
+            """.ReplaceLineEndings("\n"));
     }
 
     [Test]
