@@ -1,0 +1,47 @@
+using Telltale.Core.Intervals;
+using Telltale.Core.Workflow;
+using static Telltale.Tests.Shared.TeamTime;
+
+namespace Telltale.Core.Tests;
+
+public class DeliverySprintsTests
+{
+    private static readonly DateTimeOffset AsOf = Local(2026, 12, 1, 12);
+
+    private static readonly DeliverySprints Sprints = new(
+    [
+        new SprintWindow("42", Local(2026, 11, 16, 11), Completed: null),
+        new SprintWindow("41", Local(2026, 11, 2, 9), Completed: Local(2026, 11, 16, 10)),
+    ], AsOf);
+
+    [Test]
+    public async Task A_delivery_inside_a_sprint_window_belongs_to_that_sprint()
+    {
+        await Assert.That(Sprints.For(Local(2026, 11, 10, 15))).IsEqualTo("41");
+    }
+
+    [Test]
+    public async Task A_delivery_between_two_sprints_belongs_to_no_sprint()
+    {
+        await Assert.That(Sprints.For(Local(2026, 11, 16, 10, 30))).IsNull();
+    }
+
+    [Test]
+    public async Task A_delivery_at_the_moment_a_sprint_starts_belongs_to_it()
+    {
+        await Assert.That(Sprints.For(Local(2026, 11, 2, 9))).IsEqualTo("41");
+    }
+
+    [Test]
+    public async Task A_delivery_at_the_moment_a_sprint_is_completed_falls_outside_it()
+    {
+        await Assert.That(Sprints.For(Local(2026, 11, 16, 10))).IsNull();
+    }
+
+    [Test]
+    public async Task A_sprint_that_is_not_completed_runs_to_the_as_of_time()
+    {
+        // Sprint 42 has not been completed.
+        await Assert.That(Sprints.For(Local(2026, 11, 30, 15))).IsEqualTo("42");
+    }
+}

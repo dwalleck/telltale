@@ -13,7 +13,7 @@ Repo clones ─┼─► sync job ─► SQLite ─┼─ derived tables (rebuil
 Session logs─┘                 └─ metric views ─► Confluence page, ad hoc SQL
 ```
 
-Every collector keeps a watermark, fetches only what changed since it, and upserts by the source system's own IDs, so reruns and missed runs are harmless.
+Every collector keeps a watermark, fetches only what changed since it, and upserts by the source system's own IDs, so a rerun or a missed run of `sync` is harmless. A sync never removes a row, so work deleted in the source stays until the next `backfill`. `backfill` is the exception to upserting: it fetches everything from the configured start date and replaces the stored issues, changes and sprints with what it fetched, in one transaction. It prints how many of each the store held before and holds now, and refuses to replace stored issues or sprints with none unless run with `--allow-empty`. Statuses are reference data and are only added and updated.
 
 ## Host and operations (laptop phase)
 
@@ -32,6 +32,8 @@ src/
   Telltale.Storage.Sqlite/  migrations (raw, derived, views), upserts, watermarks,
                            derived rebuild, metric views with minimum group size
   Telltale.Reporting/       queries over views, charts (PNG), Confluence page builder + publisher
+  Telltale.Pipeline/        the steps (collect, derive, report, query) and every rule about when one may
+                           run: staleness, foreign settings, the salt, the range the store covers
   Telltale.Contracts/       session summary JSON schema, versioned
   Telltale.Cli/             composition root; the only laptop-specific project
 tools/
@@ -56,7 +58,7 @@ C# computes per-issue cycle times and per-sprint time in status into derived tab
 
 An issue counts toward its assignee at the time of the sync, hashed; assignee history is not collected. Unassigned issues count toward nobody.
 
-Changelog anomalies are logged by the sync, and each report's footer states how many issues had any.
+Changelog anomalies are logged by derive (and so by run), the step that builds each issue's history, and each report's footer states how many issues had any.
 
 ## First report
 
@@ -69,7 +71,7 @@ Interval math (`Interval`), business-day calendar (`BusinessCalendar`), status t
 Behaviors to preserve:
 
 - Changelog entries are deduplicated by history ID and ordered by time, then numeric history ID.
-- Inconsistent history produces anomaly messages but never stops the build of a timeline; the sync should log them.
+- Inconsistent history produces anomaly messages but never stops the build of a timeline; derive logs them (a total, then each anomaly new since the last derive) and stores the full list.
 - A sprint ends at its completion date; an uncompleted sprint runs to now.
 - Statuses are tracked by ID, never name.
 - Time in status is reported as calendar time, business time and business days.

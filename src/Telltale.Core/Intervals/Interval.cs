@@ -22,6 +22,9 @@ public readonly record struct Interval
 
     public bool IsEmpty => End == Start;
 
+    /// <summary>True when <paramref name="moment"/> is inside the span: at or after the start and before the end.</summary>
+    public bool Contains(DateTimeOffset moment) => Start <= moment && moment < End;
+
     /// <summary>The overlap of two intervals, or null when they don't overlap.</summary>
     public Interval? Intersect(Interval other)
     {

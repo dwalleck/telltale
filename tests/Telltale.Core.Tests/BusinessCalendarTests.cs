@@ -1,6 +1,7 @@
 using Telltale.Core.Calendar;
 using Telltale.Core.Intervals;
 using static Telltale.Core.Tests.TestTime;
+using static Telltale.Tests.Shared.TeamTime;
 
 namespace Telltale.Core.Tests;
 
@@ -68,7 +69,7 @@ public class BusinessCalendarTests
     public async Task The_25_hour_day_when_daylight_saving_ends_is_still_one_day()
     {
         // Daylight saving ended on Sunday 2026-11-01. Treat every day as a business day to test it.
-        var noWeekend = new BusinessCalendar(Chicago, weekend: Array.Empty<DayOfWeek>());
+        var noWeekend = new BusinessCalendar(Zone, weekend: Array.Empty<DayOfWeek>());
         var sunday = noWeekend.DayInterval(new DateOnly(2026, 11, 1));
 
         var (time, days) = noWeekend.Measure(sunday);

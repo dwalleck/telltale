@@ -39,7 +39,7 @@ This is the first slice of the whole system: every layer (collector, raw tables,
 16. As a team member, I want my Jira identity replaced by a salted hash before anything is written to disk, so that the store cannot be used to look me up (ADR-0003).
 17. As a team member, I want no issue summaries, descriptions or comments stored, so that the store holds no free text about my work (ADR-0002).
 18. As the project owner, I want epics and sub-tasks left out, so that containers and double-counted work don't distort throughput.
-19. As the project owner, I want the sync to log every changelog anomaly it finds, so that I can investigate bad history without the run stopping.
+19. As the project owner, I want derive (and so run) to log every changelog anomaly it finds, so that I can investigate bad history without the run stopping.
 20. As the project owner, I want the tool to back off and retry when Jira rate-limits it, so that a large backfill finishes unattended.
 
 ### Deriving
@@ -74,7 +74,7 @@ This is the first slice of the whole system: every layer (collector, raw tables,
 
 ### Querying and trust
 
-45. As the project owner, I want to run ad hoc SQL against the metric views, so that I can answer follow-up questions without new code.
+45. As the project owner, I want to run ad hoc SQL against the metric views through a `query` command, so that I can answer follow-up questions without new code and without a path around the suppression rule. (Opening the database file in another program bypasses the rule; owner decision D48, 2026-11-12.)
 46. As a team member, I want the suppression rule enforced inside the metric views, so that ad hoc SQL against them cannot produce a figure the report would have suppressed.
 47. As the project owner, I want the database to be disposable and rebuildable from Jira, so that a corrupt or lost file costs one backfill.
 
@@ -122,7 +122,7 @@ This is the first slice of the whole system: every layer (collector, raw tables,
 
 Raw tables (written only by the collector; selected fields, never original payloads):
 
-- **Issue**: Jira issue ID, key, issue type ID, created time, current status ID, current resolution ID, current story points, current assignee hash, updated time.
+- **Issue**: Jira issue ID (the issue key is not stored: nothing reads it, and beside a person hash it is the easiest way back to a person; owner decision D52, 2026-11-12), issue type ID, created time, current status ID, current resolution ID, current story points, current assignee hash, updated time.
 - **Change**: history ID, issue ID, time, field (status, sprint or points), from value, to value. Status values are status IDs; sprint values are sprint ID lists; point values are numbers.
 - **Sprint**: sprint ID, board ID, state, start, planned end, completed time.
 - **Status**: status ID, name, Jira category.
@@ -140,9 +140,9 @@ Metric views (the only thing Reporting and ad hoc SQL should read):
 
 - Delivered count per sprint.
 - Cycle time per sprint and point bucket: issue count, median, P85, in business and calendar days.
-- Time in status per sprint and status: issue count and median.
+- Time in status per sprint and status: issue count and median. Done-role statuses are left out, and an issue counts only if it spent more than zero business days in the status (owner decisions D20, D21, 2026-11-12).
 - Baseline equivalents of the two above, pooled over the configured baseline sprints.
-- Each view row carries its distinct-assignee count check inside the view: when the sprint has fewer than five distinct assignees, or the row has fewer than three, the figures are null and a suppressed flag is set. Delivered count per sprint is subject to the five-person team check only.
+- Each view row carries its distinct-assignee count check inside the view: when the sprint has fewer than five distinct assignees, or the row has fewer than three, the figures are null and a suppressed flag is set. Delivered count per sprint is subject to the five-person team check and also needs at least three distinct assignees among the delivered issues (owner decision D49, 2026-11-12). When the delivered count is withheld for that reason, that sprint's cycle time view has no per-bucket rows and the report shows one "suppressed" line, as for a sprint under five, because the bucket counts add up to it and the number of rows bounds it (owner decisions D53, D54, 2026-11-12). Its time in status counts stay, and the method note says they can approximate the withheld count (owner decision D55, 2026-11-12). A baseline sprint whose delivered count is withheld withholds the whole baseline and is named, as a baseline sprint under five does (owner decision D56, 2026-11-12).
 
 ### Metric rules
 
@@ -153,6 +153,7 @@ Metric views (the only thing Reporting and ad hoc SQL should read):
 - Point bucket: the story point value in effect at cycle start, reconstructed from point history; the current value if there is no history; unestimated if none.
 - Delivery sprint: the sprint whose window (start to completion) contains the cycle end.
 - Time in status per sprint: existing Core behaviour, over issues that were members of the sprint.
+- Owner decisions of 2026-11-12 (D12-D32) refine these rules at their edges; they are listed in the tickets they changed (02, 03, 05, 09, 11, 12).
 - Median: the middle value, or the mean of the two middle values. P85: nearest rank (the smallest value with at least 85% of values at or below it). Percentiles are computed in SQL with window functions.
 - Assignee for the suppression rule: the issue's assignee at the time of the sync. Unassigned issues count toward nobody.
 - All per-issue durations are computed in C# during `derive`; the views only aggregate.

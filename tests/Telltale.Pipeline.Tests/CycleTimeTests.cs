@@ -1,0 +1,508 @@
+using System.Text.Json.Nodes;
+using Telltale.Core.Storage;
+using Telltale.Core.Workflow;
+using Telltale.Pipeline.Tests.Harness;
+using Telltale.Storage.Sqlite;
+using TUnit.Assertions.Enums;
+using static Telltale.Tests.Shared.TeamTime;
+
+namespace Telltale.Pipeline.Tests;
+
+/// <summary>
+/// The cycle time table. January 2026 for reading the dates: the 5th, 12th and 19th are Mondays,
+/// so the 10th-11th and 17th-18th are weekends.
+/// A figure is shown only for a team of five with three assignees behind it (SuppressionTests), so most tests
+/// here have the fake serve each issue once per team member: a count is five times the issues the test adds,
+/// and a median or P85 is what it is for those issues alone.
+/// </summary>
+public class CycleTimeTests
+{
+    private const string TableHeader =
+        "\n## Cycle time by point bucket\n\n"
+        + "| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |\n"
+        + "| --- | ---: | ---: | ---: | ---: | ---: |\n";
+
+    /// <summary>What follows the cycle time section. Asserting it after the last expected row shows the table has no further row.</summary>
+    private const string NextSection = "\n## Time in status\n";
+
+    [Test]
+    public async Task The_report_shows_cycle_time_from_the_first_work_status_to_done_for_the_issues_bucket()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
+
+        // Thursday 09:00 to Monday 09:00: four calendar days, two of them a weekend.
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 12, 9), Workflow.Done);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 3 | 5 | 2.0 | 2.0 | 4.0 | 4.0 |\n");
+    }
+
+    [Test]
+    public async Task Time_in_blocked_before_any_work_status_does_not_start_the_cycle()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
+
+        // Blocked from Tuesday, development from Wednesday 09:00, done Friday 09:00.
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Blocked)
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 3 | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n");
+    }
+
+    [Test]
+    public async Task An_issue_that_went_straight_to_done_is_delivered_but_contributes_no_cycle_time()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        var report = await pipeline.ReadReportAsync(41);
+        await Assert.That(report).Contains("\nDelivered issues: 5\n");
+        await Assert.That(report).Contains("\n## Cycle time by point bucket\n\nNo issue delivered in this sprint has a cycle time.\n" + NextSection);
+        await Assert.That(await CycleTimeRowsAsync(pipeline, 41)).IsEmpty();
+    }
+
+    [Test]
+    public async Task Time_in_blocked_after_the_cycle_started_counts_toward_cycle_time()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
+
+        // Development Tuesday 09:00, blocked Wednesday to Thursday, done Friday 09:00.
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 7, 9), Workflow.Blocked)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 3 | 5 | 3.0 | 3.0 | 3.0 | 3.0 |\n");
+    }
+
+    [Test]
+    [Arguments("Review")]
+    [Arguments("QE")]
+    public async Task An_issue_that_skips_development_starts_its_cycle_at_its_first_entry_into_review_or_qe(string firstWorkStatus)
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
+
+        // Committed until Wednesday 09:00, then straight past Development; done Friday 09:00.
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Committed)
+            .Moved(Local(2026, 1, 7, 9), firstWorkStatus == "Review" ? Workflow.Review : Workflow.QE)
+            .Moved(Local(2026, 1, 8, 9), firstWorkStatus == "Review" ? Workflow.QE : Workflow.Review)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 3 | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n");
+    }
+
+    [Test]
+    public async Task A_move_from_done_to_shipped_does_not_move_the_cycle_end()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
+
+        // Development Tuesday 09:00, done Thursday 09:00, shipped the next Wednesday.
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done)
+            .Moved(Local(2026, 1, 14, 9), Workflow.Shipped);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 3 | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n");
+    }
+
+    [Test]
+    public async Task A_reopened_issues_cycle_runs_from_its_first_work_status_to_its_final_entry_into_done()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
+
+        // Development Tuesday 09:00, done Wednesday, reopened Thursday, done again Friday 09:00.
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 7, 9), Workflow.Done)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 3 | 5 | 3.0 | 3.0 | 3.0 | 3.0 |\n");
+    }
+
+    [Test]
+    public async Task Each_issues_reopen_count_is_recorded_in_derived_data()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9))
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 7, 9), Workflow.Done);
+
+        // Reopened twice. The move from Done to Shipped between them is not a reopen: both are done statuses.
+        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 5, 9))
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 7, 9), Workflow.Done)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Review)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done)
+            .Moved(Local(2026, 1, 12, 9), Workflow.Shipped)
+            .Moved(Local(2026, 1, 13, 9), Workflow.Blocked)
+            .Moved(Local(2026, 1, 14, 9), Workflow.Done);
+
+        // Reopened and not done again: not delivered, and still one reopen.
+        pipeline.Jira.AddIssue("FAKE-3", Local(2026, 1, 5, 9))
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 7, 9), Workflow.Done)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Development);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        // Reopens are recorded but not reported in this slice, so no metric view carries them yet.
+        var rows = await pipeline.QueryAsync<(string IssueId, long ReopenCount)>("SELECT issue_id, reopen_count FROM issue_cycle ORDER BY issue_id;");
+        await Assert.That(rows).IsEquivalentTo(new[] { (pipeline.Jira.IdOf("FAKE-1"), 0L), (pipeline.Jira.IdOf("FAKE-2"), 2L), (pipeline.Jira.IdOf("FAKE-3"), 1L) }, CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task A_cycle_across_a_weekend_and_a_configured_holiday_has_fewer_business_days_than_calendar_days()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
+        pipeline.Config["holidays"] = new JsonArray("2026-01-19");
+
+        // Friday noon to Tuesday noon: four calendar days. Saturday, Sunday and the Monday holiday do not
+        // count, which leaves half of Friday and half of Tuesday.
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 15, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 16, 12), Workflow.Development)
+            .Moved(Local(2026, 1, 20, 12), Workflow.Done);
+
+        await pipeline.RunAsync("run", "--sprint", "42");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains(TableHeader + "| 3 | 5 | 1.0 | 1.0 | 4.0 | 4.0 |\n");
+    }
+
+    [Test]
+    public async Task Without_the_holiday_the_same_cycle_counts_the_monday()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 15, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 16, 12), Workflow.Development)
+            .Moved(Local(2026, 1, 20, 12), Workflow.Done);
+
+        await pipeline.RunAsync("run", "--sprint", "42");
+
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains(TableHeader + "| 3 | 5 | 2.0 | 2.0 | 4.0 | 4.0 |\n");
+    }
+
+    // Median: the middle value, or the mean of the two middle values. P85: nearest rank, the smallest value
+    // with at least 85% of the values at or below it. Expected figures are worked by hand from those rules.
+    // Every issue has its own assignee, so each case ranks exactly the values listed. A bucket of one or two
+    // values is never shown (three assignees are needed), so three values is the smallest case.
+    [Test]
+    [Arguments(new[] { 4.0, 2.0, 2.0 }, 2.0, 4.0)]
+    [Arguments(new[] { 3.0, 1.0, 2.0 }, 2.0, 3.0)]
+    [Arguments(new[] { 3.0, 2.0, 1.0, 2.0 }, 2.0, 3.0)]
+    [Arguments(new[] { 4.0, 1.0, 3.0, 2.5 }, 2.75, 4.0)]
+    [Arguments(new[] { 1.0, 4.0, 1.0, 1.0, 1.0, 1.0, 1.0 }, 1.0, 1.0)]
+    [Arguments(new[] { 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0 }, 2.0, 3.0)]
+    public async Task Median_is_the_middle_value_or_the_mean_of_the_two_middle_values_and_p85_is_nearest_rank(double[] cycleDays, double median, double p85)
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
+        pipeline.Jira.AddTeam(41);
+
+        // Every cycle ends on Friday 16 January at noon and starts at most four days earlier, so none
+        // touches a weekend and its business days equal its calendar days.
+        var done = Local(2026, 1, 16, 12);
+        foreach (var (days, index) in cycleDays.Select((days, index) => (days, index)))
+        {
+            pipeline.Jira.AddIssue($"FAKE-{index + 1}", Local(2026, 1, 6, 9)).Estimated(5).AssignedTo(People.All[index])
+                .Moved(done.AddDays(-days), Workflow.Development)
+                .Moved(done, Workflow.Done);
+        }
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        var rows = await CycleTimeRowsAsync(pipeline, 41);
+        await Assert.That(rows.Count).IsEqualTo(1);
+        await Assert.That(rows[0].IssueCount).IsEqualTo(cycleDays.Length);
+        await Assert.That(rows[0].MedianBusinessDays!.Value).IsEqualTo(median).Within(0.000001);
+        await Assert.That(rows[0].P85BusinessDays!.Value).IsEqualTo(p85).Within(0.000001);
+        await Assert.That(rows[0].MedianCalendarDays!.Value).IsEqualTo(median).Within(0.000001);
+        await Assert.That(rows[0].P85CalendarDays!.Value).IsEqualTo(p85).Within(0.000001);
+    }
+
+    [Test]
+    public async Task The_table_has_a_row_per_point_bucket_with_its_issue_count_and_unestimated_issues_last()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
+
+        // Bucket 13: three issues, each Tuesday to Thursday.
+        foreach (var (key, person) in new[] { ("FAKE-1", People.Four), ("FAKE-2", People.Five), ("FAKE-3", People.One) })
+        {
+            pipeline.Jira.AddIssue(key, Local(2026, 1, 6, 9)).Estimated(13).AssignedTo(person)
+                .Moved(Local(2026, 1, 13, 9), Workflow.Development)
+                .Moved(Local(2026, 1, 15, 9), Workflow.Done);
+        }
+
+        // Bucket 3: three issues. Friday noon to Monday noon is 1 business day and 3 calendar days; Monday to
+        // Wednesday is 2 and 2; Tuesday to Friday is 3 and 3. So the shortest cycle in business days is not
+        // the shortest in calendar days: business days are 1, 2, 3 and calendar days are 2, 3, 3.
+        pipeline.Jira.AddIssue("FAKE-4", Local(2026, 1, 6, 9)).Estimated(3).AssignedTo(People.One)
+            .Moved(Local(2026, 1, 9, 12), Workflow.Development)
+            .Moved(Local(2026, 1, 12, 12), Workflow.Done);
+        pipeline.Jira.AddIssue("FAKE-5", Local(2026, 1, 6, 9)).Estimated(3).AssignedTo(People.Two)
+            .Moved(Local(2026, 1, 12, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 14, 9), Workflow.Done);
+        pipeline.Jira.AddIssue("FAKE-6", Local(2026, 1, 6, 9)).Estimated(3).AssignedTo(People.Three)
+            .Moved(Local(2026, 1, 13, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 16, 9), Workflow.Done);
+
+        // No estimate: three issues, 1 day, 2 days and 3 days.
+        foreach (var (key, person, day) in new[] { ("FAKE-7", People.Two, 7), ("FAKE-8", People.Three, 8), ("FAKE-9", People.Four, 9) })
+        {
+            pipeline.Jira.AddIssue(key, Local(2026, 1, 6, 9)).AssignedTo(person)
+                .Moved(Local(2026, 1, 6, 10), Workflow.Development)
+                .Moved(Local(2026, 1, day, 10), Workflow.Done);
+        }
+
+        // Bucket 0.5: three issues, half a day each.
+        foreach (var (key, person) in new[] { ("FAKE-10", People.One), ("FAKE-11", People.Two), ("FAKE-12", People.Three) })
+        {
+            pipeline.Jira.AddIssue(key, Local(2026, 1, 6, 9)).Estimated(0.5).AssignedTo(person)
+                .Moved(Local(2026, 1, 8, 9), Workflow.Development)
+                .Moved(Local(2026, 1, 8, 21), Workflow.Done);
+        }
+
+        // In no row of this sprint: delivered without a cycle, delivered in the next sprint, and not delivered.
+        pipeline.Jira.AddIssue("FAKE-13", Local(2026, 1, 6, 9)).Estimated(13)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done);
+        pipeline.Jira.AddIssue("FAKE-14", Local(2026, 1, 6, 9)).Estimated(13)
+            .Moved(Local(2026, 1, 14, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 21, 9), Workflow.Done);
+        pipeline.Jira.AddIssue("FAKE-15", Local(2026, 1, 6, 9)).Estimated(13)
+            .Moved(Local(2026, 1, 7, 9), Workflow.Development);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        var report = await pipeline.ReadReportAsync(41);
+        await Assert.That(report).Contains("\nDelivered issues: 13\n");
+        await Assert.That(report).Contains(
+            TableHeader
+            + "| 0.5 | 3 | 0.5 | 0.5 | 0.5 | 0.5 |\n"
+            + "| 3 | 3 | 2.0 | 3.0 | 3.0 | 3.0 |\n"
+            + "| 13 | 3 | 2.0 | 2.0 | 2.0 | 2.0 |\n"
+            + "| unestimated | 3 | 2.0 | 3.0 | 2.0 | 3.0 |\n"
+            + NextSection);
+
+        // The same rows by ad hoc SQL: an unestimated bucket is a null point_bucket.
+        var rows = await CycleTimeRowsAsync(pipeline, 41);
+        await Assert.That(rows.Select(row => (row.PointBucket, row.IssueCount)))
+            .IsEquivalentTo(new (double?, long)[] { (0.5, 3), (3, 3), (13, 3), (null, 3) }, CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task Statuses_entered_and_left_at_the_same_instant_still_start_a_cycle_and_count_as_a_reopen()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
+
+        // A bulk move: Development and Done in one instant.
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done);
+
+        // Reopened and closed again in one instant, a day after it was done. That instant is its last move
+        // into done, so its cycle runs from Tuesday 09:00 to Thursday 09:00.
+        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 5, 9)).Estimated(8)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 7, 9), Workflow.Done)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Review)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(
+            TableHeader
+            + "| 3 | 5 | 0.0 | 0.0 | 0.0 | 0.0 |\n"
+            + "| 8 | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n"
+            + NextSection);
+        var reopens = await pipeline.QueryAsync<(string IssueId, long ReopenCount)>(
+            "SELECT issue_id, reopen_count FROM issue_cycle WHERE issue_id IN (@first, @second) ORDER BY issue_id;",
+            new { first = pipeline.Jira.IdOf("FAKE-1"), second = pipeline.Jira.IdOf("FAKE-2") });
+        await Assert.That(reopens).IsEquivalentTo(new[] { (pipeline.Jira.IdOf("FAKE-1"), 0L), (pipeline.Jira.IdOf("FAKE-2"), 1L) }, CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task Two_estimates_that_differ_only_in_the_third_decimal_are_two_rows_with_different_labels()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(2.001)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 7, 9), Workflow.Done);
+        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 5, 9)).Estimated(2.004)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(
+            TableHeader
+            + "| 2.001 | 5 | 1.0 | 1.0 | 1.0 | 1.0 |\n"
+            + "| 2.004 | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n"
+            + NextSection);
+    }
+
+    [Test]
+    public async Task An_abandoned_issue_that_was_worked_on_is_in_no_cycle_time_row()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
+        pipeline.Config["abandonedResolutionIds"] = new JsonArray("300002");
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 5, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 8, 9), Workflow.Done)
+            .Resolved("300001");
+        pipeline.Jira.AddIssue("FAKE-2", Local(2026, 1, 5, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 6, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 9, 9), Workflow.Done)
+            .Resolved("300002");
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains(TableHeader + "| 3 | 5 | 2.0 | 2.0 | 2.0 | 2.0 |\n" + NextSection);
+    }
+
+    [Test]
+    public async Task The_cycle_time_view_reads_only_rows_marked_delivered_whatever_else_they_carry()
+    {
+        // Derive gives an abandoned issue a cycle end and nothing else. The view must not lean on that:
+        // "delivered" is the one test of a delivery (issue_cycle.sql), so a row that is not delivered stays
+        // out even if it carries a cycle end, a sprint and a cycle time.
+        await using var pipeline = new PipelineHarness();
+        var store = new SqliteStore(pipeline.DatabasePath);
+        await store.InitializeAsync();
+        var start = Local(2026, 1, 6, 9);
+        var end = Local(2026, 1, 8, 9);
+
+        // Five people, so the figures are shown. Each has one delivered issue (two days) and one that is not
+        // delivered but carries everything else a delivery has (six and four days).
+        var people = Enumerable.Range(1, 5).ToList();
+        await store.WriteRawAsync(new RawBatch(
+            new RawData(
+                Issues: [.. Enumerable.Range(1, 10).Select(id => new RawIssue { IssueId = $"{id}", IssueTypeId = FakeJira.IssueTypeStoryId, Created = start, StatusId = Workflow.Done.Id, ResolutionId = null, StoryPoints = 3, AssigneeHash = $"synthetic-hash-{((id - 1) % 5) + 1}", Updated = end, SprintIds = "" })],
+                Changes: [],
+                Sprints: [],
+                Statuses: []),
+            new Watermark("synthetic-collector", new CollectionScope("https://example.invalid/", FakeJira.BoardId, FakeJira.ProjectKey, new DateOnly(2025, 1, 1), "status"), UpdatedThrough: end),
+            SaltFingerprint: "synthetic-fingerprint"));
+
+        await store.ReplaceDerivedAsync(new DerivedData(
+            SprintWindows: [new DerivedSprintWindow("41", Local(2026, 1, 5, 9), Local(2026, 1, 19, 9))],
+            StatusIntervals: [],
+            IssueCycles:
+            [
+                .. people.Select(id => IssueCycle.OfDelivered($"{id}", end, deliverySprintId: "41", new Cycle(start, 2, 2), pointBucket: 3, reopenCount: 0)),
+                .. people.Select(id => IssueCycle.OfAbandoned($"{id + 5}", end, reopenCount: 0)),
+            ],
+            MembershipIntervals: [],
+            SprintStatusTimes: [],
+            BoardStatuses: [])
+        {
+            AsOf = end,
+            Anomalies = [],
+        }, new DerivedSource("synthetic-digest", ZoneId, Holidays: "", BaselineSprintIds: "[]", StatusRoles: "", AbandonedResolutionIds: ""));
+
+        // Derive cannot make such a row (IssueCycle holds no sprint, cycle time or bucket for an issue that is
+        // not delivered), so it is put in the table by hand.
+        await pipeline.ExecuteAsync(
+            "UPDATE issue_cycle SET delivery_sprint_id = '41', cycle_start = '2026-01-06T15:00:00.000Z', calendar_days = 6, business_days = 4, point_bucket = 3 WHERE delivered = 0;");
+
+        var rows = await CycleTimeRowsAsync(pipeline, 41);
+        await Assert.That(rows.Select(row => (row.PointBucket, row.IssueCount, row.P85BusinessDays, row.P85CalendarDays)))
+            .IsEquivalentTo(new (double?, long, double?, double?)[] { (3, 5, 2, 2) });
+    }
+
+    [Test]
+    public async Task An_issue_delivered_between_sprints_is_in_no_cycle_time_row()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddTwoSprintsTheFirstFromMondayEvening(pipeline.Jira);
+        pipeline.Jira.ServeEachIssueOncePer(People.Team);
+
+        // Done at 10:15 on the 19th: after sprint 41 was completed and before sprint 42 started.
+        pipeline.Jira.AddIssue("FAKE-1", Local(2026, 1, 6, 9)).Estimated(3)
+            .Moved(Local(2026, 1, 14, 9), Workflow.Development)
+            .Moved(Local(2026, 1, 19, 10, 15), Workflow.Done);
+
+        // Both sprints have a team, so neither has the single row of a suppressed sprint (owner decision D45).
+        pipeline.Jira.AddTeam(41, 42);
+
+        await pipeline.RunAsync("run", "--sprint", "41");
+
+        var rows = await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM cycle_time_per_sprint_and_bucket;");
+        await Assert.That(rows).IsEquivalentTo(new[] { 0L });
+    }
+
+    /// <summary>The cycle time view's rows for one sprint, as ad hoc SQL reads them, smallest bucket first and unestimated last.</summary>
+    private static Task<IReadOnlyList<CycleTimeRow>> CycleTimeRowsAsync(PipelineHarness pipeline, long sprintId) =>
+        pipeline.QueryAsync<CycleTimeRow>(
+            """
+            SELECT point_bucket, issue_count, median_business_days, p85_business_days, median_calendar_days, p85_calendar_days
+            FROM cycle_time_per_sprint_and_bucket
+            WHERE sprint_id = @sprintId
+            ORDER BY point_bucket IS NULL, point_bucket;
+            """,
+            new { sprintId = sprintId.ToString(System.Globalization.CultureInfo.InvariantCulture) });
+
+    private sealed class CycleTimeRow
+    {
+        public double? PointBucket { get; init; }
+        public long IssueCount { get; init; }
+        public double? MedianBusinessDays { get; init; }
+        public double? P85BusinessDays { get; init; }
+        public double? MedianCalendarDays { get; init; }
+        public double? P85CalendarDays { get; init; }
+    }
+
+    /// <summary>The harness's two sprints, both completed, with sprint 41 starting on Monday 5 January at 20:00 instead of 09:00.</summary>
+    private static void AddTwoSprintsTheFirstFromMondayEvening(FakeJira jira)
+    {
+        jira.AddSprint41(start: Local(2026, 1, 5, 20));
+        jira.AddSprint42();
+    }
+}

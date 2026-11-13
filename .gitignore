@@ -487,4 +487,10 @@ $RECYCLE.BIN/
 # Repo toolkit: logs, worktrees, machine-local overlay
 .ipe-logs/
 .worktrees/
+
+# Agent working files at a worktree root: never committed, and not a dirty tree for the full check
+# Backups discover keeps of the configuration file before it rewrites it.
+/config/*.bak
+/HANDOFF.md
+/CODE-REVIEW.md
 .repo-toolkit.local.psd1

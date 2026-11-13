@@ -16,6 +16,12 @@ internal static class ChangeOrdering
             .ToList();
     }
 
+    /// <summary>
+    /// The order two changelog entries were recorded in: negative when <paramref name="historyId"/> came first,
+    /// zero for the same entry. It decides between changes made at the same instant.
+    /// </summary>
+    public static int CompareHistoryIds(string historyId, string other) => HistoryIdComparer.Instance.Compare(historyId, other);
+
     /// <summary>Jira history IDs are numeric strings, so "10" sorts after "9".</summary>
     private sealed class HistoryIdComparer : IComparer<string>
     {

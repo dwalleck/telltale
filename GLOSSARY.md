@@ -15,7 +15,7 @@ A continuous period an issue spent in one status, identified by status ID.
 _Avoid_: Stage, phase
 
 **Sprint window**:
-The period a sprint counts for: from its start date to its completion date, or to now if not yet completed.
+The period a sprint counts for: from its start date to its completion date, or to now if not yet completed. A closed sprint with no completion date ends at its planned end. A closed sprint with neither date has no window: no delivery is counted in it, and the run says so and carries on.
 _Avoid_: Sprint dates, iteration
 
 **Membership interval**:
@@ -23,7 +23,7 @@ A continuous period an issue belonged to a given sprint, rebuilt from the Sprint
 _Avoid_: Sprint assignment
 
 **Time in status**:
-How long an issue spent in a status during a sprint: its status intervals clipped to the sprint window and its membership intervals.
+How long an issue spent in a status during a sprint: its status intervals clipped to the sprint window and its membership intervals. Reported for statuses before delivery only (not Done or Shipped), and an issue counts toward a status only if it spent more than zero business days there.
 
 **Business day**:
 A day that is neither a weekend nor a company holiday, counted in full (24 hours) in the team's time zone.
@@ -37,7 +37,7 @@ A move of an issue out of a done status category back to any earlier status.
 _Avoid_: Lead time, turnaround
 
 **Delivered**:
-An issue that is in a done status category and was not abandoned (closed with a won't-do resolution). Delivery is reaching Done; shipping to customers is a later step outside the team's control.
+An issue that is in a done status category and was not abandoned (closed with a won't-do resolution). Delivery is reaching Done; shipping to customers is a later step outside the team's control. The delivery moment is the issue's last move into a done status. An issue in a done status whose history shows no such move, or whose history ends in another status, is not delivered; it is counted as a changelog anomaly.
 _Avoid_: Completed, closed, resolved
 
 **Point bucket**:
@@ -98,7 +98,7 @@ A metric that shows whether gains came at a cost: reopen rate, revert rate, rewo
 A person's or group's own measurements from before the pilot, used as their comparison point. It is drawn from a list of sprints fixed before the pilot starts.
 
 **Minimum group size**:
-The smallest number of people (five) a result grouped by people may cover. A result grouped by issue attributes (sprint, point bucket) instead needs a team of at least five and at least three distinct assignees behind it.
+The smallest number of people (five) a result grouped by people may cover. A result grouped by issue attributes (sprint, point bucket) instead needs a team of at least five and at least three distinct assignees behind it. The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in its window. A result that fails either check is suppressed: its figures are withheld. When the team check fails, its issue counts are withheld too, because they add up to the withheld delivered count, and the sprint's tables show no per-bucket or per-status rows at all; when only the three-assignee check fails, the issue count is still shown. An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. The delivered count of a sprint also needs at least three distinct assignees among the delivered issues; when it is withheld for that reason, the sprint's point buckets are not shown at all, because their issue counts and even the number of buckets bound it from below (they count the delivered issues that have a cycle time). The sprint's per-status issue counts stay: they count every issue that spent time in a status, delivered or not, so they can approximate the withheld count but do not give it. A baseline sprint must itself pass the team check and have its delivered count shown; if one does not, every baseline figure is withheld and the report names the sprint. A baseline figure pools every issue of the baseline sprints; it is shown only when the pooled group passes both checks and no baseline sprint has that row suppressed on its own, so that a pooled figure cannot give back a withheld one.
 
 **Case study**:
 One of the two consented, named individual exceptions to the minimum group size: the project owner and one mid-level developer, each on a Pro seat.
