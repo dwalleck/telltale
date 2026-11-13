@@ -20,6 +20,22 @@ public static class HarnessSteps
         return pipeline.Out.ToString().ReplaceLineEndings("\n");
     }
 
+    /// <summary>
+    /// Everything <c>query</c> may read, as it prints it: each metric view whole, one after another in the
+    /// order of their names. The views are found in the store and not listed here, so a view added later is
+    /// read too. Two stores that give the same text cannot be told apart by any query.
+    /// </summary>
+    public static async Task<string> QueryEveryMetricViewAsync(PipelineHarness pipeline)
+    {
+        var views = await pipeline.QueryAsync<string>("SELECT name FROM derived_object WHERE kind = 'view' ORDER BY name;");
+        if (views.Count == 0)
+        {
+            throw new InvalidOperationException("The store has no metric view: derive has not run.");
+        }
+
+        return await QueryAsync(pipeline, [.. views.Select(view => $"SELECT * FROM {view};")]);
+    }
+
     /// <summary>Changes the file on disk as the owner would in an editor.</summary>
     public static async Task EditWrittenConfigAsync(PipelineHarness pipeline, Action<JsonNode> edit)
     {

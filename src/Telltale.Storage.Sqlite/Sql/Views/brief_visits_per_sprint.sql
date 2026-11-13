@@ -28,15 +28,30 @@ counted AS (
     JOIN time_in_status_issue t ON t.issue_id = v.issue_id AND t.sprint_id = v.sprint_id AND t.status_id = v.status_id
     LEFT JOIN issue i ON i.issue_id = v.issue_id
     GROUP BY v.sprint_id, v.status_id
+),
+-- Whether a row's count is withheld is decided once, here, and the count and the flag both follow from it.
+-- "r.suppressed = 0" is the rule as the owner stated it (D62: withheld when the row's median is withheld). It
+-- is a guard that cannot decide a row on its own while the counted issues are among the row's issues: a row
+-- with too few assignees behind it has no more behind the issues counted. It stays so that the rule is
+-- written where it is applied, and holds if the two ever stop reading the same issues.
+decided AS (
+    SELECT r.sprint_id,
+           r.status_id,
+           r.status_name,
+           r.board_position,
+           h.threshold_minutes,
+           COALESCE(c.issues, 0) AS issues,
+           CASE WHEN r.suppressed = 0 AND COALESCE(c.assignees, 0) >= g.assignees_behind_a_figure THEN 0 ELSE 1 END AS suppressed
+    FROM time_in_status_per_sprint r
+    JOIN threshold h ON h.status_id = r.status_id
+    LEFT JOIN counted c ON c.sprint_id = r.sprint_id AND c.status_id = r.status_id
+    CROSS JOIN minimum_group_size g
 )
-SELECT r.sprint_id,
-       r.status_id,
-       r.status_name,
-       r.board_position,
-       h.threshold_minutes,
-       CASE WHEN r.suppressed = 0 AND COALESCE(c.assignees, 0) >= g.assignees_behind_a_figure THEN COALESCE(c.issues, 0) END AS brief_visit_issue_count,
-       CASE WHEN r.suppressed = 0 AND COALESCE(c.assignees, 0) >= g.assignees_behind_a_figure THEN 0 ELSE 1 END             AS suppressed
-FROM time_in_status_per_sprint r
-JOIN threshold h ON h.status_id = r.status_id
-LEFT JOIN counted c ON c.sprint_id = r.sprint_id AND c.status_id = r.status_id
-CROSS JOIN minimum_group_size g;
+SELECT d.sprint_id,
+       d.status_id,
+       d.status_name,
+       d.board_position,
+       d.threshold_minutes,
+       CASE WHEN d.suppressed = 0 THEN d.issues END AS brief_visit_issue_count,
+       d.suppressed AS suppressed
+FROM decided d;
