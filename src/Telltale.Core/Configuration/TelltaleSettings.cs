@@ -36,7 +36,7 @@ public sealed record TelltaleSettings
     public required IReadOnlyList<DateOnly> Holidays { get; init; }
 
     /// <summary>The settings as a rebuild records them, apart from the raw data's digest: see <see cref="DerivedFrom"/>.</summary>
-    private DerivedSource Recorded { get; init; } = new("", "", "", "", "", "");
+    private DerivedSource Recorded { get; init; } = new("", "", "", "", "", "", MinimumGroupSize.Default.Team, MinimumGroupSize.Default.AssigneesBehindAFigure);
 
     /// <summary>Everything a rebuild is decided with besides the raw data and the as-of time.</summary>
     public DerivationSettings Derivation => new(new DeliveryRules(StatusRoles, AbandonedResolutionIds), new BusinessCalendar(TimeZone, Holidays));
@@ -66,6 +66,7 @@ public sealed record TelltaleSettings
         var baselineSprintIds = CheckedIds(config.BaselineSprintIds, "baselineSprintIds", "sprint");
         var timeZone = SettingRules.FindTimeZone(config.TimeZone)
             ?? throw new SettingRefusedException($"timeZone: '{config.TimeZone}' is not a known IANA time zone ID.");
+        var minimumGroupSize = CheckedMinimumGroupSize(config.MinimumGroupSize ?? MinimumGroupSize.Default);
 
         return new TelltaleSettings
         {
@@ -81,7 +82,9 @@ public sealed record TelltaleSettings
                 string.Join(",", config.Holidays.Order().Select(day => day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))),
                 DerivedSource.BaselineSprintIdsOf(baselineSprintIds),
                 string.Join(",", config.StatusRoles.Select(status => $"{status.Key}={status.Value}")),
-                string.Join(",", abandonedResolutionIds.Order(StringComparer.Ordinal))),
+                string.Join(",", abandonedResolutionIds.Order(StringComparer.Ordinal)),
+                minimumGroupSize.Team,
+                minimumGroupSize.AssigneesBehindAFigure),
         };
     }
 
@@ -91,6 +94,27 @@ public sealed record TelltaleSettings
         {
             throw new SettingRefusedException($"{setting} must not be null.");
         }
+    }
+
+    /// <summary>
+    /// Each number is zero or more: zero turns its check off (owner decision D65), and a number below zero means
+    /// nothing. Any two such numbers are accepted (owner decision D66): the team number is a minimum, not the
+    /// size of the team, so a figure may need more assignees than it. Public for <c>discover</c>, which asks
+    /// this of the numbers in an existing file before it calls Jira; throws <see cref="SettingRefusedException"/>.
+    /// </summary>
+    public static MinimumGroupSize CheckedMinimumGroupSize(MinimumGroupSize minimumGroupSize)
+    {
+        if (minimumGroupSize.Team < 0)
+        {
+            throw new SettingRefusedException(MinimumGroupSize.NumberRefused("team"));
+        }
+
+        if (minimumGroupSize.AssigneesBehindAFigure < 0)
+        {
+            throw new SettingRefusedException(MinimumGroupSize.NumberRefused("assigneesBehindAFigure"));
+        }
+
+        return minimumGroupSize;
     }
 
     private static JiraConfig CheckedJira(JiraConfig jira)

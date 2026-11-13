@@ -429,11 +429,14 @@ public sealed class SqliteStore : ITelltaleStore
             connection,
             transaction,
             """
-            INSERT INTO run (as_of, raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, objects_version)
-            VALUES (@asOf, @rawDigest, @timeZone, @holidays, @baselineSprintIds, @statusRoles, @abandonedResolutionIds, @objectsVersion);
+            INSERT INTO run (as_of, raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure, objects_version)
+            VALUES (@asOf, @rawDigest, @timeZone, @holidays, @baselineSprintIds, @statusRoles, @abandonedResolutionIds, @minimumTeam, @minimumAssigneesBehindAFigure, @objectsVersion);
             """,
-            ["@asOf", "@rawDigest", "@timeZone", "@holidays", "@baselineSprintIds", "@statusRoles", "@abandonedResolutionIds", "@objectsVersion"],
-            [[StoredTime.ToStored(derived.AsOf), source.RawDigest, source.TimeZone, source.Holidays, source.BaselineSprintIds, source.StatusRoles, source.AbandonedResolutionIds, DerivedObjectsVersion]],
+            ["@asOf", "@rawDigest", "@timeZone", "@holidays", "@baselineSprintIds", "@statusRoles", "@abandonedResolutionIds", "@minimumTeam", "@minimumAssigneesBehindAFigure", "@objectsVersion"],
+            [[
+                StoredTime.ToStored(derived.AsOf), source.RawDigest, source.TimeZone, source.Holidays, source.BaselineSprintIds, source.StatusRoles, source.AbandonedResolutionIds,
+                source.MinimumTeam, source.MinimumAssigneesBehindAFigure, DerivedObjectsVersion,
+            ]],
             cancellationToken);
 
         await ExecuteForEachRowAsync(
@@ -474,7 +477,9 @@ public sealed class SqliteStore : ITelltaleStore
 
         // Another version's table can lack a column read here, so its version is asked first.
         await RequireDerivedByThisVersionAsync(connection, cancellationToken);
-        return await connection.QuerySingleOrDefaultAsync<DerivedSource?>(Command(cancellationToken, "SELECT raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids FROM run;"));
+        return await connection.QuerySingleOrDefaultAsync<DerivedSource?>(Command(
+            cancellationToken,
+            "SELECT raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure FROM run;"));
     }
 
     /// <summary>

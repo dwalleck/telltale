@@ -1,10 +1,10 @@
 # Owner decisions: the Jira flow report
 
-Code comments, tests, tickets and the spec cite the owner's decisions by number ("owner decision D49"). This is the list. All were made on 2026-11-12 while the first spec was built. Each line gives the decision and where its full wording is; the tickets are in `.scratch/jira-flow-report/issues/`.
+Code comments, tests, tickets and the spec cite the owner's decisions by number ("owner decision D49"). This is the list. D1 to D69 were made on 2026-11-12: D1 to D57 while the first spec was built, D64 to D69 afterwards, for the optional suppression spec (`.scratch/optional-suppression/spec.md`). Two things were decided on 2026-11-13, while that spec was built: D70, and the change to D66 that its row records. Each line gives the decision and where its full wording is; the tickets are in `.scratch/jira-flow-report/issues/`.
 
 A decision that changes a metric definition is also in `GLOSSARY.md`, in a commit that gives the reason.
 
-Some numbers are missing because the decision was about the build run itself and nothing in the repository cites it (D1, D10, D11), or because it was withdrawn (D46).
+Some numbers are missing because the decision was about the build run itself and nothing in the repository cites it (D1, D10, D11), because it was withdrawn (D46), or because it belongs to a spec that is not built yet (D58 to D63, the brief status visits spec, `.scratch/brief-status-visits/`).
 
 ## Collection
 
@@ -48,6 +48,8 @@ Some numbers are missing because the decision was about the build run itself and
 
 The current rule, in one place, is the "Minimum group size" entry of `GLOSSARY.md`. The decisions are listed in the order they were made, because later ones narrow or replace earlier ones.
 
+D5 to D56 describe the rule with its default numbers, five and three. They apply with whatever numbers are configured (D64 to D66). D64 to D69 were made on 2026-11-12, after the first run on real data; their reason is in ADR-0008.
+
 | # | Decision | Full wording |
 | --- | --- | --- |
 | D5 | A suppressed row still shows its issue count; only the figures are withheld. Narrowed by D41 and D54. | ticket 06 |
@@ -64,6 +66,12 @@ The current rule, in one place, is the "Minimum group size" entry of `GLOSSARY.m
 | D54 | A sprint whose delivered count is withheld under D49 shows its cycle time table as one "suppressed" line with no bucket rows. | spec, `GLOSSARY.md` |
 | D55 | That sprint's time in status counts stay. The method note says a late status's count can approximate the withheld count. | spec, `GLOSSARY.md` |
 | D56 | A baseline sprint whose delivered count is withheld under D49 withholds the whole baseline, as D50 does. | spec, `GLOSSARY.md` |
+| D64 | The minimum group size is one optional configuration setting, `minimumGroupSize`, with two whole numbers: `team` and `assigneesBehindAFigure`. Absent means five and three. | optional suppression spec, ADR-0008, `GLOSSARY.md` |
+| D65 | A number of zero turns that check off. With both zero, no figure or count is withheld for the size of the group behind it. This covers every rule in this section and the data quality footer's counts. | optional suppression spec, ADR-0008 |
+| D66 | Every existing rule applies with the configured numbers in place of five and three. The rules themselves (what is withheld when a check fails) do not change. Any two whole numbers of zero or more are accepted. (Changed on 2026-11-13: a first form refused a number behind a figure greater than a non-zero team number, for a reason that did not hold.) | optional suppression spec |
+| D67 | Every report's method note states the numbers in force. A report written with either number below its default also says so in a line under its heading. | optional suppression spec |
+| D68 | Hashing of person fields, the fields that are never stored, and the absence of any per-person view do not depend on the setting. | optional suppression spec, ADR-0008 |
+| D69 | `discover` writes the setting with five and three into a new configuration file and never changes it afterwards. | optional suppression spec |
 
 ## Commands, configuration and secrets
 
@@ -78,6 +86,7 @@ The current rule, in one place, is the "Minimum group size" entry of `GLOSSARY.m
 | D32 | A control character in a secret refuses the value. | ticket 12 |
 | D40 | On a board with no done status, `discover` still writes the file and says no status has the done role; `run` refuses the file until one is set. | ticket 11 |
 | D43 | `run`'s messages never quote a refused status role or project key. They still quote a refused time zone. | this list |
+| D70 | `discover` keeps its rule of never writing a file `run` would refuse for `minimumGroupSize` too. A rerun on a file whose numbers the loader refuses stops with the loader's message and leaves the file untouched. (2026-11-13) | ticket 05 of the optional suppression spec (`.scratch/optional-suppression/issues/`) |
 
 ## The repository
 

@@ -2,6 +2,7 @@ using System.Data.Common;
 using System.Globalization;
 using System.Text;
 using Telltale.Core;
+using Telltale.Core.Configuration;
 using Telltale.Core.Derive;
 using Telltale.Core.Storage;
 
@@ -42,9 +43,11 @@ public static class SprintReport
     /// <summary>
     /// Renders the report. Dates are shown in <paramref name="teamTimeZone"/>. <paramref name="baselineSprintIds"/>
     /// is the baseline sprint list the derived data was built with, in order: when it is not empty, both tables
-    /// get baseline columns and the method note says what the baseline is.
+    /// get baseline columns and the method note says what the baseline is. <paramref name="numbers"/> are the
+    /// minimum group size's numbers the derived data was built under (<see cref="NumbersInForce.Of"/>): the
+    /// caller reads them once, and the report states them and decides nothing by them.
     /// </summary>
-    public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, IReadOnlyList<string> baselineSprintIds, CancellationToken cancellationToken = default)
+    public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, IReadOnlyList<string> baselineSprintIds, NumbersInForce numbers, CancellationToken cancellationToken = default)
     {
         // Owner decisions D50, D56: while a baseline sprint has its delivered count withheld, every baseline figure is
         // withheld. The baseline views have no rows then, so the cells are written from this list.
@@ -63,6 +66,7 @@ public static class SprintReport
         // Each section is one block of the report, in order. A new section is a new method and a line here.
         var report = new StringBuilder();
         AppendTitle(report, sprint, teamTimeZone);
+        AppendNumbersBelowTheDefault(report, numbers);
         AppendDeliveredCount(report, sprint);
         AppendCycleTime(report, baseline, await store.QueryViewsAsync<CycleTimeRow>(
             """
@@ -77,7 +81,7 @@ public static class SprintReport
             cancellationToken));
         AppendTimeInStatus(report, baseline, await ReadTimeInStatusAsync(store, sprintId, cancellationToken));
         var quality = await ReadDataQualityAsync(store, cancellationToken);
-        AppendMethodNote(report, quality, baselineSprintIds, withheldBaselineSprints);
+        AppendMethodNote(report, quality, numbers, baselineSprintIds, withheldBaselineSprints);
         AppendFooter(report, quality);
         return report.ToString();
     }
@@ -101,9 +105,9 @@ public static class SprintReport
         (await store.QueryViewsAsync<DataQualityRow>("SELECT as_of, time_zone, anomaly_issue_count, delivered_between_sprints_count, suppressed FROM data_quality;", cancellationToken: cancellationToken)).Single();
 
     /// <summary>Renders the report and writes it into <paramref name="directory"/>. Returns the file's path.</summary>
-    public static async Task<string> WriteAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, IReadOnlyList<string> baselineSprintIds, string directory, CancellationToken cancellationToken = default)
+    public static async Task<string> WriteAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, IReadOnlyList<string> baselineSprintIds, NumbersInForce numbers, string directory, CancellationToken cancellationToken = default)
     {
-        var text = await RenderAsync(store, sprintId, teamTimeZone, baselineSprintIds, cancellationToken);
+        var text = await RenderAsync(store, sprintId, teamTimeZone, baselineSprintIds, numbers, cancellationToken);
 
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, FileName(sprintId));
@@ -123,6 +127,45 @@ public static class SprintReport
 
         report.Append("# ").Append(Markdown.Text(sprint.SprintName)).Append(" (").Append(dates).Append(")\n\n");
     }
+
+    /// <summary>
+    /// The line under the heading of a report written with either number below its default (owner decision
+    /// D67), so that a report passed on without its context still says what its figures may rest on. A report
+    /// under numbers at or above the defaults has no such line. The line gives both numbers, says of each how
+    /// it stands to its default, and says what follows from each one that is below.
+    /// </summary>
+    private static void AppendNumbersBelowTheDefault(StringBuilder report, NumbersInForce numbers)
+    {
+        var byDefault = MinimumGroupSize.Default;
+        var (teamIsBelow, figureIsBelow) = (numbers.Team < byDefault.Team, numbers.BehindAFigure < byDefault.AssigneesBehindAFigure);
+        if (!teamIsBelow && !figureIsBelow)
+        {
+            return;
+        }
+
+        if (!numbers.TeamCheck && !numbers.FigureCheck)
+        {
+            report.Append("Small-group suppression is off: a figure in this report may rest on the work of one or two people.\n\n");
+            return;
+        }
+
+        // Said of the default's number, so that it is true under every pair of numbers and of every sprint: under
+        // the default a sprint with such a team is withheld as a whole, and under a smaller team number one can be
+        // reported. Which of its figures are shown is the method note's to say.
+        var smallTeam = $"sprint with a team smaller than {NumbersInForce.Number(byDefault.Team)} can be reported";
+        const string FewPeople = "figure may rest on the work of fewer people than the default allows";
+        report.Append("Minimum group size in this report: ")
+            .Append(numbers.TeamCheck ? $"a minimum team of {numbers.TeamInWords}" : "no minimum team")
+            .Append(" (").Append(AgainstTheDefault(numbers.Team, byDefault.Team)).Append(") and ")
+            .Append(numbers.FigureCheck ? $"a minimum of {numbers.AssigneesBehindAFigure()}" : "no minimum of assignees")
+            .Append(" behind a figure (").Append(AgainstTheDefault(numbers.BehindAFigure, byDefault.AssigneesBehindAFigure)).Append("). ")
+            .Append(teamIsBelow && figureIsBelow ? $"A {smallTeam}, and a {FewPeople}" : teamIsBelow ? $"A {smallTeam}" : $"A {FewPeople}")
+            .Append(".\n\n");
+    }
+
+    /// <summary>"below the default of five", "the default", or "above the default of five".</summary>
+    private static string AgainstTheDefault(int number, int byDefault) =>
+        number == byDefault ? "the default" : $"{(number < byDefault ? "below" : "above")} the default of {NumbersInForce.Number(byDefault)}";
 
     private static void AppendDeliveredCount(StringBuilder report, DeliveredRow sprint) =>
         report.Append("Delivered issues: ").Append(Figure(sprint.Suppressed, sprint.DeliveredCount?.ToString(CultureInfo.InvariantCulture))).Append('\n');
@@ -189,28 +232,29 @@ public static class SprintReport
 
     /// <summary>
     /// What the figures mean, with each rule as the glossary and the owner's decisions state it. The suppression
-    /// rule is ADR-0003's for results grouped by issue attributes. The time zone is the one derive stored.
+    /// rule is ADR-0003's for results grouped by issue attributes, stated with the numbers the derived data was
+    /// built under (<see cref="AppendMinimumGroupSize"/>). The time zone is the one derive stored.
     /// </summary>
-    private static void AppendMethodNote(StringBuilder report, DataQualityRow quality, IReadOnlyList<string> baselineSprintIds, IReadOnlyList<string> withheldBaselineSprints)
+    private static void AppendMethodNote(StringBuilder report, DataQualityRow quality, NumbersInForce numbers, IReadOnlyList<string> baselineSprintIds, IReadOnlyList<string> withheldBaselineSprints)
     {
         report.Append("\n## Method\n\n")
             .Append("- Durations are in business days: days that are neither a weekend nor a company holiday, each counted in full (24 hours) in the team's time zone (").Append(quality.TimeZone).Append("). Calendar days are shown alongside: elapsed time divided by 24 hours.\n")
             .Append("- Cycle time runs from an issue's first entry into a work status to its last entry into a done status, for delivered issues only. It belongs to the sprint in which the issue was delivered.\n")
             .Append("- The median is the middle value, or the mean of the two middle values. The P85 is the smallest value with at least 85% of the values at or below it.\n")
-            .Append("- Time in status includes delivered and unfinished issues in statuses before done, clipped to the sprint window and each issue's membership intervals. An issue counts toward a status only if it spent more than zero business days there. Total business days sum that time across all contributing issues, including repeated visits; this is accumulated issue time, not effort or the sprint's elapsed duration. Totals and medians use the same privacy rules.\n")
-            .Append("- A figure is shown only where it cannot show one person's work. The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in it. When the team is smaller than five, the delivered count and both tables read \"suppressed\", with no rows. With a team of five or more, a row with fewer than three distinct assignees behind it keeps its issue count and reads \"suppressed\" for its figures, and the delivered count reads \"suppressed\" when fewer than three distinct assignees are among the delivered issues, and the cycle time table then reads \"suppressed\" as well, with no rows, because the number of its rows and their counts (the delivered issues that have a cycle time) would each give a lower bound of the withheld count. The time in status table of such a sprint keeps its counts: they count every issue that spent time in a status, delivered or not, so the count of a late status can be close to the withheld delivered count. The footer's two counts read \"suppressed\" when the issues in the whole store have fewer than five distinct assignees, or fewer than three are among the issues counted.\n")
-            .Append("- An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. An unassigned issue counts toward nobody.\n");
+            .Append("- Time in status includes delivered and unfinished issues in statuses before done, clipped to the sprint window and each issue's membership intervals. An issue counts toward a status only if it spent more than zero business days there. Total business days sum that time across all contributing issues, including repeated visits; this is accumulated issue time, not effort or the sprint's elapsed duration. Totals and medians use the same privacy rules.\n");
+        AppendMinimumGroupSize(report, numbers);
 
         // Said only when there is a baseline: without one the report has no baseline column to explain.
         if (baselineSprintIds.Count > 0)
         {
             report.Append("- The baseline columns pool every issue of the baseline sprints, a list fixed in the configuration (sprints ").AppendJoin(", ", baselineSprintIds)
-                .Append("), each a completed sprint. A baseline figure reads \"suppressed\" when any baseline sprint has that row suppressed in its own report, so that a pooled figure cannot give back a withheld one. It reads \"none\" when no issue of the baseline sprints is in the row. Every baseline figure reads \"suppressed\" when a baseline sprint has its delivered count withheld: its team is smaller than five, or fewer than three distinct assignees are among its delivered issues.\n");
+                .Append("), each a completed sprint. ")
+                .Append(WhenABaselineFigureIsNotShown(numbers)).Append('\n');
         }
 
         if (withheldBaselineSprints.Count > 0)
         {
-            report.Append("- ").Append(BaselineSprintRules.WithheldInTheReport(withheldBaselineSprints)).Append('\n');
+            report.Append("- ").Append(BaselineSprintRules.WithheldInTheReport(withheldBaselineSprints, numbers)).Append('\n');
         }
 
         report.Append("- An interval that is still open (an issue still in a status, a sprint not yet completed) ends at the as-of time below.\n")
@@ -218,10 +262,87 @@ public static class SprintReport
     }
 
     /// <summary>
+    /// The method note's paragraphs on the minimum group size and on who counts as an assignee, with the numbers
+    /// in force (owner decision D67). Each sentence is about one of the two checks and is written only while
+    /// that check applies: a number of zero turns its check off (D65). With both off, the two paragraphs give
+    /// way to one that says so.
+    /// </summary>
+    private static void AppendMinimumGroupSize(StringBuilder report, NumbersInForce numbers)
+    {
+        if (!numbers.TeamCheck && !numbers.FigureCheck)
+        {
+            report.Append("- No figure in this report was withheld for group size: small-group suppression is off (minimumGroupSize in the configuration file). Person fields are still hashed before they are stored.\n");
+            return;
+        }
+
+        var team = numbers.TeamInWords;
+        var behindAFigure = numbers.AssigneesBehindAFigure(distinct: true);
+        var are = numbers.BehindAFigureAre;
+
+        // One assignee behind a figure is one person's work, so the opening sentence is said only from two.
+        report.Append(numbers.BehindAFigure >= 2
+            ? "- A figure is shown only where it cannot show one person's work."
+            : "- A figure is shown only for a group of at least the minimum group size.");
+        if (numbers.TeamCheck)
+        {
+            report.Append(" The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in it. When the team is smaller than ").Append(team)
+                .Append(", the delivered count and both tables read \"suppressed\", with no rows.");
+        }
+
+        if (numbers.FigureCheck)
+        {
+            report.Append(numbers.TeamCheck ? $" With a team of {team} or more, a row" : " A row")
+                .Append(" with fewer than ").Append(behindAFigure).Append(" behind it keeps its issue count and reads \"suppressed\" for its figures, and the delivered count reads \"suppressed\" when fewer than ")
+                .Append(behindAFigure).Append(' ').Append(are).Append(" among the delivered issues, and the cycle time table then reads \"suppressed\" as well, with no rows, because the number of its rows and their counts (the delivered issues that have a cycle time) would each give a lower bound of the withheld count. The time in status table of such a sprint keeps its counts: they count every issue that spent time in a status, delivered or not, so the count of a late status can be close to the withheld delivered count.");
+        }
+        else
+        {
+            // Of the sprint itself: a baseline figure beside it can still be withheld, for a baseline sprint's team.
+            report.Append(" With a team of ").Append(team).Append(" or more, every figure of the sprint itself is shown, whatever the number of assignees behind it.");
+        }
+
+        report.Append(" The footer's two counts read \"suppressed\" when ");
+        if (numbers.TeamCheck)
+        {
+            report.Append("the issues in the whole store have fewer than ").Append(numbers.TeamAssignees(distinct: true))
+                .Append(numbers.FigureCheck ? $", or fewer than {numbers.BehindAFigureInWords} {are} among the issues counted." : ".");
+        }
+        else
+        {
+            report.Append("fewer than ").Append(behindAFigure).Append(' ').Append(are).Append(" among the issues counted. No figure is withheld for the size of a sprint's team.");
+        }
+
+        report.Append("\n- An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. An unassigned issue counts toward nobody.\n");
+    }
+
+    /// <summary>
+    /// The baseline paragraph's sentences on what a baseline cell reads in place of a figure (owner decisions
+    /// D44, D50, D56), with the numbers in force. A row is suppressed in a sprint's own report only by the check
+    /// on the assignees behind a figure, so the sentence about such a row is said only while that check applies.
+    /// With both checks off no baseline figure is withheld, and only the sentence about a row the baseline lacks
+    /// is left.
+    /// </summary>
+    private static string WhenABaselineFigureIsNotShown(NumbersInForce numbers)
+    {
+        const string None = "reads \"none\" when no issue of the baseline sprints is in the row.";
+        if (!numbers.TeamCheck && !numbers.FigureCheck)
+        {
+            return $"A baseline figure {None}";
+        }
+
+        var teamIsSmall = $"its team is smaller than {numbers.TeamInWords}";
+        var fewDelivered = $"fewer than {numbers.AssigneesBehindAFigure(distinct: true)} {numbers.BehindAFigureAre} among its delivered issues";
+        return (numbers.FigureCheck
+                ? $"A baseline figure reads \"suppressed\" when any baseline sprint has that row suppressed in its own report, so that a pooled figure cannot give back a withheld one. It {None}"
+                : $"A baseline figure {None}")
+            + $" Every baseline figure reads \"suppressed\" when a baseline sprint has its delivered count withheld: {(numbers.TeamCheck && numbers.FigureCheck ? $"{teamIsSmall}, or {fewDelivered}" : numbers.TeamCheck ? teamIsSmall : fewDelivered)}.";
+    }
+
+    /// <summary>
     /// The data-quality footer. Its two counts cover the whole store, not the sprint: an issue delivered
     /// between sprints belongs to no sprint. They are counts only: no issue is named. The view withholds
-    /// them when the whole store has fewer than five distinct assignees, or fewer than three are among the
-    /// issues a count covers.
+    /// them when the whole store has fewer distinct assignees than a team (five by default), or fewer than a
+    /// figure needs (three by default) are among the issues a count covers.
     /// </summary>
     private static void AppendFooter(StringBuilder report, DataQualityRow quality)
     {
@@ -303,7 +424,7 @@ public static class SprintReport
     private sealed class TimeInStatusRow
     {
         public string StatusName { get; init; } = "";
-        /// <summary>Null in the one row of a sprint short of five assignees: it has no status rows, and that one row is how the report knows to write the "suppressed" line (owner decisions D41, D45).</summary>
+        /// <summary>Null in the one row of a sprint short of a team (five assignees by default): it has no status rows, and that one row is how the report knows to write the "suppressed" line (owner decisions D41, D45).</summary>
         public long? IssueCount { get; init; }
         public double? MedianBusinessDays { get; init; }
         public double? TotalBusinessDays { get; init; }
@@ -329,14 +450,14 @@ public static class SprintReport
         public string? Ended { get; init; }
         public string? PlannedEnd { get; init; }
         public long? DeliveredCount { get; init; }
-        /// <summary>The delivered count's own flag: the team check, and three assignees among the delivered issues (owner decision D49). The cycle time view withholds its rows under the same check (D54).</summary>
+        /// <summary>The delivered count's own flag: the team check, and the assignees a figure needs (three by default) among the delivered issues (owner decision D49). The cycle time view withholds its rows under the same check (D54).</summary>
         public long Suppressed { get; init; } = 1;
     }
 
     private sealed class CycleTimeRow
     {
         public double? PointBucket { get; init; }
-        /// <summary>Null in the one row of a sprint whose delivered count is withheld (short of five assignees, or of three among its delivered issues): it has no bucket rows, and that one row is how the report knows to write the "suppressed" line (owner decisions D41, D54).</summary>
+        /// <summary>Null in the one row of a sprint whose delivered count is withheld (short of a team, or of the assignees a figure needs among its delivered issues: five and three by default): it has no bucket rows, and that one row is how the report knows to write the "suppressed" line (owner decisions D41, D54).</summary>
         public long? IssueCount { get; init; }
         public double? MedianBusinessDays { get; init; }
         public double? P85BusinessDays { get; init; }

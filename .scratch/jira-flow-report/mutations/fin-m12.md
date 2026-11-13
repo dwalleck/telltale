@@ -18,3 +18,5 @@ Claim (A3): a run reads each secret once. The test passed when written.
 - Verified 2026-11-12 at a198e06: red, 1 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
 - Verified 2026-11-12 at cf5da5b: red, 1 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
 - Verified 2026-11-12 at bc92ab3: red, 1 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
+- Verified 2026-11-12 at 1830824: red, 1 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
+- Verified 2026-11-13 at d534f7f: red, 1 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.

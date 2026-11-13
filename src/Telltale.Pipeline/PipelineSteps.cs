@@ -104,7 +104,8 @@ public sealed class PipelineSteps
         RequireBaselineSprints(raw, completeFrom);
         var derived = Derivation.Derive(raw, _settings.Derivation, AsOf(raw));
         var previous = await _store.ReadAnomaliesAsync(cancellationToken);
-        await _store.ReplaceDerivedAsync(derived, await SourceAsync(cancellationToken), cancellationToken);
+        var source = await SourceAsync(cancellationToken);
+        await _store.ReplaceDerivedAsync(derived, source, cancellationToken);
 
         // Owner decision D51: such a sprint stops nothing. It is in no figure, and the console says so.
         foreach (var sprintId in derived.ClosedSprintsWithoutAnEnd)
@@ -112,7 +113,7 @@ public sealed class PipelineSteps
             await _environment.Notices.WriteLineAsync($"{SprintWindows.ClosedWithoutAnEnd(sprintId)}: no delivery is counted in it, and it cannot be reported or be a baseline sprint.");
         }
 
-        await NameWithheldBaselineSprintsAsync(cancellationToken);
+        await NameWithheldBaselineSprintsAsync(NumbersInForce.Of(source), cancellationToken);
 
         if (derived.Anomalies.Count == 0)
         {
@@ -120,7 +121,7 @@ public sealed class PipelineSteps
         }
 
         // The totals and the per-issue lines are written whatever the report's footer does with its count:
-        // the footer withholds it for a small store or fewer than three assignees, and this log goes to the
+        // the footer withholds it for a small store or too few assignees (three by default), and this log goes to the
         // operator, who holds the store and its per-issue derived tables anyway.
 
         var unseen = derived.Anomalies.Where(anomaly => !previous.Contains((anomaly.IssueId, anomaly.Message))).ToList();
@@ -199,7 +200,7 @@ public sealed class PipelineSteps
     /// </summary>
     public async Task ReportAsync(long? sprintId, bool needsSprint, CancellationToken cancellationToken)
     {
-        var completeFrom = await RequireCurrentDerivedDataAsync(cancellationToken);
+        var (completeFrom, derivedFrom) = await RequireCurrentDerivedDataAsync(cancellationToken);
 
         var sprint = sprintId?.ToString(CultureInfo.InvariantCulture)
             ?? await SprintReport.MostRecentlyCompletedSprintAsync(_store, cancellationToken);
@@ -241,8 +242,11 @@ public sealed class PipelineSteps
         }
 
         BaselineSprintRules.RequireWithinWhatWasFetched(starts, _settings.BaselineSprintIds, completeFrom);
-        await NameWithheldBaselineSprintsAsync(cancellationToken);
-        var path = await SprintReport.WriteAsync(_store, sprint, _settings.TimeZone, [.. _settings.BaselineSprintIds.Order(StringComparer.Ordinal)], _environment.ReportDirectory, cancellationToken);
+
+        // The numbers the derived data was built under, from its record: read once, for the console and the report.
+        var numbers = NumbersInForce.Of(derivedFrom);
+        await NameWithheldBaselineSprintsAsync(numbers, cancellationToken);
+        var path = await SprintReport.WriteAsync(_store, sprint, _settings.TimeZone, [.. _settings.BaselineSprintIds.Order(StringComparer.Ordinal)], numbers, _environment.ReportDirectory, cancellationToken);
         await _environment.Out.WriteLineAsync($"Wrote {path}");
     }
 
@@ -250,8 +254,9 @@ public sealed class PipelineSteps
     /// Owner decisions D50, D56: a baseline sprint whose delivered count is withheld stops nothing. The views
     /// withhold every baseline figure, and the console says which sprint is why: when the derived data is
     /// rebuilt, and when a report is written from it. Once for one pipeline, so a run says it once.
+    /// <paramref name="numbers"/> are the ones the derived data was built under.
     /// </summary>
-    private async Task NameWithheldBaselineSprintsAsync(CancellationToken cancellationToken)
+    private async Task NameWithheldBaselineSprintsAsync(NumbersInForce numbers, CancellationToken cancellationToken)
     {
         if (_withheldBaselineSprintsNamed)
         {
@@ -262,7 +267,7 @@ public sealed class PipelineSteps
         var withheld = await BaselineSprintRules.ReadWithheldAsync(_store, cancellationToken);
         if (withheld.Count > 0)
         {
-            await _environment.Notices.WriteLineAsync(BaselineSprintRules.WithheldOnTheConsole(withheld));
+            await _environment.Notices.WriteLineAsync(BaselineSprintRules.WithheldOnTheConsole(withheld, numbers));
         }
     }
 
@@ -289,9 +294,10 @@ public sealed class PipelineSteps
     /// What every command that reads the metric views asks first: the store was filled under the configured
     /// collection settings, its people are hashed with the salt at hand, and the derived data was built from
     /// the raw data and the settings as they are now. Each refusal names the command that repairs it.
-    /// Returns the moment from which the store holds every issue (see <see cref="RequireFilledUnderTheConfigurationAsync"/>).
+    /// Returns the moment from which the store holds every issue (see <see cref="RequireFilledUnderTheConfigurationAsync"/>),
+    /// and the record of what the derived data was built from, which then equals what a rebuild would record now.
     /// </summary>
-    private async Task<DateTimeOffset?> RequireCurrentDerivedDataAsync(CancellationToken cancellationToken)
+    private async Task<(DateTimeOffset? CompleteFrom, DerivedSource DerivedFrom)> RequireCurrentDerivedDataAsync(CancellationToken cancellationToken)
     {
         var completeFrom = await RequireFilledUnderTheConfigurationAsync(cancellationToken);
         await RequireStoredSaltAsync(cancellationToken);
@@ -327,13 +333,30 @@ public sealed class PipelineSteps
             throw new UserFacingException("baselineSprintIds in the configuration file changed since the derived data was built. Run derive first.");
         }
 
-        return completeFrom;
+        // The views withhold by the numbers the last derive recorded (minimum_group_size). Under other numbers
+        // they would show, or withhold, what the configuration no longer says. Deriving again is all it takes:
+        // the numbers decide nothing about what is fetched.
+        if (derivedFrom.MinimumTeam != current.MinimumTeam
+            || derivedFrom.MinimumAssigneesBehindAFigure != current.MinimumAssigneesBehindAFigure)
+        {
+            throw new UserFacingException("minimumGroupSize in the configuration file changed since the derived data was built. Run derive first.");
+        }
+
+        // Each check above compares the fields it knows and says which setting changed. This one compares the
+        // two records whole, so that a field added later and forgotten above still stops the command: the
+        // message is less exact, and stale derived data is never passed off as current.
+        if (derivedFrom != current)
+        {
+            throw new UserFacingException("The configuration or the raw data changed since the derived data was built. Run derive first.");
+        }
+
+        return (completeFrom, derivedFrom);
     }
 
     /// <summary>
     /// What the raw data can say against the baseline sprint list: every baseline sprint is a completed sprint
-    /// with a sprint window, and none started before the start date the store was last filled from. A team of
-    /// five is the views' rule, and one that fails it is not refused (owner decision D50).
+    /// with a sprint window, and none started before the start date the store was last filled from. The smallest
+    /// team (five by default) is the views' rule, and a sprint that fails it is not refused (owner decision D50).
     /// </summary>
     private void RequireBaselineSprints(RawData raw, DateTimeOffset? completeFrom)
     {

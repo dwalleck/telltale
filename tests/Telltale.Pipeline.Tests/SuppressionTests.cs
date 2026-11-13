@@ -11,10 +11,7 @@ namespace Telltale.Pipeline.Tests;
 /// </summary>
 public class SuppressionTests
 {
-    private const string CycleTimeHeader =
-        "\n## Cycle time by point bucket\n\n"
-        + "| Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |\n"
-        + "| --- | ---: | ---: | ---: | ---: | ---: |\n";
+    private const string CycleTimeHeader = ReportText.CycleTimeHeader;
 
     private const string TimeInStatusHeading = "\n## Time in status\n";
 
@@ -22,7 +19,7 @@ public class SuppressionTests
     private const string SuppressedTables = "\n## Cycle time by point bucket\n\nsuppressed\n" + TimeInStatusHeading + "\nsuppressed\n";
 
     /// <summary>What follows the two tables.</summary>
-    private const string MethodHeading = "\n## Method\n";
+    private const string MethodHeading = ReportText.MethodHeading;
 
     [Test]
     public async Task A_point_bucket_with_two_assignees_reads_suppressed_beside_its_issue_count_and_one_with_three_is_reported()

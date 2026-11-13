@@ -3,8 +3,9 @@
 -- Statuses with the done role are left out: an issue in one is not waiting on the team. Their time
 -- stays in sprint_status_time and status_interval.
 -- Minimum group size (GLOSSARY, ADR-0003): the median and total are null and suppressed is 1 when the sprint has fewer
--- than five distinct assignees (sprint_team) or fewer than three are behind the row's issues. A row short
--- of three keeps its issue_count (owner decision D5). A sprint short of five has no status rows at all: it
+-- distinct assignees than a team (sprint_team) or fewer than a figure needs are behind the row's issues
+-- (minimum_group_size's two numbers: the configured ones, five and three by default). A row short of the
+-- second keeps its issue_count (owner decision D5). A sprint short of a team has no status rows at all: it
 -- has exactly one row, with no status, no count (D41) and suppressed = 1, whether or not an issue spent
 -- time in it (D45: which statuses have rows would say where its few people's work sat).
 -- An unassigned issue counts toward nobody.

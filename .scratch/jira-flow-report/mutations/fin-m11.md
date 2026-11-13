@@ -18,3 +18,6 @@ Claim (C6): a connection that writes overwrites what it deletes. One of the thre
 - Verified 2026-11-12 at a198e06: red, 1 failed of 28 (Pipeline, filter /*/*/(BackfillRebuildTests|PrivacyTests)/*); restored.
 - Verified 2026-11-12 at cf5da5b: red, 1 failed of 28 (Pipeline, filter /*/*/(BackfillRebuildTests|PrivacyTests)/*); restored.
 - Verified 2026-11-12 at bc92ab3: red, 1 failed of 28 (Pipeline, filter /*/*/(BackfillRebuildTests|PrivacyTests)/*); restored.
+- Verified 2026-11-12 at 1830824: red, 1 failed of 28 (Pipeline, filter /*/*/(BackfillRebuildTests|PrivacyTests)/*); restored.
+- Verified 2026-11-13 at d534f7f: red, 1 failed of 28 (Pipeline, filter /*/*/(BackfillRebuildTests|PrivacyTests)/*); restored.
+- Verified 2026-11-13 at c7de38f: red, 1 failed of 28 (Pipeline, filter /*/*/(BackfillRebuildTests|PrivacyTests)/*); restored.
