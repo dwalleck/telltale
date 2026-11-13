@@ -17,6 +17,33 @@
 - [ ] A backfill completes and a report is produced for the most recent completed sprint
 - [ ] Team time zone and company holiday list are entered in the configuration
 
+## Before you start
+
+This section is for whoever picks the ticket up on the work laptop, including an agent that has only this repository. It was added on 2026-11-12, after the build was merged.
+
+**Read first:** `README.md` (install, first run, commands), `GLOSSARY.md`, `docs/decisions.md` (the owner decisions that comments and tests cite by number), and `docs/research/jira-cloud-rest-api.md` ("research note 05": the Jira shapes the code assumes, every one of them unverified against a real site).
+
+**The repository is public, on a personal GitHub account.** `CLAUDE.md` says company data stays on company systems. On this ticket that means:
+
+- Run the tool from a working folder outside the clone. `config/`, `data/` and `reports/` are ignored by git as a second guard, not as permission to keep them in the clone.
+- Never commit, push or paste into a ticket, a commit message, a test name or a code comment: the configuration file, the database, a report, a real Jira response, or a real site URL, project key, board ID, sprint name, status name, issue ID, person or field value. The status names in the checklist below are the owner's own description and are the only exception.
+- When the real site differs from what the code assumes, describe the difference in terms of shape ("`created` is a number", "the last page has no `isLast`"), then reproduce it in the fake Jira (`tests/Telltale.Pipeline.Tests/Harness/FakeJira.cs`) with invented values, with a test that fails before the fix. Do not copy a response and edit it.
+- Secrets go in with `telltale secrets set`, typed at its prompt. They are never an argument, an environment variable on Windows, or text in a file or a conversation.
+
+**Who does what.** The ticket is `ready-for-human` because the owner has to be there: only the owner enters credentials, judges whether a real status or resolution has the assumed role, and decides anything that changes a metric definition. An agent's part is running the checks, reading error messages, and fixing differences with synthetic fixtures and tests. A change to a metric definition is a commit that gives the reason (`CLAUDE.md`).
+
+**Checks.** `dotnet build` and `dotnet test` from the repository root are the whole check; the build treats warnings as errors. The build run used a toolkit and skills that are not in this repository (`.repo-toolkit.psd1` and `.scratch/jira-flow-report/mutations/` belong to it) and are not needed here.
+
+**Windows has never run this code.** Everything was built and tested on macOS. If tests fail on the laptop, the likely causes are file locking (the store's lock file, a database file still open when a test deletes it), path separators, line endings in compared text, and the tests that read the database file's bytes after a delete.
+
+**Setup choices decided after this ticket was written:**
+
+- [ ] The hashing salt is created with `telltale secrets set hashing-salt --generate`, before the first backfill, and is not changed afterwards. Changing it needs `--replace` and a new backfill.
+- [ ] `backfillStart` is earlier than the start of the earliest baseline sprint. A report refuses a sprint that started before it.
+- [ ] Each baseline sprint has a team of at least five assignees and at least three distinct assignees among its delivered issues. One sprint that falls short withholds the whole baseline, and the report names it (D50, D56). Check the candidates with `telltale report --sprint <id>` before fixing the list: a sprint whose "Delivered issues" line reads `suppressed` cannot be a baseline sprint.
+- [ ] The baseline sprint list is fixed once and then left alone.
+- [ ] Every command but `backfill` refuses a store filled under other collection settings. After changing the board, the projects, a field ID or `backfillStart`, run `backfill`.
+
 ## Handed over by the resolved tickets
 
 Collected in the final fix pass (2026-11-12) from the comments of tickets 04, 09, 10, 11, 12 and 14 and from the final review, so that this ticket holds every "confirm on a real site or on Windows" item in one place. Nothing here ran against a real site or on Windows. Each item is confirmed, or corrected with a synthetic fixture that reproduces the difference.

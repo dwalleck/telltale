@@ -10,12 +10,14 @@ The project owner (a senior .NET engineer) needs to justify AI plan upgrades to 
 
 1. `GLOSSARY.md` — the project's language. Settled.
 2. `docs/adr/` — seven decisions with real trade-offs. Settled unless the owner reopens one.
-3. `docs/context/pilot-plan.md` — the story, the metrics, the pilot. The "why".
+3. `docs/context/pilot-plan.md` — the story, the metrics, the evaluation. The "why".
 4. `docs/context/system-design.md` — the working technical design and source-system details. The "how", including what is already built.
 5. `docs/context/confluence-page.md` — the report layout.
 6. `src/Telltale.Core` and `tests/Telltale.Core.Tests` — the code that exists.
 
 ## What is open
+
+**Update, Nov 12, 2026:** the first spec is built and merged. The Jira path works end to end against synthetic fixtures: `discover`, `secrets set`, `backfill`, `sync`, `derive`, `report`, `run` and `query` (see `README.md`). The owner's decisions made while building it are in `docs/decisions.md`. The next step is ticket 13, the first run against the real Jira on the work laptop: `.scratch/jira-flow-report/issues/13-first-real-run-on-work-laptop.md`. Start there.
 
 **Update, Nov 11, 2026:** a grilling session settled the Scope, Definitions and Implementation items below; the answers are in `GLOSSARY.md`, ADR-0002, ADR-0003 and `system-design.md`. The first spec is the Jira path end to end. What remains open: the company facts (found by `discover` on the work laptop), the Kiro session details (first ticket of the sessions spec), the table schema (for the spec), and three owner tasks: the volunteers' consent to cohort reporting, the baseline sprint list, and the date the success criteria go to leadership.
 
@@ -30,7 +32,7 @@ The original list, kept for the record:
 - Review round, when a reviewer leaves several reviews before the author pushes.
 - Rework: lines changed again by anyone, or only outside the original PR's author?
 - Linked bugs: which Jira link type connects a bug to the issue that caused it?
-- Baseline window: how many sprints before the pilot.
+- Baseline window: how many sprints before the evaluation.
 
 **Facts to discover (look up, don't ask)**
 - Where Kiro stores session logs and what they contain; whether skill invocations are detectable. Blocks the exporter.
@@ -53,5 +55,5 @@ The original list, kept for the record:
 
 ## Other artifacts (outside the repo)
 
-- Planning doc "Measuring AI Value: A Structured-Use Pilot" (claude.ai Docs); its content is in `pilot-plan.md`.
-- Design canvas "AI Pilot Dashboard — Confluence Sketch" (claude.ai); its layout is in `confluence-page.md`.
+- Planning doc (claude.ai Docs); its content is in `pilot-plan.md`.
+- Design canvas (claude.ai); its layout is in `confluence-page.md`.

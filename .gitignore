@@ -488,7 +488,9 @@ $RECYCLE.BIN/
 .ipe-logs/
 .worktrees/
 
-# The store and the reports Telltale writes when it is run from the repository root: never committed.
+# What Telltale reads and writes when it is run from the repository root: never committed.
+# The configuration file holds no secrets, but it names the Jira site and its projects.
+/config/
 /data/
 /reports/
 
