@@ -10,7 +10,9 @@
 -- configured number, three by default). Such a bucket keeps its issue_count (owner decision D5).
 -- A sprint whose delivered count is withheld (sprint_team.delivered_suppressed: fewer assignees in
 -- the sprint than a team, or fewer than a figure needs among its delivered issues) has no bucket rows at all: it has exactly one
--- row, with no bucket, no count and suppressed = 1, whether or not anything was delivered in it. Bucket
+-- row, with no bucket, no count and suppressed = 1, whether or not anything was delivered in it. (With both
+-- numbers zero no delivered count is withheld, so no sprint has that row; with only the number behind a figure
+-- zero, a sprint short of a team still has it.) Bucket
 -- counts add up to the delivered issues that have a cycle time, and the number of bucket rows is at most
 -- that: both bound the withheld delivered count from below (D41, D54). And which buckets have rows says what
 -- the sprint's few people worked on (D45). In that row a null

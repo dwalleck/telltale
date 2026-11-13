@@ -96,17 +96,21 @@ public sealed record TelltaleSettings
         }
     }
 
-    /// <summary>Each number is zero or more: zero turns its check off (owner decision D65), and a number below zero means nothing.</summary>
+    /// <summary>
+    /// Each number is zero or more: zero turns its check off (owner decision D65), and a number below zero means
+    /// nothing. Any two such numbers are accepted (owner decision D66): the team number is a minimum, not the
+    /// size of the team, so a figure may need more assignees than it.
+    /// </summary>
     private static MinimumGroupSize CheckedMinimumGroupSize(MinimumGroupSize minimumGroupSize)
     {
         if (minimumGroupSize.Team < 0)
         {
-            throw new SettingRefusedException("minimumGroupSize.team must be a whole number of zero or more.");
+            throw new SettingRefusedException(MinimumGroupSize.NumberRefused("team"));
         }
 
         if (minimumGroupSize.AssigneesBehindAFigure < 0)
         {
-            throw new SettingRefusedException("minimumGroupSize.assigneesBehindAFigure must be a whole number of zero or more.");
+            throw new SettingRefusedException(MinimumGroupSize.NumberRefused("assigneesBehindAFigure"));
         }
 
         return minimumGroupSize;

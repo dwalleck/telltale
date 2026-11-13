@@ -24,6 +24,9 @@ public static class ConfigFile
 
         // A setting written twice is refused: the reader of the file could not tell which value is in force.
         AllowDuplicateProperties = false,
+
+        // minimumGroupSize is read by hand, so that null, a quoted number or a missing number is refused by name.
+        Converters = { new MinimumGroupSizeConverter() },
     };
 
     /// <summary>

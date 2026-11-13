@@ -11,6 +11,12 @@ public sealed record MinimumGroupSize
     /// <summary>The numbers in force when the configuration file has no <c>minimumGroupSize</c>: five and three (owner decision D64).</summary>
     public static MinimumGroupSize Default { get; } = new() { Team = 5, AssigneesBehindAFigure = 3 };
 
+    /// <summary>
+    /// Why the number <paramref name="name"/> (<c>team</c> or <c>assigneesBehindAFigure</c>) of the setting is
+    /// refused, whatever was written in its place: the one wording, for the file's reader and for the rules.
+    /// </summary>
+    public static string NumberRefused(string name) => $"minimumGroupSize.{name} must be written as a whole number of zero or more.";
+
     /// <summary>The fewest distinct assignees a sprint, or the whole store for the footer's counts, needs for anything to be shown.</summary>
     public required int Team { get; init; }
 

@@ -186,7 +186,7 @@ public class OptionalSuppressionTests
 
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            $"The configuration file {pipeline.ConfigPath} is not valid: minimumGroupSize.{refused} must be a whole number of zero or more.\n");
+            $"The configuration file {pipeline.ConfigPath} is not valid: minimumGroupSize.{refused} must be written as a whole number of zero or more.\n");
         await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(0);
         await Assert.That(File.Exists(pipeline.DatabasePath)).IsFalse();
     }
