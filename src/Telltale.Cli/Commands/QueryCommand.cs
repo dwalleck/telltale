@@ -14,7 +14,7 @@ internal static class QueryCommand
             services,
             "query",
             "Run a SQL query over the metric views and print its rows as a markdown table. Jira is not called. "
-            + "The query reads the metric views and nothing else in the store, so the suppression rule holds for it. "
+            + "The query reads the metric views and nothing else in the store, and the metric views withhold small-group figures according to the minimumGroupSize setting of the configuration file. "
             + "Opening the database file in another program bypasses the suppression rule: that program reads every table.",
             fetches: false,
             async (pipeline, parse, cancellationToken) =>
