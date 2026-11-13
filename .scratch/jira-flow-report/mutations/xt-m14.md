@@ -19,3 +19,4 @@ Expected red: `A_status_role_outside_the_four_roles_is_refused_and_the_status_is
 - Verified 2026-11-12 at 741dd98: red, 1 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
 - Verified 2026-11-12 at a198e06: red, 1 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
 - Verified 2026-11-12 at cf5da5b: red, 1 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.
+- Verified 2026-11-12 at bc92ab3: red, 1 failed of 55 (Pipeline, filter /*/*/ConfigurationAndSecretsTests/*); restored.

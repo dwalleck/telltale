@@ -16,3 +16,4 @@ Claim (review finding 1): the time-in-status tests fail when the join between a 
 - Verified 2026-11-12 at 741dd98: red, 19 failed of 35 (Pipeline, filter /*/*/TimeInStatusTableTests/*); restored.
 - Verified 2026-11-12 at a198e06: red, 19 failed of 35 (Pipeline, filter /*/*/TimeInStatusTableTests/*); restored.
 - Verified 2026-11-12 at cf5da5b: red, 19 failed of 35 (Pipeline, filter /*/*/TimeInStatusTableTests/*); restored.
+- Verified 2026-11-12 at bc92ab3: red, 19 failed of 35 (Pipeline, filter /*/*/TimeInStatusTableTests/*); restored.

@@ -19,3 +19,4 @@ Expected red: `Project_keys_in_the_file_that_run_would_refuse_stop_a_rerun_and_a
 - Verified 2026-11-12 at 741dd98: red, 1 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.
 - Verified 2026-11-12 at a198e06: red, 1 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.
 - Verified 2026-11-12 at cf5da5b: red, 1 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.
+- Verified 2026-11-12 at bc92ab3: red, 1 failed of 114 (Pipeline, filter /*/*/DiscoverTests/*); restored.

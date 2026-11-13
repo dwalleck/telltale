@@ -19,3 +19,4 @@ Expected red: `A_failure_to_read_the_stored_salt_is_reported_as_that_and_nothing
 - Verified 2026-11-12 at 741dd98: red, 1 failed of 16 (Pipeline, filter /*/*/CredentialManagerSecretStoreTests/*); restored.
 - Verified 2026-11-12 at a198e06: red, 1 failed of 16 (Pipeline, filter /*/*/CredentialManagerSecretStoreTests/*); restored.
 - Verified 2026-11-12 at cf5da5b: red, 1 failed of 16 (Pipeline, filter /*/*/CredentialManagerSecretStoreTests/*); restored.
+- Verified 2026-11-12 at bc92ab3: red, 1 failed of 16 (Pipeline, filter /*/*/CredentialManagerSecretStoreTests/*); restored.
