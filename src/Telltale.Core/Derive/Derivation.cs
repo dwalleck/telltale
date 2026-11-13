@@ -77,6 +77,9 @@ public static class Derivation
         var anomalies = new List<IssueAnomaly>();
         var briefVisits = new List<SprintBriefVisit>();
 
+        // The one place that asks whether any status is listed: with none, no stay is worked out and nothing is looked at.
+        var checksBriefVisits = settings.BriefVisitThresholds.Count > 0;
+
         foreach (var issue in raw.Issues)
         {
             var timeline = timelines[issue.IssueId];
@@ -104,8 +107,8 @@ public static class Derivation
             // gives nothing, so it is not measured at all: most issues were in one or two of the board's sprints.
             var memberOf = membership.Intervals.Select(interval => interval.SprintId).ToHashSet(StringComparer.Ordinal);
 
-            // The issue's stays are the same for every sprint, and are not worked out when no status is listed.
-            IReadOnlyList<Stay> stays = settings.BriefVisitThresholds.Count == 0 ? [] : BriefVisits.Stays(timeline);
+            // The issue's stays are the same for every sprint: worked out once, when the first sprint needs them.
+            IReadOnlyList<Stay>? stays = null;
             foreach (var window in windows.Where(counted => memberOf.Contains(counted.SprintId)))
             {
                 // The time this sprint counts of this issue, worked out once for the time in status and the brief visits.
@@ -115,9 +118,12 @@ public static class Derivation
                     .Select(pair => new SprintStatusTime(issue.IssueId, window.SprintId, pair.Key, pair.Value.CalendarTime, pair.Value.BusinessTime, pair.Value.BusinessDays)));
 
                 // A brief visit is not a changelog anomaly: nothing here adds to the anomalies or to what derive logs.
-                briefVisits.AddRange(BriefVisits.During(countedTime, stays, settings.BriefVisitThresholds)
-                    .Order(StringComparer.Ordinal)
-                    .Select(statusId => new SprintBriefVisit(issue.IssueId, window.SprintId, statusId)));
+                if (checksBriefVisits)
+                {
+                    briefVisits.AddRange(BriefVisits.During(countedTime, stays ??= BriefVisits.Stays(timeline), settings.BriefVisitThresholds)
+                        .Order(StringComparer.Ordinal)
+                        .Select(statusId => new SprintBriefVisit(issue.IssueId, window.SprintId, statusId)));
+                }
             }
         }
 

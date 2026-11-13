@@ -57,7 +57,7 @@ public sealed record TelltaleConfig
     /// reader also refuses a null or anything else that is not an object, a threshold that is not written as
     /// a number, and a status listed twice.
     /// </summary>
-    public IReadOnlyDictionary<string, double> BriefVisitThresholds { get; init; } = new Dictionary<string, double>();
+    public BriefVisitThresholdsInMinutes BriefVisitThresholds { get; init; } = BriefVisitThresholdsInMinutes.None;
 }
 
 /// <summary>Where the team's work lives in Jira.</summary>

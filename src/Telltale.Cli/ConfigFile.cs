@@ -1,8 +1,6 @@
-using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
-using System.Text.Json.Serialization.Metadata;
 using Telltale.Core;
 using Telltale.Core.Configuration;
 using Telltale.Core.Workflow;
@@ -29,24 +27,10 @@ public static class ConfigFile
         AllowDuplicateProperties = false,
 
         // minimumGroupSize is read by hand, so that null, a quoted number or a missing number is refused by name.
-        Converters = { new MinimumGroupSizeConverter() },
-
         // briefVisitThresholds is too, so that what is refused is named without the status ID it stands under.
-        // Its type is a plain dictionary, so its converter is bound to the setting and not to the type.
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { ReadBriefVisitThresholdsByHand } },
+        // Each setting has a type of its own, and its reader is found by that type.
+        Converters = { new MinimumGroupSizeConverter(), new BriefVisitThresholdsConverter() },
     };
-
-    /// <summary>For reading <c>briefVisitThresholds</c> on its own, outside a configuration: nothing else is read with these.</summary>
-    private static readonly JsonSerializerOptions BriefVisitThresholdsAlone = new() { Converters = { new BriefVisitThresholdsConverter() } };
-
-    private static void ReadBriefVisitThresholdsByHand(JsonTypeInfo type)
-    {
-        if (type.Type == typeof(TelltaleConfig))
-        {
-            // Found by the property, not by the name in the file, so a renamed setting cannot lose its reader unseen.
-            type.Properties.Single(property => property.AttributeProvider is PropertyInfo { Name: nameof(TelltaleConfig.BriefVisitThresholds) }).CustomConverter = new BriefVisitThresholdsConverter();
-        }
-    }
 
     /// <summary>
     /// The minimum group size as the file holds it, with the names the file is read by: what <c>discover</c>
@@ -62,7 +46,7 @@ public static class ConfigFile
     /// file before it calls Jira (owner decision D70).
     /// </summary>
     internal static void RequireMinimumGroupSize(JsonNode? written, string path) =>
-        RequireSetting<MinimumGroupSize>(written, Options, numbers => TelltaleSettings.CheckedMinimumGroupSize(numbers), path);
+        RequireSetting<MinimumGroupSize>(written, numbers => TelltaleSettings.CheckedMinimumGroupSize(numbers), path);
 
     /// <summary>
     /// Reads and checks the <c>briefVisitThresholds</c> that the file at <paramref name="path"/> holds as
@@ -75,14 +59,14 @@ public static class ConfigFile
     /// that reader's own message and not this one's.
     /// </summary>
     internal static void RequireBriefVisitThresholds(JsonNode? written, StatusRoles? roles, string path) =>
-        RequireSetting<IReadOnlyDictionary<string, double>>(written, BriefVisitThresholdsAlone, thresholds => TelltaleSettings.CheckedBriefVisitThresholds(thresholds, roles), path);
+        RequireSetting<BriefVisitThresholdsInMinutes>(written, thresholds => TelltaleSettings.CheckedBriefVisitThresholds(thresholds, roles), path);
 
     /// <summary>One setting, read from what the file holds for it and then checked by its rule. A null in the file reaches the setting's converter as the JSON null it is, and is refused there.</summary>
-    private static void RequireSetting<T>(JsonNode? written, JsonSerializerOptions options, Action<T> check, string path)
+    private static void RequireSetting<T>(JsonNode? written, Action<T> check, string path)
     {
         try
         {
-            check(JsonSerializer.Deserialize<T>(written?.ToJsonString() ?? "null", options)!);
+            check(JsonSerializer.Deserialize<T>(written?.ToJsonString() ?? "null", Options)!);
         }
         catch (Exception exception) when (IsRefusal(exception))
         {

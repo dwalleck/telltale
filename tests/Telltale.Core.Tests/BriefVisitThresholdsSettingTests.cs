@@ -45,6 +45,29 @@ public class BriefVisitThresholdsSettingTests
     }
 
     [Test]
+    public async Task A_rebuild_records_the_thresholds_derive_applies_also_for_settings_copied_with_other_thresholds()
+    {
+        // The record is made from the thresholds that are applied, so the two cannot differ: the view and the
+        // report state what derive used, and a report never passes for current under other thresholds.
+        var settings = TelltaleSettings.From(Config() with { BriefVisitThresholds = new Dictionary<string, double> { ["4"] = 5 } });
+
+        var copied = settings with { BriefVisitThresholds = new Dictionary<string, TimeSpan> { ["5"] = TimeSpan.FromSeconds(90), ["1"] = TimeSpan.FromMinutes(2) } };
+
+        await Assert.That(copied.Derivation.BriefVisitThresholds["5"]).IsEqualTo(TimeSpan.FromSeconds(90));
+        await Assert.That(copied.DerivedFrom("synthetic-digest").BriefVisitThresholds).IsEqualTo("""{"1":2,"5":1.5}""");
+        await Assert.That(settings.DerivedFrom("synthetic-digest").BriefVisitThresholds).IsEqualTo("""{"4":5}""");
+    }
+
+    [Test]
+    public async Task A_rebuild_with_no_status_listed_records_that_nothing_is_checked()
+    {
+        var recorded = TelltaleSettings.From(Config()).DerivedFrom("synthetic-digest");
+
+        await Assert.That(recorded.BriefVisitThresholds).IsEqualTo("{}");
+        await Assert.That(recorded.BriefVisitsChecked).IsFalse();
+    }
+
+    [Test]
     public async Task A_rebuild_records_the_length_of_time_that_is_applied_so_two_numbers_that_are_one_length_of_time_are_one_record()
     {
         // The second number differs from five minutes by far less than the smallest step of time the tool measures.

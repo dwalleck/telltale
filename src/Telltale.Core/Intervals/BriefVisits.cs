@@ -76,24 +76,17 @@ public static class BriefVisits
     /// A brief visit made in an earlier sprint, or before the issue joined, does not count toward this one.
     /// <paramref name="stays"/> are the issue's stays (<see cref="Stays"/>).
     /// Whether the issue is in the status's time in status row for the sprint is not asked here: the metric
-    /// view asks it. With no status listed nothing is looked at.
+    /// view asks it. With no status listed no stay is brief; derive does not ask then (<see cref="Derive.Derivation"/>).
     /// </summary>
     public static IReadOnlySet<string> During(
         IReadOnlyList<Interval> countedTime,
         IEnumerable<Stay> stays,
-        IReadOnlyDictionary<string, TimeSpan> thresholds)
-    {
-        if (thresholds.Count == 0)
-        {
-            return NoStatuses;
-        }
-
-        return stays
+        IReadOnlyDictionary<string, TimeSpan> thresholds) =>
+        stays
             .Where(stay => thresholds.TryGetValue(stay.StatusId, out var threshold) && IsBrief(stay, threshold))
             .Where(stay => countedTime.Any(period => Overlaps(stay, period)))
             .Select(stay => stay.StatusId)
             .ToHashSet(StringComparer.Ordinal);
-    }
 
     /// <summary>
     /// The overlap rule, for a stay of any length or none: the stay overlaps a counted period when it begins
@@ -103,6 +96,4 @@ public static class BriefVisits
     /// </summary>
     private static bool Overlaps(Stay stay, Interval period) =>
         period.Contains(stay.Start) || (stay.Start < period.Start && !(stay.End <= period.Start));
-
-    private static readonly IReadOnlySet<string> NoStatuses = new HashSet<string>();
 }
