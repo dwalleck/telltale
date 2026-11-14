@@ -37,11 +37,11 @@ public class SuppressionOffTests
 
     /// <summary>
     /// The metric views: what <c>query</c> may read. A view added later is added here, and to what
-    /// <see cref="The_metric_views_are_these_nine_with_suppression_off_and_none_holds_a_person"/> says of each.
+    /// <see cref="The_metric_views_are_these_ten_with_suppression_off_and_none_holds_a_person"/> says of each.
     /// </summary>
     private static readonly string[] MetricViews =
     [
-        "baseline_cycle_time_per_bucket", "baseline_sprint", "baseline_time_in_status", "cycle_time_per_sprint_and_bucket", "data_quality",
+        "baseline_cycle_time_per_bucket", "baseline_sprint", "baseline_time_in_status", "brief_visits_per_sprint", "cycle_time_per_sprint_and_bucket", "data_quality",
         "delivered_per_sprint", "minimum_group_size", "sprint_team", "time_in_status_per_sprint",
     ];
 
@@ -456,6 +456,7 @@ public class SuppressionOffTests
             | baseline_cycle_time_per_bucket.suppressed | 3 | 0 |
             | baseline_sprint.suppressed | 3 | 0 |
             | baseline_time_in_status.suppressed | 3 | 0 |
+            | brief_visits_per_sprint.suppressed | 0 | 0 |
             | cycle_time_per_sprint_and_bucket.suppressed | 7 | 0 |
             | data_quality.suppressed | 1 | 0 |
             | delivered_per_sprint.suppressed | 3 | 0 |
@@ -649,7 +650,7 @@ public class SuppressionOffTests
     }
 
     [Test]
-    public async Task The_metric_views_are_these_nine_with_suppression_off_and_none_holds_a_person()
+    public async Task The_metric_views_are_these_ten_with_suppression_off_and_none_holds_a_person()
     {
         // Owner decision D68: turning suppression off adds no view, and no view is about a person. (That each
         // view has the same columns in either state is OptionalSuppressionTests'.)

@@ -43,12 +43,20 @@ public static class SprintReport
     /// <summary>
     /// Renders the report. Dates are shown in <paramref name="teamTimeZone"/>. <paramref name="baselineSprintIds"/>
     /// is the baseline sprint list the derived data was built with, in order: when it is not empty, both tables
-    /// get baseline columns and the method note says what the baseline is. <paramref name="numbers"/> are the
-    /// minimum group size's numbers the derived data was built under (<see cref="NumbersInForce.Of"/>): the
-    /// caller reads them once, and the report states them and decides nothing by them.
+    /// get baseline columns and the method note says what the baseline is. <paramref name="derivedFrom"/> is
+    /// the record of the derived data the report is written from, which the caller reads once from the store
+    /// (<see cref="ITelltaleStore.ReadDerivedSourceAsync"/>). The report takes two things from it, as the metric
+    /// views do, and decides nothing by either: the minimum group size's numbers the derived data was built
+    /// under (<see cref="NumbersInForce.Of"/>), which it states, and whether a status was listed under
+    /// <c>briefVisitThresholds</c> (<see cref="DerivedSource.BriefVisitsChecked"/>). With a status listed the
+    /// method note explains the footer's brief visit lines, also for a sprint that has none. With no status
+    /// listed the report is what it was before brief visits were counted, and the brief visit view is not read.
     /// </summary>
-    public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, IReadOnlyList<string> baselineSprintIds, NumbersInForce numbers, CancellationToken cancellationToken = default)
+    public static async Task<string> RenderAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, IReadOnlyList<string> baselineSprintIds, DerivedSource derivedFrom, CancellationToken cancellationToken = default)
     {
+        var numbers = NumbersInForce.Of(derivedFrom);
+        var briefVisitsChecked = derivedFrom.BriefVisitsChecked;
+
         // Owner decisions D50, D56: while a baseline sprint has its delivered count withheld, every baseline figure is
         // withheld. The baseline views have no rows then, so the cells are written from this list.
         var withheldBaselineSprints = baselineSprintIds.Count == 0 ? [] : await BaselineSprintRules.ReadWithheldAsync(store, cancellationToken);
@@ -81,8 +89,18 @@ public static class SprintReport
             cancellationToken));
         AppendTimeInStatus(report, baseline, await ReadTimeInStatusAsync(store, sprintId, cancellationToken));
         var quality = await ReadDataQualityAsync(store, cancellationToken);
-        AppendMethodNote(report, quality, numbers, baselineSprintIds, withheldBaselineSprints);
+        AppendMethodNote(report, quality, numbers, briefVisitsChecked, baselineSprintIds, withheldBaselineSprints);
         AppendFooter(report, quality);
+
+        // With no status listed the view has no rows, so it is not asked.
+        if (briefVisitsChecked)
+        {
+            AppendBriefVisits(report, await store.QueryViewsAsync<BriefVisitsRow>(
+                "SELECT status_name, threshold_minutes, brief_visit_issue_count, suppressed FROM brief_visits_per_sprint WHERE sprint_id = @sprintId ORDER BY board_position;",
+                new { sprintId },
+                cancellationToken));
+        }
+
         return report.ToString();
     }
 
@@ -105,9 +123,9 @@ public static class SprintReport
         (await store.QueryViewsAsync<DataQualityRow>("SELECT as_of, time_zone, anomaly_issue_count, delivered_between_sprints_count, suppressed FROM data_quality;", cancellationToken: cancellationToken)).Single();
 
     /// <summary>Renders the report and writes it into <paramref name="directory"/>. Returns the file's path.</summary>
-    public static async Task<string> WriteAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, IReadOnlyList<string> baselineSprintIds, NumbersInForce numbers, string directory, CancellationToken cancellationToken = default)
+    public static async Task<string> WriteAsync(ITelltaleStore store, string sprintId, TimeZoneInfo teamTimeZone, IReadOnlyList<string> baselineSprintIds, DerivedSource derivedFrom, string directory, CancellationToken cancellationToken = default)
     {
-        var text = await RenderAsync(store, sprintId, teamTimeZone, baselineSprintIds, numbers, cancellationToken);
+        var text = await RenderAsync(store, sprintId, teamTimeZone, baselineSprintIds, derivedFrom, cancellationToken);
 
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, FileName(sprintId));
@@ -233,16 +251,17 @@ public static class SprintReport
     /// <summary>
     /// What the figures mean, with each rule as the glossary and the owner's decisions state it. The suppression
     /// rule is ADR-0003's for results grouped by issue attributes, stated with the numbers the derived data was
-    /// built under (<see cref="AppendMinimumGroupSize"/>). The time zone is the one derive stored.
+    /// built under (<see cref="AppendMinimumGroupSize"/>). The time zone is the one derive stored. The paragraph
+    /// on brief visits is its last, and is there only when a status is listed (<see cref="AppendBriefVisitsExplained"/>).
     /// </summary>
-    private static void AppendMethodNote(StringBuilder report, DataQualityRow quality, NumbersInForce numbers, IReadOnlyList<string> baselineSprintIds, IReadOnlyList<string> withheldBaselineSprints)
+    private static void AppendMethodNote(StringBuilder report, DataQualityRow quality, NumbersInForce numbers, bool briefVisitsChecked, IReadOnlyList<string> baselineSprintIds, IReadOnlyList<string> withheldBaselineSprints)
     {
         report.Append("\n## Method\n\n")
             .Append("- Durations are in business days: days that are neither a weekend nor a company holiday, each counted in full (24 hours) in the team's time zone (").Append(quality.TimeZone).Append("). Calendar days are shown alongside: elapsed time divided by 24 hours.\n")
             .Append("- Cycle time runs from an issue's first entry into a work status to its last entry into a done status, for delivered issues only. It belongs to the sprint in which the issue was delivered.\n")
             .Append("- The median is the middle value, or the mean of the two middle values. The P85 is the smallest value with at least 85% of the values at or below it.\n")
             .Append("- Time in status includes delivered and unfinished issues in statuses before done, clipped to the sprint window and each issue's membership intervals. An issue counts toward a status only if it spent more than zero business days there. Total business days sum that time across all contributing issues, including repeated visits; this is accumulated issue time, not effort or the sprint's elapsed duration. Totals and medians use the same privacy rules.\n");
-        AppendMinimumGroupSize(report, numbers);
+        AppendMinimumGroupSize(report, numbers, briefVisitsChecked);
 
         // Said only when there is a baseline: without one the report has no baseline column to explain.
         if (baselineSprintIds.Count > 0)
@@ -259,15 +278,55 @@ public static class SprintReport
 
         report.Append("- An interval that is still open (an issue still in a status, a sprint not yet completed) ends at the as-of time below.\n")
             .Append("- Work that has since been removed from Jira stays in the figures until the next backfill.\n");
+        if (briefVisitsChecked)
+        {
+            AppendBriefVisitsExplained(report, numbers);
+        }
+    }
+
+    /// <summary>
+    /// The method note's paragraph on brief visits (GLOSSARY: Brief visit; owner decisions D60 to D62), written
+    /// only when a status is listed. It says what a brief visit is, that brief visits are counted and no figure
+    /// was changed because of one, what a count reads in place of a number, and that the rule was added after
+    /// the first run on real data. What a count reads follows the numbers in force (D67), as the view does
+    /// (<c>brief_visits_per_sprint</c>): while a figure needs assignees behind it, a count of nothing has nobody
+    /// behind it and is withheld as a count with too few is; with that number at zero no count is withheld and
+    /// a count of nothing is printed as 0. The lines come from the time in status table's rows, so a sprint
+    /// short of a team has none.
+    /// </summary>
+    private static void AppendBriefVisitsExplained(StringBuilder report, NumbersInForce numbers)
+    {
+        report.Append("- A brief visit is one unbroken stay in a status that ended and was shorter than the status's threshold.")
+            .Append(" It is measured in clock time over the issue's whole history: weekends and holidays count, and the stay is not clipped to the sprint.")
+            .Append(" For each status the configuration file lists (briefVisitThresholds), the footer gives how many of the issues in the status's time in status row had a brief visit during the time the row counts.")
+            .Append(" Brief visits are counted and nothing more: no duration was excluded or corrected because of one, and every other figure is what it would be without the count.")
+            .Append(" A short median in the time in status table does not show how many issues had a brief visit.");
+        if (numbers.FigureCheck)
+        {
+            report.Append(" A count reads \"suppressed\" when its row in the time in status table reads \"suppressed\" for its figures, or when fewer than ")
+                .Append(numbers.AssigneesBehindAFigure(distinct: true)).Append(' ').Append(numbers.BehindAFigureAre).Append(" among the issues counted.")
+                .Append(" A count of nothing has nobody behind it, so a zero and a withheld count both read \"suppressed\".");
+        }
+        else
+        {
+            report.Append(numbers.TeamCheck ? " No count is withheld for the number of assignees behind it" : " No count is withheld for group size")
+                .Append(", and a count of nothing reads 0.");
+        }
+
+        report.Append(" A listed status with no row in the time in status table has no line")
+            .Append(numbers.TeamCheck ? $", and a sprint whose team is smaller than {numbers.TeamInWords} has none at all." : ".")
+            .Append(" This rule was added on 2026-11-12, after the first run on real data: the thresholds were chosen with knowledge of results, and the counts describe data quality and are not a success criterion.\n");
     }
 
     /// <summary>
     /// The method note's paragraphs on the minimum group size and on who counts as an assignee, with the numbers
     /// in force (owner decision D67). Each sentence is about one of the two checks and is written only while
     /// that check applies: a number of zero turns its check off (D65). With both off, the two paragraphs give
-    /// way to one that says so.
+    /// way to one that says so. With a status listed for brief visits the footer can have brief visit lines
+    /// after its two counts of the whole store, withheld by their own rule (<see cref="AppendBriefVisitsExplained"/>),
+    /// so the sentence on those two says which they are, whether or not this sprint has such a line.
     /// </summary>
-    private static void AppendMinimumGroupSize(StringBuilder report, NumbersInForce numbers)
+    private static void AppendMinimumGroupSize(StringBuilder report, NumbersInForce numbers, bool briefVisitsChecked)
     {
         if (!numbers.TeamCheck && !numbers.FigureCheck)
         {
@@ -301,7 +360,7 @@ public static class SprintReport
             report.Append(" With a team of ").Append(team).Append(" or more, every figure of the sprint itself is shown, whatever the number of assignees behind it.");
         }
 
-        report.Append(" The footer's two counts read \"suppressed\" when ");
+        report.Append(briefVisitsChecked ? " The footer's two counts of the whole store" : " The footer's two counts").Append(" read \"suppressed\" when ");
         if (numbers.TeamCheck)
         {
             report.Append("the issues in the whole store have fewer than ").Append(numbers.TeamAssignees(distinct: true))
@@ -339,10 +398,11 @@ public static class SprintReport
     }
 
     /// <summary>
-    /// The data-quality footer. Its two counts cover the whole store, not the sprint: an issue delivered
-    /// between sprints belongs to no sprint. They are counts only: no issue is named. The view withholds
-    /// them when the whole store has fewer distinct assignees than a team (five by default), or fewer than a
-    /// figure needs (three by default) are among the issues a count covers.
+    /// The data-quality footer, up to its brief visit lines (<see cref="AppendBriefVisits"/>). Its two counts
+    /// here cover the whole store, not the sprint: an issue delivered between sprints belongs to no sprint.
+    /// They are counts only: no issue is named. The view withholds them when the whole store has fewer distinct
+    /// assignees than a team (five by default), or fewer than a figure needs (three by default) are among the
+    /// issues a count covers.
     /// </summary>
     private static void AppendFooter(StringBuilder report, DataQualityRow quality)
     {
@@ -352,6 +412,43 @@ public static class SprintReport
             .Append("- As-of time: ").Append(asOf.ToString("yyyy-MM-dd HH:mm zzz", CultureInfo.InvariantCulture)).Append(" (").Append(quality.TimeZone).Append(")\n")
             .Append("- Issues with changelog anomalies, in the whole store: ").Append(Figure(quality.Suppressed, quality.AnomalyIssueCount?.ToString(CultureInfo.InvariantCulture))).Append('\n')
             .Append("- Issues delivered between sprints, in the whole store: ").Append(Figure(quality.Suppressed, quality.DeliveredBetweenSprintsCount?.ToString(CultureInfo.InvariantCulture))).Append('\n');
+    }
+
+    /// <summary>
+    /// The footer's brief visit lines (GLOSSARY: Brief visit; owner decision D61), after its other lines: one
+    /// per row of the view, so one per listed status that has a row in the sprint's time in status table, in
+    /// board order. A line names the status and states its threshold. The view withholds a count as it does
+    /// every figure, and a count of nothing with it, so the two read alike.
+    /// </summary>
+    private static void AppendBriefVisits(StringBuilder report, IReadOnlyList<BriefVisitsRow> rows)
+    {
+        foreach (var row in rows)
+        {
+            var threshold = $"{Minutes(row.ThresholdMinutes)} {(row.ThresholdMinutes == 1 ? "minute" : "minutes")}";
+            report.Append("- ").Append(Markdown.Text(row.StatusName)).Append(": ");
+            if (row.Suppressed == 0 && row.BriefVisitIssueCount is { } issues)
+            {
+                report.Append(issues.ToString(CultureInfo.InvariantCulture)).Append(issues == 1 ? " issue" : " issues").Append(" had a visit shorter than ").Append(threshold).Append('\n');
+            }
+            else
+            {
+                report.Append("issues with a visit shorter than ").Append(threshold).Append(": ").Append(Suppressed).Append('\n');
+            }
+        }
+    }
+
+    /// <summary>
+    /// A threshold in minutes as the footer writes it: the shortest digits that identify the number, as it was
+    /// written in the configuration file for a threshold of a few decimals (5, 0.5, 0.69), and always in plain
+    /// decimal digits. The round-trip format alone turns to an exponent below 0.0001 (1E-05), which a reader of
+    /// a report should not have to decode; its digits are kept and only the notation changes.
+    /// </summary>
+    private static string Minutes(double minutes)
+    {
+        var shortest = minutes.ToString("R", CultureInfo.InvariantCulture);
+        return shortest.Contains('E', StringComparison.Ordinal)
+            ? decimal.Parse(shortest, NumberStyles.Float, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture)
+            : shortest;
     }
 
     /// <summary>
@@ -440,6 +537,14 @@ public static class SprintReport
         public string TimeZone { get; init; } = "";
         public long? AnomalyIssueCount { get; init; }
         public long? DeliveredBetweenSprintsCount { get; init; }
+        public long Suppressed { get; init; } = 1;
+    }
+
+    private sealed class BriefVisitsRow
+    {
+        public string StatusName { get; init; } = "";
+        public double ThresholdMinutes { get; init; }
+        public long? BriefVisitIssueCount { get; init; }
         public long Suppressed { get; init; } = 1;
     }
 

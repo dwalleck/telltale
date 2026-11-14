@@ -90,7 +90,7 @@ public class QueryCommandTests
 
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString()).StartsWith(
-            "This query reads only the metric views (baseline_cycle_time_per_bucket, baseline_sprint, baseline_time_in_status, cycle_time_per_sprint_and_bucket, "
+            "This query reads only the metric views (baseline_cycle_time_per_bucket, baseline_sprint, baseline_time_in_status, brief_visits_per_sprint, cycle_time_per_sprint_and_bucket, "
             + "data_quality, delivered_per_sprint, minimum_group_size, sprint_team, time_in_status_per_sprint), and it asked for something else: ");
         await Assert.That(pipeline.Error.ToString().TrimEnd().Split('\n').Length).IsEqualTo(1);
         await Assert.That(pipeline.Out.ToString()).IsEmpty();

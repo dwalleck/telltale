@@ -20,11 +20,10 @@ WITH status_time AS (
            COUNT(*) AS issue_count,
            SUM(t.business_days) AS total_business_days,
            COUNT(DISTINCT i.assignee_hash) AS assignees
-    FROM sprint_status_time t
+    -- An issue counts toward a status only if it spent business time there (owner decision D21):
+    -- time_in_status_issue says which issues those are, for this view and for every other.
+    FROM time_in_status_issue t
     LEFT JOIN issue i ON i.issue_id = t.issue_id
-    -- An issue counts toward a status only if it spent business time there (owner decision D21): one that
-    -- was in the status only over a weekend or a holiday is in neither the count nor the median and adds no total.
-    WHERE t.business_days > 0
     GROUP BY t.sprint_id, t.status_id
 )
 SELECT st.sprint_id,

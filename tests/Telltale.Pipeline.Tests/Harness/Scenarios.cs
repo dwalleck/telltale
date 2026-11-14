@@ -106,6 +106,24 @@ public static class Scenarios
         return assignee is null ? issue : issue.AssignedTo(assignee);
     }
 
+    /// <summary>
+    /// An issue of sprint 41 or 42 that was caught up in one go: in New (a not started status) until the
+    /// sprint's first Wednesday at 10:00 (7 January 2026 for sprint 41, 21 January for sprint 42), then moved to
+    /// Development and, <paramref name="secondsInDevelopment"/> later, to Review, where it stayed two days
+    /// before it was done. So its one visit to Development lasted twenty seconds unless the test says otherwise.
+    /// It was created on the Monday before: at 09:00 for sprint 41, as the sprint starts, and at 11:00 for
+    /// sprint 42, half an hour after it starts. A null <paramref name="assignee"/> leaves it unassigned.
+    /// </summary>
+    public static FakeIssue CaughtUp(FakeJira jira, string key, FakePerson? assignee, long sprintId = 41, int secondsInDevelopment = 20)
+    {
+        var (created, caughtUp) = sprintId == 41 ? (Local(2026, 1, 5, 9), Local(2026, 1, 7, 10)) : (Local(2026, 1, 19, 11), Local(2026, 1, 21, 10));
+        var issue = jira.AddIssue(key, created).InSprints(sprintId)
+            .Moved(caughtUp, Workflow.Development)
+            .Moved(caughtUp.AddSeconds(secondsInDevelopment), Workflow.Review)
+            .Moved(caughtUp.AddDays(2), Workflow.Done);
+        return assignee is null ? issue : issue.AssignedTo(assignee);
+    }
+
     /// <summary>The Monday, 09:00, on which sprint 41, 42 or 43 starts in these fixtures.</summary>
     public static DateTimeOffset MondayOf(long sprintId) => sprintId switch
     {

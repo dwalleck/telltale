@@ -203,7 +203,7 @@ public class MethodNoteAndFooterTests
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
 
         // Rendered with another zone than derive used: the note and the as-of time still speak of derive's.
-        var report = await SprintReport.RenderAsync(new SqliteStore(pipeline.DatabasePath), "41", TimeZoneInfo.FindSystemTimeZoneById("Europe/Berlin"), baselineSprintIds: [], new NumbersInForce(MinimumGroupSize.Default));
+        var report = await SprintReport.RenderAsync(new SqliteStore(pipeline.DatabasePath), "41", TimeZoneInfo.FindSystemTimeZoneById("Europe/Berlin"), baselineSprintIds: [], HarnessSteps.RecordUnderTheDefaults);
 
         await Assert.That(report).Contains("in the team's time zone (America/Chicago). Calendar days");
         await Assert.That(report).Contains("\n- As-of time: 2026-02-03 12:00 -06:00 (America/Chicago)\n");

@@ -22,8 +22,7 @@ WITH per_sprint AS (
     WHERE c.delivered = 1 AND c.business_days IS NOT NULL
     UNION ALL
     SELECT 'status', t.sprint_id, CAST(NULL AS REAL), CAST(t.status_id AS TEXT), t.business_days
-    FROM sprint_status_time t
-    WHERE t.business_days > 0
+    FROM time_in_status_issue t
 )
 SELECT 'sprint' AS scope, p.measure, p.sprint_id, p.bucket, p.status_id, p.days
 FROM per_sprint p

@@ -153,6 +153,23 @@ internal static class DiscoverCommand
             }
         }
 
+        // The brief visit thresholds are the owner's as well: discover never writes, changes or removes them.
+        // They are refused here in the same way. Once the file has roles discover adds none, so the statuses
+        // listed are checked against them now. A file with no roles yet gets them from Jira, so there only
+        // the thresholds are checked now, and the statuses by the check of the text about to be written.
+        if (root.TryGetPropertyValue("briefVisitThresholds", out var briefVisitThresholds))
+        {
+            try
+            {
+                var roles = fileHadNoRoles ? null : StatusRoles.Parse(statusRoles.Select(role => KeyValuePair.Create(role.Key, RoleText(role.Value))));
+                ConfigFile.RequireBriefVisitThresholds(briefVisitThresholds, roles, path);
+            }
+            catch (UserFacingException exception)
+            {
+                throw RunWouldRefuse(path, exception);
+            }
+        }
+
         var site = SettingRules.WithTrailingSlash(new Uri(siteText!));
         if (replacedUnshown.Contains("jira.siteUrl"))
         {

@@ -8,7 +8,9 @@
 -- IDs in order, separated by commas: what was delivered was decided with them. minimum_team and
 -- minimum_assignees_behind_a_figure are the minimum group size's two numbers (GLOSSARY: Minimum group size):
 -- the minimum_group_size view gives them to every metric view, and no view reads the configuration or
--- states a number of its own. objects_version identifies the
+-- states a number of its own. brief_visit_thresholds is the briefVisitThresholds setting (GLOSSARY: Brief
+-- visit) as a JSON object of status ID to minutes, the IDs in order ('{"10001":5}'), '{}' when no status is
+-- checked: brief_visits_per_sprint reads the listed statuses and their thresholds from it. objects_version identifies the
 -- scripts that created the derived tables and the metric views: when the tool's scripts differ, the views
 -- may lack a rule the tool relies on (the minimum group size, ADR-0003), and nothing is read from them.
 CREATE TABLE run (
@@ -21,5 +23,6 @@ CREATE TABLE run (
     abandoned_resolution_ids TEXT NOT NULL,
     minimum_team        INTEGER NOT NULL,
     minimum_assignees_behind_a_figure INTEGER NOT NULL,
+    brief_visit_thresholds TEXT NOT NULL,
     objects_version     TEXT NOT NULL
 ) STRICT;

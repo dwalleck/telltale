@@ -243,10 +243,9 @@ public sealed class PipelineSteps
 
         BaselineSprintRules.RequireWithinWhatWasFetched(starts, _settings.BaselineSprintIds, completeFrom);
 
-        // The numbers the derived data was built under, from its record: read once, for the console and the report.
-        var numbers = NumbersInForce.Of(derivedFrom);
-        await NameWithheldBaselineSprintsAsync(numbers, cancellationToken);
-        var path = await SprintReport.WriteAsync(_store, sprint, _settings.TimeZone, [.. _settings.BaselineSprintIds.Order(StringComparer.Ordinal)], numbers, _environment.ReportDirectory, cancellationToken);
+        // What the derived data was built under, from its record: read once, for the console and the report.
+        await NameWithheldBaselineSprintsAsync(NumbersInForce.Of(derivedFrom), cancellationToken);
+        var path = await SprintReport.WriteAsync(_store, sprint, _settings.TimeZone, [.. _settings.BaselineSprintIds.Order(StringComparer.Ordinal)], derivedFrom, _environment.ReportDirectory, cancellationToken);
         await _environment.Out.WriteLineAsync($"Wrote {path}");
     }
 
@@ -340,6 +339,13 @@ public sealed class PipelineSteps
             || derivedFrom.MinimumAssigneesBehindAFigure != current.MinimumAssigneesBehindAFigure)
         {
             throw new UserFacingException("minimumGroupSize in the configuration file changed since the derived data was built. Run derive first.");
+        }
+
+        // brief_visit and the view over it were built under the thresholds the last derive recorded. Deriving
+        // again is all it takes: the thresholds decide nothing about what is fetched.
+        if (derivedFrom.BriefVisitThresholds != current.BriefVisitThresholds)
+        {
+            throw new UserFacingException("briefVisitThresholds in the configuration file changed since the derived data was built. Run derive first.");
         }
 
         // Each check above compares the fields it knows and says which setting changed. This one compares the

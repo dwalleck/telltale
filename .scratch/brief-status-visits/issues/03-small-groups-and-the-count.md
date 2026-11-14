@@ -8,21 +8,38 @@ Spec: `../spec.md` (owner decision D62; the confirmed reading on zero; user stor
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] With two distinct assignees behind the counted issues, the line reads as withheld and the view's count is null with its flag set
-- [ ] When the status's time in status row has its median withheld, the count is withheld
-- [ ] A sprint that fails the team check has no brief visit lines in its footer and no rows in the view
-- [ ] A count of zero reads the same as a withheld count, in the report and in the view
-- [ ] A listed status with no time in status row in the sprint has no line and no row
-- [ ] Issues with no assignee count toward nobody
-- [ ] A sprint whose delivered count is withheld (D49) still shows a brief visit count that passes its own checks, as its time in status counts stay (D55)
-- [ ] A probe over the metric views finds no query that tells a zero count from a withheld one
-- [ ] The probe finds no query that recovers a withheld count by subtracting shown figures, including the row's issue count and the counts of other statuses and sprints
-- [ ] Each case is asserted in the report and by `query`
-- [ ] The existing privacy checks on the delivered count still pass with brief visits present
-- [ ] If the `minimumGroupSize` setting exists: the count is withheld and shown according to the configured numbers; with both zero every sprint has its rows, every count is shown, and a count of nothing is `0`
-- [ ] If the `minimumGroupSize` setting does not exist yet, the ticket says so in its comments, so that the suppression work knows to cover the brief visits view
-- [ ] A leak found here is reported with the broad rule that would close it, as a decision needed, before a narrow fix is made
-- [ ] Expected multi-line strings are normalized to LF
-- [ ] All fixtures are synthetic
+- [x] With two distinct assignees behind the counted issues, the line reads as withheld and the view's count is null with its flag set
+- [x] When the status's time in status row has its median withheld, the count is withheld
+- [x] A sprint that fails the team check has no brief visit lines in its footer and no rows in the view
+- [x] A count of zero reads the same as a withheld count, in the report and in the view
+- [x] A listed status with no time in status row in the sprint has no line and no row
+- [x] Issues with no assignee count toward nobody
+- [x] A sprint whose delivered count is withheld (D49) still shows a brief visit count that passes its own checks, as its time in status counts stay (D55)
+- [x] A probe over the metric views finds no query that tells a zero count from a withheld one
+- [x] The probe finds no query that recovers a withheld count by subtracting shown figures, including the row's issue count and the counts of other statuses and sprints
+- [x] Each case is asserted in the report and by `query`
+- [x] The existing privacy checks on the delivered count still pass with brief visits present
+- [x] If the `minimumGroupSize` setting exists: the count is withheld and shown according to the configured numbers; with both zero every sprint has its rows, every count is shown, and a count of nothing is `0`
+- [x] If the `minimumGroupSize` setting does not exist yet, the ticket says so in its comments, so that the suppression work knows to cover the brief visits view
+- [x] A leak found here is reported with the broad rule that would close it, as a decision needed, before a narrow fix is made
+- [x] Expected multi-line strings are normalized to LF
+- [x] All fixtures are synthetic
+
+## Comments
+
+Resolved 2026-11-13. Merged into `spec/brief-status-visits` as 054cdc6 (source `ticket/bv-03-small-groups-and-the-count` at 95f49eb; commits 23b4b66, b03f337, bbbacf9, d84b961, 95f49eb), after tickets 04 (2bf4301) and 02 (2c34234). The merge had no conflict in the text, and nothing was changed inside it: no test and no mutation record of this ticket needed a new expectation on the merged tree.
+
+- Checks: the merged tree differs from the source tree, because it also holds tickets 02 and 04, so the full check ran at merge (record `merge-03-record.json` in the integration tree, base 76df925): Core 153 and Pipeline 922 passed, 0 failed, 0 skipped, 0 warnings, format, line endings and the SQL line endings pass. The implementer's own full check on 95f49eb (record `bv03-r1-record.json`, base c1d8b72) passed too: Core 112, Pipeline 845.
+- This ticket's tests on the merged tree: written against ticket 01's behaviour, they pass unchanged beside ticket 02 (zero-length stays count, same-status entries are one stay) and ticket 04 (refused settings, the applied threshold printed). Their fixtures hold no stay of no length and no change from a status to itself, and their thresholds are whole minutes, so no expectation moved. No conflict between the tickets was found.
+- Mutations: 8 new records under `.scratch/brief-status-visits/mutations/`, 03-m1 to 03-m8, all active and red (first red at 23b4b66). They stand in for red-first runs: ticket 01 had built the rule, so every test of this ticket passed when first run. Re-pointed by the implementer after the review's F7, the mutation unchanged, each red at bbbacf9: 01-m6 and 03-m4 (now one edit each, on the one predicate), 01-m7, 01-m8 (the join, now inside `decided`), 03-m2 and 03-m3 (the flag line). Rerun red at d84b961 because their filter names tests whose bodies changed: 03-m1, 03-m5, 03-m6, 03-m7, 03-m8. No other merged ticket changed `brief_visits_per_sprint.sql`, `HarnessSteps.cs`, `BriefVisitCountTests.cs` or the records 01-m6, 01-m7 and 01-m8, so the re-pointed records find the lines they were verified on. Rerun at merge, the records whose files the merge changed relative to the source, 23 of 37, all red: 01-m1, 01-m2, 01-m3, 01-m10, 02-m1 to 02-m11, 04-m1 to 04-m8. `-ValidateOnly` passes for all three features at 054cdc6 (37, 279 and 48 edits).
+- Review (root's `code-review`, eleven findings, no CONFIRMED or PLAUSIBLE verdicts, so each has a disposition from root). Fixed here in bbbacf9, each checked against the diff by the merger: F2 (the probe's comment says what it claims, that a withheld count cannot be recovered, and what it does not; a seventh store, where seven of the row's eight issues had a brief visit and the eighth is one person's, pins the count as shown and the remainder as 1), F6 (comment only: `r.suppressed = 0` is a guard that cannot decide a row on its own while the counted issues are among the row's, and stays because D62 states it as the rule), F7 (the view decides once, in the CTE `decided`, whether a count is withheld, and the count and the flag follow from it), F9 (the expected rows take the status IDs from `Workflow.Development.Id` and `Workflow.Review.Id`), F10 (`HarnessSteps.QueryEveryMetricViewAsync` is the one copy of "every metric view through `query`"). Accepted by user decision, no change: F1 (bv-D8), F5 (bv-D9). Other tickets', built there and merged: F3 and F8 (ticket 04), F4 and F11 (ticket 02).
+- Decisions that touched the ticket (user, 2026-11-13). bv-D7: a shown time in status median can hint at a withheld brief visit count; accepted, no figure changes, and ticket 05's method note says a short median does not show how many issues had a brief visit. bv-D8: a shown brief visit count can be subtracted from the row's issue count to give the number of issues with no brief visit, which may rest on fewer assignees than the configured number; accepted and recorded, as D37 is, and the count is not withheld for it; the probe test says so and pins it. bv-D9: counts from two derives under different thresholds can be differenced to a band that rests on too few people; accepted and recorded, whoever edits the configuration file is trusted with it, and ticket 05 says so in the README.
+- The implementer's three readings, as answered in the review: (1) the row's own median, shown under its own check, can suggest that a withheld count is not zero, though it is no bound: accepted as bv-D7; (2) a count of nothing under zero assignees needed reads "0 issues had a visit shorter than 5 minutes": accepted as pinned; (3) with one assignee needed, a count made only of unassigned issues is withheld, as a count of nothing is: accepted, it matches `data_quality`.
+- The `minimumGroupSize` setting exists (ADR-0008), so that box is met by saying so and the "if the setting exists" box applies. It is met by the nine-case numbers test, the team-of-six test and the both-zero test.
+- The two "probe finds no query" boxes are ticked as the probe now states them: no query over the metric views tells a count of nothing from a withheld count, or one withheld count from another, and none recovers a withheld count by subtracting shown figures. The accepted remainder is outside that claim: the row's issue count less a shown count gives the number of issues with no brief visit, whoever is behind them (bv-D8), and the probe pins it as shown.
+- The boxes on a withheld median and on a sprint that fails the team check rest on ticket 01's tests in `BriefVisitCountTests` (report and `query`), which this ticket did not copy, and on the team-of-six test here. The box on a leak found here: the review's F1 and F5 and the implementer's first reading were each put to the user before any change, and each was accepted without one.
+- Existing assertions changed: none. The test file is new; `HarnessSteps.cs` gained one method and lost nothing; no existing test file is in the diff.
+- Merger's read of c1d8b72..95f49eb: the view is the ticket's one production change. Its columns, their names and order are the same; the count is null exactly when the flag is 1, by the same predicate as before, written once; no expected value in any test changed for it, and ticket 01's tests of the view pass unchanged. It has no person column: `assignee_hash` is read only inside `COUNT(DISTINCT ...)` in `counted`, as before. Fixtures are synthetic (`FAKE-<n>`, the harness's people, workflow and sprints; no status ID is written out). No project, package or toolkit file changed, and no stray file. No test asserts that a withheld count differs from a count of nothing; the tests that compare stores assert they are the same to the byte, with a control that differs in the one row expected. `test-anti-patterns` on the new tests (10 methods, 29 cases): no critical or high finding; medium, one: the two probe tests are long, each one scenario over several stores; low, one: the report-trusts-the-flag test replaces the view by hand, as its prior art in `SuppressionTests` does.
+- With the user, not settled by this merge: nothing new. The three readings above are answered.

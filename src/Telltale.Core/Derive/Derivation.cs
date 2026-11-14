@@ -7,7 +7,7 @@ namespace Telltale.Core.Derive;
 
 /// <summary>
 /// Rebuilds all derived data from the raw rows. It is a pure function of the raw data, the
-/// configured status roles, abandoned resolutions and business calendar, and the as-of time, so changing a definition means rerunning it (ADR-0002).
+/// configured status roles, abandoned resolutions, business calendar and brief visit thresholds, and the as-of time, so changing a definition means rerunning it (ADR-0002).
 /// </summary>
 /// <remarks>
 /// Throws <see cref="UserFacingException"/> when an issue is in, or its timeline entered, a status that has no configured role,
@@ -75,6 +75,10 @@ public static class Derivation
         var memberships = new List<IssueMembershipInterval>();
         var sprintStatusTimes = new List<SprintStatusTime>();
         var anomalies = new List<IssueAnomaly>();
+        var briefVisits = new List<SprintBriefVisit>();
+
+        // The one place that asks whether any status is listed: with none, no stay is worked out and nothing is looked at.
+        var checksBriefVisits = settings.BriefVisitThresholds.Count > 0;
 
         foreach (var issue in raw.Issues)
         {
@@ -102,11 +106,24 @@ public static class Derivation
             // Only sprints that count (the windows above) have time in status. A sprint the issue was never in
             // gives nothing, so it is not measured at all: most issues were in one or two of the board's sprints.
             var memberOf = membership.Intervals.Select(interval => interval.SprintId).ToHashSet(StringComparer.Ordinal);
+
+            // The issue's stays are the same for every sprint: worked out once, when the first sprint needs them.
+            IReadOnlyList<Stay>? stays = null;
             foreach (var window in windows.Where(counted => memberOf.Contains(counted.SprintId)))
             {
-                sprintStatusTimes.AddRange(TimeInStatus.ForSprint(window, timeline.Intervals, membership.Intervals, calendar, asOf)
+                // The time this sprint counts of this issue, worked out once for the time in status and the brief visits.
+                var countedTime = TimeInStatus.CountedTime(window, membership.Intervals, asOf);
+                sprintStatusTimes.AddRange(TimeInStatus.During(countedTime, timeline.Intervals, calendar, asOf)
                     .OrderBy(pair => pair.Key, StringComparer.Ordinal)
                     .Select(pair => new SprintStatusTime(issue.IssueId, window.SprintId, pair.Key, pair.Value.CalendarTime, pair.Value.BusinessTime, pair.Value.BusinessDays)));
+
+                // A brief visit is not a changelog anomaly: nothing here adds to the anomalies or to what derive logs.
+                if (checksBriefVisits)
+                {
+                    briefVisits.AddRange(BriefVisits.During(countedTime, stays ??= BriefVisits.Stays(timeline), settings.BriefVisitThresholds)
+                        .Order(StringComparer.Ordinal)
+                        .Select(statusId => new SprintBriefVisit(issue.IssueId, window.SprintId, statusId)));
+                }
             }
         }
 
@@ -121,6 +138,7 @@ public static class Derivation
             AsOf = asOf,
             Anomalies = anomalies,
             ClosedSprintsWithoutAnEnd = [.. raw.Sprints.Where(SprintWindows.IsClosedWithoutAnEnd).Select(sprint => sprint.SprintId)],
+            BriefVisits = briefVisits,
         };
     }
 
@@ -141,5 +159,9 @@ public static class Derivation
             reopens);
 }
 
-/// <summary>Everything a rebuild is decided with besides the raw data and the as-of time: how a delivery is decided, and the business calendar.</summary>
-public sealed record DerivationSettings(DeliveryRules Delivery, BusinessCalendar Calendar);
+/// <summary>Everything a rebuild is decided with besides the raw data and the as-of time: how a delivery is decided, the business calendar, and the brief visit thresholds.</summary>
+public sealed record DerivationSettings(DeliveryRules Delivery, BusinessCalendar Calendar)
+{
+    /// <summary>The threshold of every status checked for brief visits (GLOSSARY: Brief visit), by status ID. Empty when nothing is checked.</summary>
+    public IReadOnlyDictionary<string, TimeSpan> BriefVisitThresholds { get; init; } = new Dictionary<string, TimeSpan>();
+}
