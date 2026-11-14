@@ -31,11 +31,11 @@ A day that is neither a weekend nor a company holiday, counted in full (24 hours
 _Avoid_: Working day, workday, working hours
 
 **Cycle time**:
-Business days from the first time development work starts on an issue to the last time it enters a done status category, for delivered issues only. It belongs to the sprint in which the issue was delivered.
+The elapsed business days from an issue's first move into a work status to its last move into a done status, for delivered issues only. Once the cycle has started, all of its time counts: waiting for review or testing, time blocked, time moved back to a status that is waiting to be picked up, and time spent in done before a reopen. Time before the first work status (in the backlog, or waiting in the sprint to be picked up) does not count. It belongs to the sprint in which the issue was delivered. It measures how long delivery took, not the effort that went into it.
+_Avoid_: Lead time, turnaround, delivery time
 
 **Reopen**:
-A move of an issue out of a done status category back to any earlier status.
-_Avoid_: Lead time, turnaround
+A move of an issue out of a done status back to any earlier status.
 
 **Delivered**:
 An issue that is in a done status category and was not abandoned (closed with a won't-do resolution). Delivery is reaching Done; shipping to customers is a later step outside the team's control. The delivery moment is the issue's last move into a done status. An issue in a done status whose history shows no such move, or whose history ends in another status, is not delivered; it is counted as a changelog anomaly.
