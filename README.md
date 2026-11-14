@@ -337,6 +337,26 @@ Report and query assertions normalize both actual output and multiline expected 
 | `src/Telltale.Reporting` | The markdown sprint report. |
 | `src/Telltale.Pipeline` | The steps the commands run, and their rules. |
 | `src/Telltale.Cli` | The `telltale` executable. |
+| `eng/SeedStore` | A developer tool that writes a synthetic store; see below. |
+
+### Trying the executable without Jira
+
+`eng/SeedStore` writes a working folder that a published `telltale` can `derive`, `report` and `query`, with no Jira site and no secrets. Use it to try a build by hand or to check what this README says against the executable.
+
+```
+dotnet run --project eng/SeedStore -- <working folder>
+cd <working folder>
+telltale derive
+telltale report --sprint 42
+telltale query "SELECT * FROM delivered_per_sprint"
+```
+
+- **Everything it writes is synthetic.** `config/telltale.json` and `data/telltale.db` are filled by the real `backfill` from the tests' fake Jira: `FAKE-` issues, fake people and fake statuses. No real Jira data is involved.
+- **The history** is two completed sprints, 41 (listed as the baseline) and 42, with a team of six. Each has delivered and unfinished issues and four issues that passed through Development in twenty seconds; sprint 42 has a reopened issue and a row that reads `suppressed`.
+- **`--minimum-group-size <team>,<assignees behind a figure>`** writes `minimumGroupSize`, for example `0,0`.
+- **`--brief-visit-threshold <status>=<minutes>`** writes an entry of `briefVisitThresholds` and may be repeated, for example `development=5`. A status is its ID or its name without "Fake"; `--help` lists them.
+- **The working folder must be empty or new**, unless `--force` is given, which replaces the configuration file and the store and leaves other files alone. A folder inside a checkout of this repository is always refused.
+- `backfill`, `sync`, `run` and `discover` call Jira, so they do not work on a seeded store. To change a setting afterwards, edit the configuration file and run `telltale derive`.
 
 ## Further reading
 

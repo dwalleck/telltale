@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Telltale.SeedStore</RootNamespace>
+    <AssemblyName>seed-store</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <!-- The test platform's build files arrive with the reference to the test project. This is not a test
+         application: it has its own entry point, and dotnet test must not try to run it. -->
+    <IsTestProject>false</IsTestProject>
+    <IsTestingPlatformApplication>false</IsTestingPlatformApplication>
+    <GenerateTestingPlatformEntryPoint>false</GenerateTestingPlatformEntryPoint>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The fake Jira and the synthetic history are the tests' own (Harness/SeededStore.cs): one copy. -->
+    <ProjectReference Include="..\..\tests\Telltale.Pipeline.Tests\Telltale.Pipeline.Tests.csproj" />
+  </ItemGroup>
+
+</Project>

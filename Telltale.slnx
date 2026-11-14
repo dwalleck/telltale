@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/eng/">
+    <Project Path="eng/SeedStore/SeedStore.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Telltale.Cli/Telltale.Cli.csproj" />
     <Project Path="src/Telltale.Collectors/Telltale.Collectors.csproj" />
