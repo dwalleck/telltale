@@ -1,7 +1,7 @@
 @{
     SchemaVersion   = 1
     Solution        = 'Telltale.slnx'
-    SourcePaths     = @('src', 'tests')
+    SourcePaths     = @('src', 'tests', 'eng')
     LogDir          = '.ipe-logs'
     WorktreeDir     = '.worktrees'
     DrivePool       = @('W', 'X', 'Y', 'Z')
