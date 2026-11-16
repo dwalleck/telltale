@@ -59,7 +59,7 @@ To run from source without publishing, use `dotnet run --project src/Telltale.Cl
 
 ### Upgrading
 
-A store written by a version from before the `minimumGroupSize` setting or the `briefVisitThresholds` setting needs one `telltale derive` after upgrading, because the derived tables changed. Until then `report` and `query` stop with:
+A store needs one `telltale derive` after upgrading to any version whose derived tables or metric views differ from the ones that built it. The tool tells the two apart by the text of its SQL scripts, so this includes a version that changed only a comment in one. Until then `report` and `query` stop with:
 
 ```
 The derived data in the store was built by another version of this tool. Run derive first.
@@ -153,7 +153,9 @@ It refuses to replace a non-empty store with an empty fetch, because that usuall
 
 ### `sync`
 
-Fetches what changed in Jira since the last `sync` or `backfill` and adds it to the store. It never removes anything; `backfill` does that.
+Fetches what changed in Jira since the last `sync` or `backfill` and adds it to the store. It removes one thing: a stored issue that has since become an epic or a sub-task, which is out of scope. Work deleted or moved in Jira stays until the next `backfill`.
+
+A request that fails in a way that can pass by itself (Jira answers 408, 500, 502, 503 or 504, the connection drops, or no answer comes in time) is sent again up to three times, after waits of 5, 10 and 20 seconds; this applies to `backfill` and `discover` too. A rate-limited request (429) is sent again up to five times, after the wait Jira asks for. One command waits at most 15 minutes in all. A fetch is stored whole or not at all, so a run that still fails has changed nothing.
 
 ### `derive`
 

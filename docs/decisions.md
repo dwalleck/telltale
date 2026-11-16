@@ -72,6 +72,7 @@ D5 to D56 describe the rule with its default numbers, five and three. They apply
 | D67 | Every report's method note states the numbers in force. A report written with either number below its default also says so in a line under its heading. | optional suppression spec |
 | D68 | Hashing of person fields, the fields that are never stored, and the absence of any per-person view do not depend on the setting. | optional suppression spec, ADR-0008 |
 | D69 | `discover` writes the setting with five and three into a new configuration file and never changes it afterwards. | optional suppression spec |
+| D82 | The distinct assignees behind every check are counted from each issue's assignee as of the last sync, for past sprints too; assignee history is not collected. So reassigning an old issue can change whether a past sprint's figures are shown, and through D50 and D56 whether the baseline is. This is accepted: collecting assignee history would store more about people, and would change how the checks count after results had been seen. (2026-11-15) | this list, `GLOSSARY.md` |
 
 ## Data quality
 

@@ -24,7 +24,19 @@ internal sealed class JiraClient : IDisposable
     private static readonly TimeSpan ShortestWait = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan FirstWaitWithoutRetryAfter = TimeSpan.FromSeconds(5);
 
-    // The most one client, and so one command, waits on rate limits in all.
+    // How often one request is sent again after a failure that can pass by itself: a 408 or a 5xx that Jira or
+    // a gateway answers under load, a connection that drops, an answer that does not come in time. A fetch is one
+    // batch (owner decision D38), so without any retry one such moment late in a backfill discards the whole
+    // fetch. The waits start at five seconds and double, as for a rate limit that names no wait: five retries
+    // wait two and a half minutes in all, which outlasts a gateway's restart in an unattended backfill.
+    // A request's retries are counted together, whatever their reasons.
+    private const int MaxTransientRetries = 5;
+
+    // An answer that does not come in time gets fewer: each try waits out HttpClient's whole timeout before
+    // its wait here begins, and a discover pointed at a site that never answers should not sit for a quarter of an hour.
+    private const int MaxRetriesAfterNoAnswer = 3;
+
+    // The most one client, and so one command, waits on rate limits and passing failures in all.
     private static readonly TimeSpan LongestTotalWait = TimeSpan.FromMinutes(15);
 
     private readonly HttpClient _http;
@@ -64,7 +76,8 @@ internal sealed class JiraClient : IDisposable
 
     /// <summary>
     /// Sends a request and reads the JSON answer. A rate-limited answer (429) is waited out and the request
-    /// sent again. Every way this can fail for reasons outside the tool becomes a
+    /// sent again; so is, a few times, a failure that can pass by itself (<see cref="MaxTransientRetries"/>).
+    /// Every other way this can fail for reasons outside the tool becomes a
     /// <see cref="UserFacingException"/> that names the request and never quotes the response, which can hold
     /// issue or person data.
     /// </summary>
@@ -82,8 +95,8 @@ internal sealed class JiraClient : IDisposable
     }
 
     /// <summary>
-    /// Sends the request once. Null when Jira answered that it is rate limited and the wait before the next
-    /// try is over. <paramref name="retries"/> is how often this request was already sent again.
+    /// Sends the request once. Null when the request is to be sent again and the wait before that is over:
+    /// Jira answered that it is rate limited, or the request failed in a way that can pass by itself. <paramref name="retries"/> is how often this request was already sent again.
     /// </summary>
     private async Task<JsonDocument?> SendOnceAsync(HttpMethod method, string relativeUrl, string call, JsonObject? body, int retries, CancellationToken cancellationToken)
     {
@@ -100,6 +113,14 @@ internal sealed class JiraClient : IDisposable
         }
         catch (HttpRequestException exception)
         {
+            // A connection that was refused, reset or cut off can be a passing fault. A name that does not
+            // resolve, a proxy tunnel or TLS is a setting, and waiting does not change it.
+            if (exception.HttpRequestError is HttpRequestError.ConnectionError or HttpRequestError.ResponseEnded
+                && await WaitedForAnotherTryAsync("The connection to Jira failed", call, retries, MaxTransientRetries, cancellationToken))
+            {
+                return null;
+            }
+
             // DNS, connection, proxy tunnel and TLS failures. The category is enough; the message can name hosts.
             var reason = exception.HttpRequestError == HttpRequestError.Unknown ? "the connection failed" : exception.HttpRequestError.ToString();
             throw new UserFacingException(
@@ -110,6 +131,11 @@ internal sealed class JiraClient : IDisposable
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
             // Not the user's Ctrl+C: HttpClient's own timeout.
+            if (await WaitedForAnotherTryAsync("Jira did not answer in time", call, retries, MaxRetriesAfterNoAnswer, cancellationToken))
+            {
+                return null;
+            }
+
             throw new UserFacingException($"Jira did not answer {call} in time.", exception);
         }
 
@@ -148,7 +174,13 @@ internal sealed class JiraClient : IDisposable
             if (!response.IsSuccessStatusCode)
             {
                 LastRefusal = response.StatusCode;
-                throw new UserFacingException($"Jira answered {(int)response.StatusCode} ({response.StatusCode}) to {call}.");
+                var answered = $"Jira answered {(int)response.StatusCode} ({response.StatusCode})";
+                if (CanPass(response.StatusCode) && await WaitedForAnotherTryAsync(answered, call, retries, MaxTransientRetries, cancellationToken))
+                {
+                    return null;
+                }
+
+                throw new UserFacingException($"{answered} to {call}.");
             }
 
             try
@@ -161,6 +193,32 @@ internal sealed class JiraClient : IDisposable
                 throw new UserFacingException($"The answer to {call} was not JSON. A proxy or sign-in page may have been served in place of Jira's answer.", exception);
             }
         }
+    }
+
+    /// <summary>Answers that say Jira, or a gateway in front of it, could not serve the request now. Any other error is about the request.</summary>
+    private static bool CanPass(HttpStatusCode status) => status is HttpStatusCode.RequestTimeout
+        or HttpStatusCode.InternalServerError
+        or HttpStatusCode.BadGateway
+        or HttpStatusCode.ServiceUnavailable
+        or HttpStatusCode.GatewayTimeout;
+
+    /// <summary>
+    /// Waits before a request that failed in a passing way is sent again, and says so (<paramref name="failure"/>
+    /// holds nothing of the response). False, without waiting, when the request has had <paramref name="maxRetries"/> retries or the
+    /// command its waits: the caller then reports the failure as it would have without any retry.
+    /// </summary>
+    private async Task<bool> WaitedForAnotherTryAsync(string failure, string call, int retries, int maxRetries, CancellationToken cancellationToken)
+    {
+        var wait = FirstWaitWithoutRetryAfter * Math.Pow(2, retries);
+        if (retries >= maxRetries || _waited + wait > LongestTotalWait)
+        {
+            return false;
+        }
+
+        await _notices.WriteLineAsync($"{failure}. Waiting {wait.TotalSeconds:0} seconds before asking again ({call}).");
+        _waited += wait;
+        await Task.Delay(wait, _clock, cancellationToken);
+        return true;
     }
 
     /// <summary>

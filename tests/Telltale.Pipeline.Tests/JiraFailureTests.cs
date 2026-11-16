@@ -48,7 +48,8 @@ public class JiraFailureTests
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo("Jira did not answer GET rest/api/3/status in time.\n");
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            JiraNotices.EveryRetryAfterNoAnswer("GET rest/api/3/status") + "Jira did not answer GET rest/api/3/status in time.\n");
     }
 
     [Test]
