@@ -50,6 +50,17 @@ Worklog reliability checks: gap between worklog `started` and `created` (logged 
 - Group only by attributes fixed before work starts (ADR-0006).
 - Privacy rules: ADR-0003, ADR-0005.
 
+## Brief visits (decided 2026-11-17)
+
+The evaluation is judged with brief visits left out (`exclude`) of both time in status and cycle time. The same treatment applies to the baseline sprints and to the evaluation sprints. The rule is in `.scratch/brief-visit-treatment/spec.md` (owner decisions D83 to D96).
+
+- **Reason:** a stay shorter than its status's threshold records when the board was updated, not how long the work took. Its usual cause is an issue moved through several statuses at once after the work was done. The recorded figures are then too short by an amount that differs from sprint to sprint, and they would move if people began to update the board more promptly, which the structured workflow may itself cause.
+- **When:** decided after the recorded figures of past sprints had been seen (D89), and before the setting was built or any evaluation sprint was judged. No evaluation figure is judged under the recorded treatment.
+- **What the adjusted figures are:** figures of the issues that were moved on time. Small issues are left out more often than large ones, so cycle time is read by point bucket and never as one figure for a sprint. The number of delivered issues whose cycle starts with a brief visit is read beside it, for the baseline and for each evaluation sprint (D87).
+- **Later:** a start taken from another source, such as the first commit on the issue's branch or a pull request event, is a second reading when it is built (D88). It is a lower bound, because work begins before the first commit. It does not replace this treatment unless a dated commit here says so.
+
+The thresholds are company configuration and are not in this repository.
+
 ## The pilot
 
 - **Duration:** 3–4 sprints.
