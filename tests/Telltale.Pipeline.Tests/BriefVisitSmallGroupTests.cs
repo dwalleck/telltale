@@ -130,7 +130,10 @@ public class BriefVisitSmallGroupTests
 
         // What the first store gives: the withheld count is null beside the shown ones, and no sum or
         // remainder holds it.
+        // A row as the view printed whole ends with the number of issues left out and its flag, which are null
+        // and 0 while brief visits are counted: nothing is left out.
         var developmentRowWithheld = $"| 41 | {DevelopmentId} | Fake Development | 4 | 5 | NULL | 1 |\n";
+        var developmentRowWithheldInTheWholeView = $"| 41 | {DevelopmentId} | Fake Development | 4 | 5 | NULL | 1 | NULL | 0 |\n";
         await Assert.That(read[0].Attempts).IsEqualTo(
             ViewHead
             + developmentRowWithheld
@@ -175,8 +178,8 @@ public class BriefVisitSmallGroupTests
 
         // The comparison can fail: with three people behind the count, that one row differs and nothing else.
         var shown = read[^2];
-        await Assert.That(read[0].Views).Contains(developmentRowWithheld);
-        await Assert.That(shown.Views).IsEqualTo(read[0].Views.Replace(developmentRowWithheld, $"| 41 | {DevelopmentId} | Fake Development | 4 | 5 | 3 | 0 |\n", StringComparison.Ordinal));
+        await Assert.That(read[0].Views).Contains(developmentRowWithheldInTheWholeView);
+        await Assert.That(shown.Views).IsEqualTo(read[0].Views.Replace(developmentRowWithheldInTheWholeView, $"| 41 | {DevelopmentId} | Fake Development | 4 | 5 | 3 | 0 | NULL | 0 |\n", StringComparison.Ordinal));
         await Assert.That(shown.Reports).IsEqualTo(
             read[0].Reports.Replace(DevelopmentWithheld + "\n" + ReviewOfThree, "- Fake Development: 3 issues had a visit shorter than 5 minutes\n" + ReviewOfThree, StringComparison.Ordinal));
 
@@ -276,7 +279,10 @@ public class BriefVisitSmallGroupTests
 
         // The footer's cycle time line counts delivered issues, and none of those entered a work status.
         await Assert.That(read[0].Report).EndsWith("\n- Fake Development: 3 issues had a visit shorter than 5 minutes\n" + ReportText.CyclesThatStartWithBriefVisit("suppressed"));
-        await Assert.That(read[0].Views).Contains(ViewHead + $"| 41 | {Workflow.Development.Id} | Fake Development | 4 | 5 | 3 | 0 |\n");
+        // The view printed whole ends with the number of issues left out and its flag: null and 0 while brief visits are counted.
+        await Assert.That(read[0].Views).Contains(
+            "| sprint_id | status_id | status_name | board_position | threshold_minutes | brief_visit_issue_count | suppressed | left_out_issue_count | left_out_suppressed |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+            + $"| 41 | {Workflow.Development.Id} | Fake Development | 4 | 5 | 3 | 0 | NULL | 0 |\n");
         await Assert.That(read[0].Views).Contains("| sprint_id | team_suppressed | delivered_suppressed |\n| --- | --- | --- |\n| 41 | 0 | 1 |\n");
 
         // Whatever was delivered, the report and every metric view are the same: with the brief visit rows

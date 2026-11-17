@@ -74,8 +74,9 @@ public class BriefVisitsLeftOutOfCycleTimeTests
         await Assert.That(report).Contains("\nDelivered issues: 7\n");
         await Assert.That(report).Contains("\n" + developmentRow + "\n");
         await Assert.That(report).Contains(ReportText.CycleTimeHeader + bucketRow + "\n");
+        // Left out of time in status, the status's line goes on to give the four that are not in its row.
         await Assert.That(report).EndsWith(
-            "\n- Fake Development: 4 issues had a visit shorter than 5 minutes\n"
+            "\n- Fake Development: 4 issues had a visit shorter than 5 minutes" + (timeInStatus == "exclude" ? ReportText.LeftOutOfTheRow("4") : "") + "\n"
             + "- Delivered issues whose cycle starts with a brief visit, " + cycleLineEnding + "\n");
         await Assert.That(await QueryAsync(pipeline, CycleStartsSql)).IsEqualTo(CycleStartsHead + "| 41 | 4 | 0 |\n");
     }

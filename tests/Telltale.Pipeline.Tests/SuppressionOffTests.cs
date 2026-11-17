@@ -456,6 +456,7 @@ public class SuppressionOffTests
             | baseline_cycle_time_per_bucket.suppressed | 3 | 0 |
             | baseline_sprint.suppressed | 3 | 0 |
             | baseline_time_in_status.suppressed | 3 | 0 |
+            | brief_visits_per_sprint.left_out_suppressed | 0 | 0 |
             | brief_visits_per_sprint.suppressed | 0 | 0 |
             | cycle_starts_with_brief_visit_per_sprint.suppressed | 0 | 0 |
             | cycle_time_per_sprint_and_bucket.suppressed | 7 | 0 |

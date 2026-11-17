@@ -23,6 +23,17 @@
 -- of zero turns the check off (owner decision D65), and a count of nothing is then shown as 0, as
 -- data_quality's counts are. An unassigned issue counts toward nobody. The check of the delivered count
 -- (sprint_team.delivered_suppressed, D49) is not read, as time_in_status_per_sprint does not read it (D55).
+-- The number of issues left out of the row (GLOSSARY: Treatment; owner decisions D84, D95, D98):
+-- left_out_issue_count is how many of the issues that were in the row before anything was left out are not
+-- in the status's row in time_in_status_per_sprint, because their only business time in the status was brief
+-- visits. Each of them is among the issues with a brief visit. It is measured only when the rebuild left brief
+-- visits out of time in status (run.brief_visit_treatment): while they are counted nothing is left out, the
+-- number is null, and left_out_suppressed is 0, because nothing is withheld. When they are left out, the
+-- number is null and left_out_suppressed is 1 when fewer distinct assignees than a figure needs are among the
+-- issues left out, by the same check and the same numbers as the count: so a number of nothing reads as a
+-- withheld one does, and with the number of assignees at zero it is shown as 0. A row of this view with no
+-- row in time_in_status_per_sprint shows that every issue of the status was left out, so that its number is
+-- at least one also when it is withheld: the owner accepted that (D98).
 CREATE VIEW brief_visits_per_sprint AS
 WITH threshold AS (
     SELECT CAST(j.key AS TEXT) AS status_id, CAST(j.value AS REAL) AS threshold_minutes
@@ -44,6 +55,27 @@ counted AS (
     LEFT JOIN issue i ON i.issue_id = v.issue_id
     GROUP BY v.sprint_id, v.status_id
 ),
+-- Whether the rebuild left brief visits out of time in status: the treatment it recorded, never the
+-- configuration's.
+treatment AS (
+    SELECT json_extract(brief_visit_treatment, '$.timeInStatus') = 'exclude' AS leaves_out
+    FROM run
+),
+-- The issues left out of a row: in it before anything was left out, and not in what remains.
+left_out AS (
+    SELECT r.sprint_id,
+           r.status_id,
+           COUNT(*) AS issues,
+           COUNT(DISTINCT a.assignee_hash) AS assignees
+    FROM time_in_status_issue_recorded r
+    LEFT JOIN issue a ON a.issue_id = r.issue_id
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM time_in_status_issue m
+        WHERE m.issue_id = r.issue_id AND m.sprint_id = r.sprint_id AND m.status_id = r.status_id
+    )
+    GROUP BY r.sprint_id, r.status_id
+),
 -- Whether a row's count is withheld is decided once, here, and the count and the flag both follow from it.
 -- The counted issues and the rows are read from the one view (time_in_status_issue_recorded), so the counted
 -- issues are always among the row's issues. Before a treatment could leave issues out, this view read the
@@ -58,6 +90,10 @@ decided AS (
            COALESCE(s.name, r.status_id) AS status_name,
            b.position AS board_position,
            h.threshold_minutes,
+           -- The number of issues left out is decided here in the same way, once. While brief visits are
+           -- counted there is no number and nothing is withheld.
+           CASE WHEN treatment.leaves_out THEN COALESCE(l.issues, 0) END AS left_out,
+           CASE WHEN NOT treatment.leaves_out OR COALESCE(l.assignees, 0) >= g.assignees_behind_a_figure THEN 0 ELSE 1 END AS left_out_suppressed,
            COALESCE(c.issues, 0) AS issues,
            CASE WHEN COALESCE(c.assignees, 0) >= g.assignees_behind_a_figure THEN 0 ELSE 1 END AS suppressed
     FROM recorded_row r
@@ -66,6 +102,8 @@ decided AS (
     JOIN board_status b ON b.status_id = r.status_id
     LEFT JOIN status s ON s.status_id = r.status_id
     LEFT JOIN counted c ON c.sprint_id = r.sprint_id AND c.status_id = r.status_id
+    LEFT JOIN left_out l ON l.sprint_id = r.sprint_id AND l.status_id = r.status_id
+    CROSS JOIN treatment
     CROSS JOIN minimum_group_size g
     WHERE b.is_done = 0
       AND t.team_suppressed = 0
@@ -76,5 +114,7 @@ SELECT d.sprint_id,
        d.board_position,
        d.threshold_minutes,
        CASE WHEN d.suppressed = 0 THEN d.issues END AS brief_visit_issue_count,
-       d.suppressed AS suppressed
+       d.suppressed AS suppressed,
+       CASE WHEN d.left_out_suppressed = 0 THEN d.left_out END AS left_out_issue_count,
+       d.left_out_suppressed AS left_out_suppressed
 FROM decided d;
