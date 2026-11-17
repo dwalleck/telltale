@@ -68,9 +68,9 @@ public static class SprintReport
         var numbers = NumbersInForce.Of(derivedFrom);
         var briefVisitsChecked = derivedFrom.BriefVisitsChecked;
 
-        // The treatment in force is the one the rebuild recorded. Leaving out acts on the listed statuses only.
+        // The treatment in force is the one the rebuild recorded. Leaving out acts on the listed statuses only,
+        // and which rows those are is the brief visit view's to say (ReadTimeInStatusAsync).
         var leftOutOfTimeInStatus = derivedFrom.BriefVisitsLeftOutOfTimeInStatus;
-        var adjustedStatusIds = leftOutOfTimeInStatus ? derivedFrom.BriefVisitStatusIds : new HashSet<string>(StringComparer.Ordinal);
         var leftOutOfCycleTime = derivedFrom.BriefVisitsLeftOutOfCycleTime;
 
         // Owner decisions D50, D56: while a baseline sprint has its delivered count withheld, every baseline figure is
@@ -104,7 +104,7 @@ public static class SprintReport
             """,
             new { sprintId },
             cancellationToken));
-        AppendTimeInStatus(report, baseline, await ReadTimeInStatusAsync(store, sprintId, cancellationToken), adjustedStatusIds, leftOutOfTimeInStatus);
+        AppendTimeInStatus(report, baseline, await ReadTimeInStatusAsync(store, sprintId, leftOutOfTimeInStatus, cancellationToken), leftOutOfTimeInStatus);
         var quality = await ReadDataQualityAsync(store, cancellationToken);
 
         // With no status listed neither brief visit view has rows, so neither is asked. The footer's cycle time
@@ -136,13 +136,23 @@ public static class SprintReport
         return report.ToString();
     }
 
-    private static Task<IReadOnlyList<TimeInStatusRow>> ReadTimeInStatusAsync(ITelltaleStore store, string sprintId, CancellationToken cancellationToken) =>
+    /// <summary>
+    /// The rows of the sprint's time in status table. With <paramref name="leftOutOfTimeInStatus"/> a row
+    /// says whether it is adjusted: whether its status is one listed for brief visits. That is read from
+    /// <c>brief_visits_per_sprint</c>, which has a row for every listed status that has a row in the table,
+    /// and is not worked out here from the recorded thresholds: the mark on a row points to the status's
+    /// footer line, and the line is written from the same view, so a marked row always has one. While brief
+    /// visits are counted no row is adjusted and that view is not read.
+    /// </summary>
+    private static Task<IReadOnlyList<TimeInStatusRow>> ReadTimeInStatusAsync(ITelltaleStore store, string sprintId, bool leftOutOfTimeInStatus, CancellationToken cancellationToken) =>
         store.QueryViewsAsync<TimeInStatusRow>(
-            """
-            SELECT v.status_id, v.status_name, v.issue_count, v.median_business_days, v.total_business_days, v.suppressed,
-                   b.median_business_days AS baseline_median_business_days, b.suppressed AS baseline_suppressed
+            $"""
+            SELECT v.status_name, v.issue_count, v.median_business_days, v.total_business_days, v.suppressed,
+                   b.median_business_days AS baseline_median_business_days, b.suppressed AS baseline_suppressed,
+                   {(leftOutOfTimeInStatus ? "l.status_id IS NOT NULL" : "0")} AS adjusted
             FROM time_in_status_per_sprint v
             LEFT JOIN baseline_time_in_status b ON b.status_id = v.status_id
+            {(leftOutOfTimeInStatus ? "LEFT JOIN brief_visits_per_sprint l ON l.sprint_id = v.sprint_id AND l.status_id = v.status_id" : "")}
             WHERE v.sprint_id = @sprintId
             ORDER BY v.board_position;
             """,
@@ -312,10 +322,10 @@ public static class SprintReport
 
     /// <summary>
     /// One row per status issues spent time in during the sprint, in board order. A status nobody was in has no row.
-    /// The row of a status in <paramref name="adjustedStatusIds"/> carries <see cref="AdjustedMark"/> after its name.
+    /// A row that is adjusted (<see cref="ReadTimeInStatusAsync"/>) carries <see cref="AdjustedMark"/> after its name.
     /// A table with no row says so in a sentence, worded by <paramref name="leftOutOfTimeInStatus"/>.
     /// </summary>
-    private static void AppendTimeInStatus(StringBuilder report, BaselineColumns baseline, IReadOnlyList<TimeInStatusRow> rows, IReadOnlySet<string> adjustedStatusIds, bool leftOutOfTimeInStatus)
+    private static void AppendTimeInStatus(StringBuilder report, BaselineColumns baseline, IReadOnlyList<TimeInStatusRow> rows, bool leftOutOfTimeInStatus)
     {
         report.Append("\n## Time in status\n\n");
         if (rows is [{ IssueCount: null }])
@@ -340,7 +350,7 @@ public static class SprintReport
         foreach (var row in rows)
         {
             string[] baselineCells = baseline == BaselineColumns.None ? [] : [BaselineDays(baseline, row.BaselineSuppressed, row.BaselineMedianBusinessDays)];
-            var status = row.StatusId is { } statusId && adjustedStatusIds.Contains(statusId) ? row.StatusName + AdjustedMark : row.StatusName;
+            var status = row.Adjusted != 0 ? row.StatusName + AdjustedMark : row.StatusName;
             AppendTableRow(report, [status, Count(row.IssueCount), Days(row.Suppressed, row.MedianBusinessDays), Days(row.Suppressed, row.TotalBusinessDays), .. baselineCells]);
         }
     }
@@ -794,9 +804,9 @@ public static class SprintReport
 
     private sealed class TimeInStatusRow
     {
-        /// <summary>Null in the one row of a sprint short of a team, which has no status.</summary>
-        public string? StatusId { get; init; }
         public string StatusName { get; init; } = "";
+        /// <summary>1 when the row's status is listed for brief visits and brief visits are left out of time in status; 0 otherwise, and in the one row of a sprint short of a team, which has no status.</summary>
+        public long Adjusted { get; init; }
         /// <summary>Null in the one row of a sprint short of a team (five assignees by default): it has no status rows, and that one row is how the report knows to write the "suppressed" line (owner decisions D41, D45).</summary>
         public long? IssueCount { get; init; }
         public double? MedianBusinessDays { get; init; }
