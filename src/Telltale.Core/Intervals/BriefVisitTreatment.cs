@@ -97,7 +97,8 @@ public static class BriefVisitTreatments
     /// brief visit (<see cref="Cycles.StartsWithBriefVisit"/>; owner decisions D90 and D91). Under
     /// <see cref="CountBriefVisits"/> the cycle is measured as it is. Under <see cref="ExcludeBriefVisits"/> a
     /// cycle that starts with a brief visit is left out (owner decision D85): the issue then has no cycle
-    /// time, as one that never entered a work status has none, and is delivered all the same. A brief visit
+    /// time, as one that never entered a work status has none, and is delivered all the same. Its point
+    /// bucket is not decided here and does not change (owner decision D102). A brief visit
     /// later in the cycle leaves nothing out, because a cycle is measured from its start to the delivery and
     /// not as a sum of stays.
     /// </summary>

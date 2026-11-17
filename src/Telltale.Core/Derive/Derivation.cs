@@ -93,9 +93,10 @@ public static class Derivation
             IReadOnlyList<Stay> stays = checksBriefVisits ? BriefVisits.Stays(timeline) : [];
 
             // The one place an issue's cycle is built from its outcome. The treatment for cycle time is applied
-            // here and nowhere else (GLOSSARY: Treatment): a cycle it leaves out is no cycle from here on, so the
-            // issue is stored as one that never entered a work status is, and stays delivered. Whether the cycle
-            // starts with a brief visit is recorded whatever the treatment (owner decision D87).
+            // here and nowhere else (GLOSSARY: Treatment): an issue whose cycle it leaves out is stored with no
+            // cycle time, as one that never entered a work status is, and stays delivered, in the point bucket
+            // it had (owner decision D102). Whether the cycle starts with a brief visit is recorded whatever the
+            // treatment (owner decision D87).
             cycles.Add(outcome switch
             {
                 Delivered delivered => DeliveredCycle(
@@ -176,9 +177,11 @@ public static class Derivation
     /// <summary>
     /// A delivered issue's cycle, in the bucket of its estimate at the start of its cycle, so a later
     /// re-estimate does not move it (ADR-0006). An issue that never entered a work status has no cycle start;
-    /// its bucket is its estimate at the delivery moment (owner decision D35). So it is for an issue whose
-    /// cycle <paramref name="cycleTimeTreatment"/> leaves out because it starts with a brief visit (owner
-    /// decision D85): it is stored in every respect as an issue that never entered a work status is, and
+    /// its bucket is its estimate at the delivery moment (owner decision D35). An issue whose cycle
+    /// <paramref name="cycleTimeTreatment"/> leaves out because it starts with a brief visit (owner decision
+    /// D85) is stored with no cycle time, and with the bucket it has when the cycle is counted: its estimate
+    /// at the start of its cycle, because it did enter a work status and its start is what it was (owner
+    /// decisions D90 and D102). So the bucket of a delivered issue never depends on the treatment.
     /// <paramref name="startsWithBriefVisit"/> is kept beside it.
     /// </summary>
     private static IssueCycle DeliveredCycle(RawIssue issue, Delivered delivered, string? deliverySprintId, Cycle? cycle, IEnumerable<PointChange> pointChanges, int reopens, bool startsWithBriefVisit, BriefVisitTreatment cycleTimeTreatment)
@@ -189,7 +192,7 @@ public static class Derivation
             delivered.At,
             deliverySprintId,
             toMeasure,
-            toMeasure is { } measured
+            cycle is { } measured
                 ? PointHistory.EstimateAt(measured.Start, measured.StartHistoryId, issue.StoryPoints, pointChanges)
                 : PointHistory.EstimateAt(delivered.At, delivered.HistoryId, issue.StoryPoints, pointChanges),
             reopens,

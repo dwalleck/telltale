@@ -81,15 +81,17 @@ public class BriefVisitsLeftOutOfCycleTimeTests
     }
 
     [Test]
-    public async Task An_issue_with_no_cycle_time_keeps_its_delivery_its_delivery_sprint_and_its_reopen_count()
+    public async Task An_issue_with_no_cycle_time_keeps_its_delivery_its_delivery_sprint_its_reopen_count_and_its_point_bucket()
     {
         // Besides the usual seven, a caught-up issue that was reopened once and done again, and one delivered
-        // after the sprint, in no sprint that has started.
+        // after the sprint, in no sprint that has started. The reopened one was estimated at 3 points when its
+        // cycle started on Wednesday the 7th and re-estimated to 5 on Thursday, before it was done.
         await using var pipeline = new PipelineHarness();
         AddSprint41WithItsTeam(pipeline.Jira);
         AddFourCaughtUpIssuesOfFourPeople(pipeline.Jira);
         AddFourDaysInDevelopmentForThreePeople(pipeline.Jira);
         Scenarios.CaughtUp(pipeline.Jira, "FAKE-5", People.Five).Estimated(3)
+            .Reestimated(Local(2026, 1, 8, 10), 5)
             .Moved(Local(2026, 1, 12, 10), Workflow.Review)
             .Moved(Local(2026, 1, 13, 10), Workflow.Done);
         pipeline.Jira.AddIssue("FAKE-6", Local(2026, 1, 5, 9)).AssignedTo(People.One).InSprints(41)
@@ -97,24 +99,27 @@ public class BriefVisitsLeftOutOfCycleTimeTests
             .Moved(Local(2026, 1, 7, 10).AddSeconds(20), Workflow.Review)
             .Moved(Local(2026, 1, 20, 10), Workflow.Done);
         ListDevelopment(pipeline);
-        const string DeliveriesSql = "SELECT issue_id, cycle_end, delivered, delivery_sprint_id, reopen_count, starts_with_brief_visit FROM issue_cycle ORDER BY issue_id;";
+        const string DeliveriesSql = "SELECT issue_id, cycle_end, delivered, delivery_sprint_id, reopen_count, starts_with_brief_visit, point_bucket FROM issue_cycle ORDER BY issue_id;";
 
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
-        var deliveries = await pipeline.QueryAsync<(string, string?, long, string?, long, long)>(DeliveriesSql);
+        var deliveries = await pipeline.QueryAsync<(string, string?, long, string?, long, long, double?)>(DeliveriesSql);
         var delivered = await QueryAsync(pipeline, "SELECT * FROM delivered_per_sprint;");
         LeaveBriefVisitsOutOfCycleTime(pipeline);
         await pipeline.RunAllAsync(["derive"], ["report", "--sprint", "41"]);
 
-        // Every issue's delivery is what it was, the reopened one's reopen count is one, and the delivered
-        // count, which is what seat value counts of issues, is eight for the sprint.
-        await Assert.That(await pipeline.QueryAsync<(string, string?, long, string?, long, long)>(DeliveriesSql)).IsEquivalentTo(deliveries);
+        // Every issue's delivery and point bucket are what they were, the reopened one's reopen count is one,
+        // and the delivered count, which is what seat value counts of issues, is eight for the sprint. The
+        // re-estimated issue is in the bucket of its estimate at the start of its cycle, 3, under either
+        // treatment (bvt-D17), though under exclude it has no cycle time.
+        await Assert.That(deliveries.Single(issue => issue.Item1 == pipeline.Jira.IdOf("FAKE-5")).Item7).IsEqualTo(3d);
+        await Assert.That(await pipeline.QueryAsync<(string, string?, long, string?, long, long, double?)>(DeliveriesSql)).IsEquivalentTo(deliveries);
         await Assert.That(await QueryAsync(pipeline, "SELECT * FROM delivered_per_sprint;")).IsEqualTo(delivered);
         await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\nDelivered issues: 8\n");
-        var leftOut = await pipeline.QueryAsync<(string, long, string?, long)>(
-            "SELECT issue_id, delivered, delivery_sprint_id, reopen_count FROM issue_cycle WHERE delivered = 1 AND business_days IS NULL ORDER BY reopen_count, delivery_sprint_id;");
+        var leftOut = await pipeline.QueryAsync<(string, long, string?, long, double?)>(
+            "SELECT issue_id, delivered, delivery_sprint_id, reopen_count, point_bucket FROM issue_cycle WHERE delivered = 1 AND business_days IS NULL ORDER BY reopen_count, delivery_sprint_id;");
         await Assert.That(leftOut.Select(issue => issue.Item1)).IsEquivalentTo(new[] { "FAKE-1", "FAKE-2", "FAKE-3", "FAKE-4", "FAKE-5", "FAKE-6" }.Select(pipeline.Jira.IdOf));
-        await Assert.That(leftOut.Single(issue => issue.Item1 == pipeline.Jira.IdOf("FAKE-5"))).IsEqualTo((pipeline.Jira.IdOf("FAKE-5"), 1L, "41", 1L));
-        await Assert.That(leftOut.Single(issue => issue.Item1 == pipeline.Jira.IdOf("FAKE-6"))).IsEqualTo((pipeline.Jira.IdOf("FAKE-6"), 1L, (string?)null, 0L));
+        await Assert.That(leftOut.Single(issue => issue.Item1 == pipeline.Jira.IdOf("FAKE-5"))).IsEqualTo((pipeline.Jira.IdOf("FAKE-5"), 1L, "41", 1L, (double?)3d));
+        await Assert.That(leftOut.Single(issue => issue.Item1 == pipeline.Jira.IdOf("FAKE-6"))).IsEqualTo((pipeline.Jira.IdOf("FAKE-6"), 1L, (string?)null, 0L, (double?)null));
     }
 
     [Test]
@@ -213,6 +218,32 @@ public class BriefVisitsLeftOutOfCycleTimeTests
         await Assert.That(counted).IsEqualTo(BaselineHead + "| 3 | 3 | 4 | 0 |\n");
         await Assert.That(await QueryAsync(pipeline, BaselineSql)).IsEqualTo(BaselineHead + "| 3 | 3.5 | 4 | 0 |\n");
         await Assert.That(await pipeline.ReadReportAsync(42)).Contains(ReportText.CycleTimeHeaderWithBaseline + "| 3 | 3 | 3.0 | 3.0 | 3.0 | 3.0 | 3.5 | 4.0 |\n");
+    }
+
+    [Test]
+    [Arguments("count", "count", false)]
+    [Arguments("exclude", "count", true)]
+    [Arguments("count", "exclude", true)]
+    [Arguments("exclude", "exclude", true)]
+    public async Task The_method_note_says_of_the_baseline_that_brief_visits_are_left_out_of_it_when_either_metric_leaves_them_out(string timeInStatus, string cycleTime, bool leftOut)
+    {
+        // Sprint 41 is the baseline, and the report is sprint 42's.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.AddSprints41And42();
+        pipeline.Jira.AddIdleTeam(Local(2026, 1, 2, 9), 41, 42);
+        AddFourDaysInDevelopmentForThreePeople(pipeline.Jira);
+        pipeline.Config["baselineSprintIds"] = new JsonArray("41");
+        ListDevelopment(pipeline);
+        pipeline.Config["briefVisitTreatment"] = new JsonObject { ["timeInStatus"] = timeInStatus, ["cycleTime"] = cycleTime };
+
+        await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "42"]);
+
+        // While both metrics count brief visits the sentence is what it was before a treatment could be chosen.
+        const string Pooled = "\n- The baseline columns pool every issue of the baseline sprints, a list fixed in the configuration (sprints 41), each a completed sprint";
+        var report = await pipeline.ReadReportAsync(42);
+        await Assert.That(report).Contains(leftOut
+            ? Pooled + ", with brief visits left out as they are in this report's own figures (see the paragraph on brief visits below). A baseline figure reads "
+            : Pooled + ". A baseline figure reads ");
     }
 
     [Test]

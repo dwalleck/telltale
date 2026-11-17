@@ -360,7 +360,10 @@ public static class SprintReport
         if (baselineSprintIds.Count > 0)
         {
             report.Append("- The baseline columns pool every issue of the baseline sprints, a list fixed in the configuration (sprints ").AppendJoin(", ", baselineSprintIds)
-                .Append("), each a completed sprint. ")
+                .Append("), each a completed sprint")
+
+                // Under exclude for either metric the pool is of what remains, as the sprint's own figures are (bvt-D10).
+                .Append(leftOutOfTimeInStatus || leftOutOfCycleTime ? ", with brief visits left out as they are in this report's own figures (see the paragraph on brief visits below). " : ". ")
                 .Append(WhenABaselineFigureIsNotShown(numbers)).Append('\n');
         }
 
