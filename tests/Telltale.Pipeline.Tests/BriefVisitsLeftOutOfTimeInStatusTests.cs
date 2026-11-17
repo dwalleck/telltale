@@ -434,8 +434,8 @@ public class BriefVisitsLeftOutOfTimeInStatusTests
         await Assert.That(leftOut).Contains("\n| Fake New | 8 | ");
         await Assert.That(leftOut).Contains("\n| Fake Development (adjusted: see the footer) | 3 | 2.0 | 6.0 |\n");
 
-        // Nothing else differs but the method note's sentences that leaving out makes untrue (bvt-D10): the
-        // report with those five put back as they read under count, and the line, the mark and what the
+        // Nothing else differs but the method note's sentences that leaving out changes or adds: the
+        // report with those put back as they read under count, and the line, the mark and what the
         // footer line goes on to say taken away, is the report under count. The footer line of the listed
         // status that has a row goes on to the number left out of it, which is nothing and so reads as a
         // withheld number does.
@@ -474,15 +474,16 @@ public class BriefVisitsLeftOutOfTimeInStatusTests
     private const string Heading = "# Fake Sprint 41 (2026-01-05 to 2026-01-19)\n\n";
 
     private const string LineUnderTheHeading =
-        "Brief visits are left out of time in status in this report. A row of that table marked \"adjusted\" is of a status listed for brief visits: its figures are of what remains, and the footer gives the number of its issues that had a brief visit.\n\n";
+        "Brief visits are left out of time in status in this report. A row of that table marked \"adjusted\" is of a status listed for brief visits: its figures are of what remains, and the footer gives the number of its issues that had a brief visit and the number left out of the row.\n\n";
 
     private const string Mark = " (adjusted: see the footer)";
 
     /// <summary>
-    /// The sentences of the method note that leaving out makes untrue: one of its paragraph on time in status,
-    /// on what the total sums, and four of its paragraph on brief visits. Each is given with its wording when
-    /// brief visits are left out of time in status and its wording while they are counted, which is what it
-    /// was before a treatment could be chosen. Under the default numbers.
+    /// The sentences of the method note that differ when brief visits are left out of time in status: one of
+    /// its paragraph on time in status, on what the total sums, and those of its paragraph on brief visits. Each
+    /// is given with its wording when brief visits are left out of time in status and its wording while they
+    /// are counted, which is what it was before a treatment could be chosen; a sentence that is there only
+    /// when they are left out has no other wording. Under the default numbers.
     /// </summary>
     private static readonly (string LeftOut, string Counted)[] MethodNoteSentences =
     [
@@ -490,12 +491,14 @@ public class BriefVisitsLeftOutOfTimeInStatusTests
             " Total business days sum that time across all contributing issues, including repeated visits; this is accumulated issue time,"),
         (" For each status the configuration file lists (briefVisitThresholds), the footer gives how many of the issues that were in the status's time in status row before anything was left out had a brief visit during the time the row counts.",
             " For each status the configuration file lists (briefVisitThresholds), the footer gives how many of the issues in the status's time in status row had a brief visit during the time the row counts."),
-        (" The time of every brief visit to a listed status is left out of the issue's time in that status (briefVisitTreatment in the configuration file), and an issue left with no business time in the status is not in its row: the row's count, median and total, and the baseline median, are of what remains. No other figure was changed because of a brief visit, and no duration was estimated or replaced.",
-            " Brief visits are counted and nothing more: no duration was excluded or corrected because of one, and every other figure is what it would be without the count."),
+        (ReportText.Treatment.IsASetting + ReportText.Treatment.LeftOutOfTimeInStatusAlone + ReportText.Treatment.TimeInStatusIsLeftOut + ReportText.Treatment.Why + ReportText.Treatment.WhatLeavingOutDoesNotDo,
+            ReportText.Treatment.NothingIsDone),
         (" A count reads \"suppressed\" when its row in the time in status table would read \"suppressed\" for its figures with nothing left out, or when fewer than three distinct assignees are among the issues counted.",
             " A count reads \"suppressed\" when its row in the time in status table reads \"suppressed\" for its figures, or when fewer than three distinct assignees are among the issues counted."),
+        (ReportText.Treatment.TheSecondNumber + ReportText.Treatment.TheSecondNumberReadsSuppressed, ""),
         (" A listed status that had no row in the time in status table before anything was left out has no line; one whose every issue was left out has a line and no row, and a sprint whose team is smaller than five has no line for any listed status.",
             " A listed status with no row in the time in status table has no line, and a sprint whose team is smaller than five has no line for any listed status."),
+        (ReportText.Treatment.WhenLeavingOutWasAdded("time in status is"), ""),
     ];
 
     /// <summary>The store's content (<see cref="PipelineHarness.ReadStoreContentAsync"/>) as one block per table or view, by its name; a block starts with the name.</summary>

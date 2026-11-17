@@ -452,7 +452,7 @@ public class BriefVisitsLeftOutSmallGroupTests
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).StartsWith(
             "# Fake Sprint 41 (2026-01-05 to 2026-01-19)\n\n"
-            + "Brief visits are left out of time in status and of cycle time in this report. A row of the time in status table marked \"adjusted\" is of a status listed for brief visits: its figures are of what remains, and the footer gives the number of its issues that had a brief visit."
+            + "Brief visits are left out of time in status and of cycle time in this report. A row of the time in status table marked \"adjusted\" is of a status listed for brief visits: its figures are of what remains, and the footer gives the number of its issues that had a brief visit and the number left out of the row."
             + " A delivered issue whose cycle starts with a brief visit has no cycle time: the cycle time table's figures are of the cycles that remain, and the footer gives the number of such issues.\n\n"
             + "Delivered issues: suppressed\n\n## Cycle time by point bucket\n\nsuppressed\n");
         await Assert.That(report).Contains("\n## Time in status\n\nsuppressed\n");

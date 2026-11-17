@@ -200,7 +200,7 @@ public static class Derivation
     }
 }
 
-/// <summary>Everything a rebuild is decided with besides the raw data and the as-of time: how a delivery is decided, the business calendar, and the brief visit thresholds.</summary>
+/// <summary>Everything a rebuild is decided with besides the raw data and the as-of time: how a delivery is decided, the business calendar, the brief visit thresholds, and the treatment of brief visits for time in status and for cycle time.</summary>
 public sealed record DerivationSettings(DeliveryRules Delivery, BusinessCalendar Calendar)
 {
     /// <summary>The threshold of every status checked for brief visits (GLOSSARY: Brief visit), by status ID. Empty when nothing is checked.</summary>

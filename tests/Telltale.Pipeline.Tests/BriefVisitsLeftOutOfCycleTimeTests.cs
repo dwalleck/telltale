@@ -111,7 +111,7 @@ public class BriefVisitsLeftOutOfCycleTimeTests
         // Every issue's delivery and point bucket are what they were, the reopened one's reopen count is one,
         // and the delivered count, which is what seat value counts of issues, is eight for the sprint. The
         // re-estimated issue is in the bucket of its estimate at the start of its cycle, 3, under either
-        // treatment (bvt-D17), though under exclude it has no cycle time.
+        // treatment (owner decision D102), though under exclude it has no cycle time.
         await Assert.That(deliveries.Single(issue => issue.Item1 == pipeline.Jira.IdOf("FAKE-5")).Item7).IsEqualTo(3d);
         await Assert.That(await pipeline.QueryAsync<(string, string?, long, string?, long, long, double?)>(DeliveriesSql)).IsEquivalentTo(deliveries);
         await Assert.That(await QueryAsync(pipeline, "SELECT * FROM delivered_per_sprint;")).IsEqualTo(delivered);
@@ -298,7 +298,7 @@ public class BriefVisitsLeftOutOfCycleTimeTests
             + "Delivered issues: ");
         await Assert.That(bothLeftOut).StartsWith(
             Heading
-            + "Brief visits are left out of time in status and of cycle time in this report. A row of the time in status table marked \"adjusted\" is of a status listed for brief visits: its figures are of what remains, and the footer gives the number of its issues that had a brief visit. A delivered issue whose cycle starts with a brief visit has no cycle time: the cycle time table's figures are of the cycles that remain, and the footer gives the number of such issues.\n\n"
+            + "Brief visits are left out of time in status and of cycle time in this report. A row of the time in status table marked \"adjusted\" is of a status listed for brief visits: its figures are of what remains, and the footer gives the number of its issues that had a brief visit and the number left out of the row. A delivered issue whose cycle starts with a brief visit has no cycle time: the cycle time table's figures are of the cycles that remain, and the footer gives the number of such issues.\n\n"
             + "Delivered issues: ");
     }
 
@@ -356,17 +356,24 @@ public class BriefVisitsLeftOutOfCycleTimeTests
         var cycleTimeLeftOut = await pipeline.ReadReportAsync(41);
 
         // The report with the line under the heading and the note taken away, and the footer line's ending
-        // and the two sentences put back as they read under count, is the report under count.
+        // and the method note's sentences put back as they read under count, is the report under count. The
+        // note differs in the sentence on what cycle time is and, in its paragraph on brief visits, in what is
+        // done with them, in whether the issues the footer's last line counts have a cycle time, and in the
+        // sentence on when leaving out was added.
         await Assert.That(counted).Contains(CycleTimeSentence);
-        await Assert.That(counted).Contains(NothingIsDone);
+        await Assert.That(counted).Contains(ReportText.Treatment.NothingIsDone);
+        await Assert.That(counted).Contains(ReportText.Treatment.TheyAreInTheFigures);
         await Assert.That(cycleTimeLeftOut).Contains(CycleTimeSentence + CycleTimeSentenceLeftOut);
-        await Assert.That(cycleTimeLeftOut).Contains(
-            " A delivered issue whose cycle starts with a brief visit has no cycle time (briefVisitTreatment in the configuration file). " + StillDelivered + NoOtherFigure);
+        await Assert.That(cycleTimeLeftOut).Contains(WhatIsDoneWithCycleTimeAlone);
+        await Assert.That(cycleTimeLeftOut).Contains(ReportText.Treatment.TheyHaveNoCycleTime);
+        await Assert.That(cycleTimeLeftOut).Contains(ReportText.Treatment.WhenLeavingOutWasAdded("cycle time is"));
         var putBack = cycleTimeLeftOut
             .Replace("Brief visits are left out of cycle time in this report. A delivered issue whose cycle starts with a brief visit has no cycle time: the cycle time table's figures are of the cycles that remain, and the footer gives the number of such issues.\n\n", "")
             .Replace(NoteUnderTheTable, "")
             .Replace(CycleTimeSentenceLeftOut, "")
-            .Replace(" A delivered issue whose cycle starts with a brief visit has no cycle time (briefVisitTreatment in the configuration file). " + StillDelivered + NoOtherFigure, NothingIsDone)
+            .Replace(WhatIsDoneWithCycleTimeAlone, ReportText.Treatment.NothingIsDone)
+            .Replace(ReportText.Treatment.TheyHaveNoCycleTime, ReportText.Treatment.TheyAreInTheFigures)
+            .Replace(ReportText.Treatment.WhenLeavingOutWasAdded("cycle time is"), "")
             .Replace(ReportText.CyclesThatStartWithBriefVisitAndHaveNoCycleTime("suppressed"), ReportText.CyclesThatStartWithBriefVisit("suppressed"));
         await Assert.That(putBack).IsEqualTo(counted);
     }
@@ -387,15 +394,25 @@ public class BriefVisitsLeftOutOfCycleTimeTests
         await pipeline.RunAllAsync(["derive"], ["report", "--sprint", "41"]);
         var bothLeftOut = await pipeline.ReadReportAsync(41);
 
-        // The sentence on what is done with a brief visit says both things, and names the setting once.
-        await Assert.That(timeInStatusLeftOut).Contains(TimeInStatusLeftOut + NoOtherFigure);
-        await Assert.That(bothLeftOut).Contains(TimeInStatusLeftOut + " A delivered issue whose cycle starts with a brief visit has no cycle time. " + StillDelivered + NoOtherFigure);
+        // The paragraph on brief visits says what is done to each metric, and names the setting once. Cycle
+        // time adds its sentences to it: what is left out, the reason for a cycle, that the issues the footer's
+        // last line counts have no cycle time, and cycle time among the metrics measured another way.
+        await Assert.That(timeInStatusLeftOut).Contains(
+            ReportText.Treatment.IsASetting + ReportText.Treatment.LeftOutOfTimeInStatusAlone + ReportText.Treatment.TimeInStatusIsLeftOut + ReportText.Treatment.Why + ReportText.Treatment.WhatLeavingOutDoesNotDo);
+        await Assert.That(bothLeftOut).Contains(
+            ReportText.Treatment.IsASetting + ReportText.Treatment.LeftOutOfBoth + ReportText.Treatment.TimeInStatusIsLeftOut + ReportText.Treatment.CycleTimeIsLeftOut
+            + ReportText.Treatment.Why + ReportText.Treatment.WhyForACycle + ReportText.Treatment.WhatLeavingOutDoesNotDo);
+        await Assert.That(bothLeftOut.Split(ReportText.Treatment.IsASetting).Length).IsEqualTo(2);
         var putBackToTimeInStatus = bothLeftOut
             .Replace(" and of cycle time in this report. A row of the time in status table marked", " in this report. A row of that table marked")
             .Replace(" A delivered issue whose cycle starts with a brief visit has no cycle time: the cycle time table's figures are of the cycles that remain, and the footer gives the number of such issues.", "")
             .Replace(NoteUnderTheTable, "")
             .Replace(CycleTimeSentenceLeftOut, "")
-            .Replace(" A delivered issue whose cycle starts with a brief visit has no cycle time. " + StillDelivered, "")
+            .Replace(ReportText.Treatment.LeftOutOfBoth, ReportText.Treatment.LeftOutOfTimeInStatusAlone)
+            .Replace(ReportText.Treatment.CycleTimeIsLeftOut, "")
+            .Replace(ReportText.Treatment.WhyForACycle, "")
+            .Replace(ReportText.Treatment.TheyHaveNoCycleTime, ReportText.Treatment.TheyAreInTheFigures)
+            .Replace(ReportText.Treatment.WhenLeavingOutWasAdded("time in status and cycle time are"), ReportText.Treatment.WhenLeavingOutWasAdded("time in status is"))
             .Replace(ReportText.CyclesThatStartWithBriefVisitAndHaveNoCycleTime("suppressed"), ReportText.CyclesThatStartWithBriefVisit("suppressed"));
         await Assert.That(putBackToTimeInStatus).IsEqualTo(timeInStatusLeftOut);
     }
@@ -414,17 +431,10 @@ public class BriefVisitsLeftOutOfCycleTimeTests
     private const string CycleTimeSentenceLeftOut =
         " A delivered issue whose cycle starts with a brief visit has no cycle time (see the paragraph on brief visits below).";
 
-    /// <summary>The sentence of the paragraph on brief visits that says nothing is done with one, as it reads while both metrics count them.</summary>
-    private const string NothingIsDone =
-        " Brief visits are counted and nothing more: no duration was excluded or corrected because of one, and every other figure is what it would be without the count.";
-
-    private const string TimeInStatusLeftOut =
-        " The time of every brief visit to a listed status is left out of the issue's time in that status (briefVisitTreatment in the configuration file), and an issue left with no business time in the status is not in its row: the row's count, median and total, and the baseline median, are of what remains.";
-
-    private const string StillDelivered =
-        "It is still delivered: the delivered count does not change, and the cycle time table's counts, medians and P85s, and the baseline's, are of the cycles that remain.";
-
-    private const string NoOtherFigure = " No other figure was changed because of a brief visit, and no duration was estimated or replaced.";
+    /// <summary>What the paragraph on brief visits says is done with them when cycle time alone leaves them out, in place of the sentence that they are counted and nothing more.</summary>
+    private const string WhatIsDoneWithCycleTimeAlone =
+        ReportText.Treatment.IsASetting + ReportText.Treatment.LeftOutOfCycleTimeAlone + ReportText.Treatment.CycleTimeIsLeftOut
+        + ReportText.Treatment.Why + ReportText.Treatment.WhyForACycle + ReportText.Treatment.WhatLeavingOutDoesNotDo;
 
     private const string CycleStartsSql = "SELECT sprint_id, issue_count, suppressed FROM cycle_starts_with_brief_visit_per_sprint ORDER BY sprint_id;";
 

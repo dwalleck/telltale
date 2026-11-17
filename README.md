@@ -19,7 +19,9 @@ One markdown file per sprint, with:
 - **Time in status:** how many issues spent time in each workflow status, their median time and total business days. Totals sum issue time within the sprint and membership windows, not effort.
 - **Baseline columns:** cycle-time medians and P85s and time-in-status medians pooled over a fixed list of earlier sprints, for comparison.
 - **Method note and data quality footer:** how the figures were computed and what was left out.
-- **Brief visit lines in the footer:** when the configuration lists statuses under `briefVisitThresholds`, one line for each listed status that has a row in the sprint's time in status table says how many of the issues in that row had a visit shorter than the status's threshold, or reads `suppressed`. A listed status with no row has no line, and a sprint whose tables are withheld has none. No figure is changed because of a brief visit. See [Brief visit thresholds](#brief-visit-thresholds).
+- **Brief visit lines in the footer:** when the configuration lists statuses under `briefVisitThresholds`, one line for each listed status that has a row in the sprint's time in status table, or had one before any brief visit was left out, says how many of the issues in the row before anything was left out had a visit shorter than the status's threshold, or reads `suppressed`. A listed status that had no such row has no line, and a sprint whose tables are withheld has none. No figure is changed because of a brief visit unless `briefVisitTreatment` says so. See [Brief visit thresholds](#brief-visit-thresholds).
+- **A cycle time line in the footer:** when a listed status has the role `work`, the footer's last line says how many of the sprint's delivered issues have a cycle that starts with a brief visit, or reads `suppressed`.
+- **What leaving brief visits out adds:** when `briefVisitTreatment` sets `exclude` for time in status or for cycle time, a line under the heading says which of the two were adjusted, and the method note says what was left out, why, and what that does not do. With `exclude` for time in status, the row of every listed status is marked `(adjusted: see the footer)` and each brief visit line goes on to the number of issues left out of the row. With `exclude` for cycle time, the cycle time table has a note under it. See [Brief visit treatment](#brief-visit-treatment).
 
 Time is counted in business days in the team's time zone, skipping weekends and the configured holidays. The definitions are in [`GLOSSARY.md`](GLOSSARY.md).
 
@@ -34,7 +36,7 @@ Reporting no per-person results is a hard constraint of the design. Withholding 
 - **A report written below the defaults says so.** When either number is below its default, a line under the report's heading gives the numbers in force, or says that small-group suppression is off. The method note of every report states the rule the report was written under.
 - **The rule lives in the database views.** `report` and `query` both read through them, so neither can show a figure that the numbers in force withhold.
 - **Opening the database file in another program bypasses the rule.** That program reads every table.
-- **Whoever edits the configuration file is trusted with it.** The rule is applied to each brief visit count on its own. Someone who derives twice under different `briefVisitThresholds` can subtract one shown count from the other, and the difference can rest on fewer people than the numbers in force allow. See [Brief visit thresholds](#brief-visit-thresholds).
+- **Whoever edits the configuration file is trusted with it.** The rule is applied to each brief visit count on its own. Someone who derives twice under different `briefVisitThresholds` can subtract one shown count from the other, and the difference can rest on fewer people than the numbers in force allow. Someone who derives twice under different values of `briefVisitTreatment` can set a figure under `count` beside the same figure under `exclude`, which says something about the issues left out even when their count is withheld. See [Brief visit thresholds](#brief-visit-thresholds) and [Brief visit treatment](#brief-visit-treatment).
 
 ## Requirements
 
@@ -95,7 +97,7 @@ Run it from a working folder outside your clone of this repository, so the store
    telltale discover --site-url https://example.atlassian.net/ --board 42 --time-zone America/Chicago --backfill-start 2026-07-01
    ```
 
-3. **Review `config/telltale.json`.** Give every status a role (`not started`, `work`, `blocked` or `done`); at least one must be `done`. List the resolutions that mean an issue was abandoned, the company holidays, and the baseline sprint IDs. `discover` wrote `minimumGroupSize` with its default numbers; leave it, or see [Minimum group size](#minimum-group-size). To count brief visits, add `briefVisitThresholds` by hand; see [Brief visit thresholds](#brief-visit-thresholds).
+3. **Review `config/telltale.json`.** Give every status a role (`not started`, `work`, `blocked` or `done`); at least one must be `done`. List the resolutions that mean an issue was abandoned, the company holidays, and the baseline sprint IDs. `discover` wrote `minimumGroupSize` with its default numbers; leave it, or see [Minimum group size](#minimum-group-size). To count brief visits, add `briefVisitThresholds` by hand; see [Brief visit thresholds](#brief-visit-thresholds). To leave them out of time in status or cycle time, add `briefVisitTreatment` as well; see [Brief visit treatment](#brief-visit-treatment).
 
 4. **Fetch the history.**
 
@@ -136,6 +138,8 @@ A new file gets `minimumGroupSize` with five and three. A rerun never changes th
 
 `discover` never writes `briefVisitThresholds`. A rerun keeps the setting as the file has it and never changes or removes it. A rerun on a file whose `briefVisitThresholds` would be refused writes nothing and leaves the file untouched. It prints `discover did not write <file>, because run would refuse it:` followed by the message `run` would give.
 
+`discover` never writes `briefVisitTreatment` either. A rerun keeps the setting as a value and in its place in the file, and never changes or removes it. It does not keep the file byte for byte: a rerun that changes anything else rewrites the file in the tool's layout and drops comments, and says so. A rerun on a file whose `briefVisitTreatment` would be refused writes nothing, leaves the file untouched and prints the same line, followed by the message `run` would give. It prints no part of a key written under the setting, also when the key is written twice. When a file has more than one fault, `discover` and `run` may each report a different one: each checks in its own order and stops at the first. Each message is true of the file, and correcting one fault brings the next.
+
 ### `secrets set <jira-email|jira-api-token|hashing-salt>`
 
 Stores one secret in Windows Credential Manager. The value is asked for at a prompt, or piped in with `--stdin`; it is never taken as an argument.
@@ -159,7 +163,7 @@ A request that fails in a way that can pass by itself (Jira answers 408, 500, 50
 
 ### `derive`
 
-Drops and rebuilds every derived table and view from the raw data: issue cycles, time in each status, sprint windows and the metric views. Run it after changing `statusRoles`, `abandonedResolutionIds`, `holidays`, `timeZone`, `baselineSprintIds`, `minimumGroupSize` or `briefVisitThresholds`. It calls no Jira.
+Drops and rebuilds every derived table and view from the raw data: issue cycles, time in each status, sprint windows and the metric views. Run it after changing `statusRoles`, `abandonedResolutionIds`, `holidays`, `timeZone`, `baselineSprintIds`, `minimumGroupSize`, `briefVisitThresholds` or `briefVisitTreatment`. It calls no Jira.
 
 ### `report [--sprint <id>]`
 
@@ -177,9 +181,15 @@ Runs one `SELECT` over the metric views and prints the rows as a markdown table.
 telltale query "SELECT * FROM delivered_per_sprint"
 ```
 
-The main views are `delivered_per_sprint`, `cycle_time_per_sprint_and_bucket`, `time_in_status_per_sprint`, `baseline_cycle_time_per_bucket`, `baseline_time_in_status`, `data_quality` and `brief_visits_per_sprint`. `minimum_group_size` holds the two numbers the derived data was built under.
+The main views are `delivered_per_sprint`, `cycle_time_per_sprint_and_bucket`, `time_in_status_per_sprint`, `baseline_cycle_time_per_bucket`, `baseline_time_in_status`, `data_quality`, `brief_visits_per_sprint` and `cycle_starts_with_brief_visit_per_sprint`. `minimum_group_size` holds the two numbers the derived data was built under, and `brief_visit_treatment` the treatment of brief visits it was built under.
 
-`brief_visits_per_sprint` has one row per sprint and status listed under `briefVisitThresholds` that has a row in the sprint's time in status table: the threshold in minutes, the count, and a `suppressed` flag. A withheld count is `NULL` with `suppressed` at 1. Without the setting the view has no rows.
+`brief_visits_per_sprint` has one row per sprint and status listed under `briefVisitThresholds` that had a row in the sprint's time in status table before any brief visit was left out: the threshold in minutes, the count, and a `suppressed` flag. A withheld count is `NULL` with `suppressed` at 1. While brief visits are counted, that is every listed status with a row in the time in status table. Under `exclude` for time in status, a status whose every issue was left out has a row here and none in `time_in_status_per_sprint`. Without `briefVisitThresholds` the view has no rows.
+
+The view has two more columns, `left_out_issue_count` and `left_out_suppressed`: the number of issues left out of the status's time in status row, and its flag. Under `exclude` for time in status, a withheld number is `NULL` with `left_out_suppressed` at 1. Under `count` nothing is left out: the number is empty (`NULL`) beside a flag of 0.
+
+`cycle_starts_with_brief_visit_per_sprint` has one row per sprint when a listed status has the role `work`, and no rows otherwise: `issue_count`, the number of the sprint's delivered issues whose cycle starts with a brief visit, and a `suppressed` flag. The number is the same under either treatment.
+
+`brief_visit_treatment` has one row with two columns, `time_in_status` and `cycle_time`, each `count` or `exclude`. A figure of `time_in_status_per_sprint` or `cycle_time_per_sprint_and_bucket` looks the same under either treatment, so read this view beside it to know which one it was measured under.
 
 ## Configuration file
 
@@ -216,6 +226,11 @@ The main views are `delivered_per_sprint`, `cycle_time_per_sprint_and_bucket`, `
   "briefVisitThresholds": {
     "10001": 5,
     "10002": 0.5
+  },
+  // What is done with brief visits. Optional. Each part is "count" or "exclude"; a part left out is "count".
+  "briefVisitTreatment": {
+    "timeInStatus": "exclude",
+    "cycleTime": "count"
   }
 }
 ```
@@ -236,6 +251,7 @@ The main views are `delivered_per_sprint`, `cycle_time_per_sprint_and_bucket`, `
 | `baselineSprintIds` | A list of sprint IDs, each a quoted string of digits. Optional. | `["41", "42"]` |
 | `minimumGroupSize` | An object with the two numbers `team` and `assigneesBehindAFigure`. Each is a whole number of zero or more, written in plain digits, not quoted, with no fraction and no exponent, and no greater than 2,147,483,647. Optional; when it is present both numbers are required. | `{ "team": 5, "assigneesBehindAFigure": 3 }` |
 | `briefVisitThresholds` | An object of status ID (a string of digits, as in `statusRoles`) to threshold: a number of minutes greater than zero, not quoted. A fraction is allowed. Each status must be in `statusRoles` with a role other than `done`, and may be listed once. Optional; may be empty. | `{ "10001": 5, "10002": 0.5 }` |
+| `briefVisitTreatment` | An object with the parts `timeInStatus` and `cycleTime`, each `"count"` or `"exclude"`. Optional, and so is each part: a part left out is `"count"`. `"count"` changes no figure. `"exclude"` for `timeInStatus` leaves the time of every brief visit to a listed status out of time in status. `"exclude"` for `cycleTime` gives a delivered issue whose cycle starts with a brief visit no cycle time. `"exclude"` needs a status listed in `briefVisitThresholds`, and for `cycleTime` one with the role `work`. | `{ "timeInStatus": "exclude", "cycleTime": "count" }` |
 
 Things that are refused when the file is loaded, with a message that names the file:
 
@@ -253,6 +269,13 @@ Things that are refused when the file is loaded, with a message that names the f
 - **A threshold too large or too small to be a length of time**: `1e300` is refused as too large, and `1e-9` because it `rounds to no time at all`. The shortest length of time the tool measures is a ten-millionth of a second.
 - **`briefVisitThresholds` written as anything but an object**, such as `null`, `false`, `5`, `"off"` or a list: `briefVisitThresholds must be an object of status IDs, each with its threshold in minutes; leave the setting out to check no status.`
 - **A status listed twice under `briefVisitThresholds`**: `briefVisitThresholds lists a status twice.`
+- **`briefVisitTreatment` written as anything but an object**, such as `null`, `false` or `"exclude"`: `briefVisitTreatment must be an object with the parts timeInStatus and cycleTime; leave the setting out to count brief visits and change no figure.` The messages of this setting's rules, the seven listed here, never quote what the file holds.
+- **Any other name inside `briefVisitTreatment`**, including a part with another capitalization: `briefVisitTreatment has a part the tool does not know. The parts are timeInStatus and cycleTime.`
+- **A part of `briefVisitTreatment` written twice**: `briefVisitTreatment.timeInStatus is written twice.`
+- **A part that is not `"count"` or `"exclude"`**, including `null`, `true` or a number: `briefVisitTreatment.cycleTime must be written as "count" or "exclude".`
+- **`timeInStatus` as `exclude` with no status listed in `briefVisitThresholds`**: `briefVisitTreatment.timeInStatus is exclude, and no status is listed in briefVisitThresholds, so no visit would be left out. List a status there, or write count.`
+- **`cycleTime` as `exclude` with no status listed in `briefVisitThresholds`**: `briefVisitTreatment.cycleTime is exclude, and no status is listed in briefVisitThresholds, so no cycle would be left out. List a status with the role work there, or write count.`
+- **`cycleTime` as `exclude` when no listed status has the role `work`**: `briefVisitTreatment.cycleTime is exclude, and no status listed in briefVisitThresholds has the role work, so no cycle could start with a brief visit and none would be left out. List a status with the role work there, or write count.`
 
 About `holidays`:
 
@@ -301,24 +324,65 @@ The setting changes only this rule. Person fields are still hashed before they a
 - A threshold is applied to the nearest ten-millionth of a second, and one that rounds to less than that is refused. The report prints the threshold as applied, in plain digits. `0.5` is thirty seconds exactly.
 - A stay exactly as long as the threshold is not brief.
 
-What a report then shows:
+What a report then shows. A status's row, here and in the next list, is its row in the sprint's time in status table before any brief visit was left out. While brief visits are counted, the default, that is the row the table shows. Under `exclude` for time in status the table shows what remains, which can be fewer issues or no row at all; see [Brief visit treatment](#brief-visit-treatment).
 
-- **One line per listed status at the end of the footer**, in board order, for each listed status that has a row in the sprint's time in status table. A shown count reads `Development: 4 issues had a visit shorter than 5 minutes`. A withheld one reads `Development: issues with a visit shorter than 5 minutes: suppressed`.
-- **The count is of issues in that status's time in status row**, each counted once, so it is never larger than the row's issue count.
-- **A paragraph at the end of the method note** says what a brief visit is, that brief visits are counted and no figure was excluded or corrected, and that the rule was added on 2026-11-12, after the first run on real data.
-- **No other figure changes.** The medians, totals and counts are what they are without the setting, and so is the footer's changelog anomaly count: a brief visit is not a changelog anomaly, and `derive` and `run` print nothing about it.
+- **One line per listed status at the end of the footer**, in board order, for each listed status that has such a row. A shown count reads `Development: 4 issues had a visit shorter than 5 minutes`. A withheld one reads `Development: issues with a visit shorter than 5 minutes: suppressed`.
+- **The count is of issues in that row**, each counted once, so it is never larger than that row's issue count. Under `exclude` for time in status it can be larger than the issue count the table shows.
+- **One more line when a listed status has the role `work`**, after those: `Delivered issues whose cycle starts with a brief visit, which are in the cycle time figures: 4`. A cycle starts with a brief visit when the stay that begins where the cycle starts is one. The line is there for every sprint, also one with a team smaller than `team`, where it reads `suppressed`.
+- **A paragraph at the end of the method note** says what a brief visit is, that brief visits are counted and no figure was excluded or corrected, what the footer's last line counts, and that the rule was added on 2026-11-12, after the first run on real data.
+- **No other figure changes**, unless `briefVisitTreatment` says so (see [Brief visit treatment](#brief-visit-treatment)). The medians, totals and counts are what they are without the setting, and so is the footer's changelog anomaly count: a brief visit is not a changelog anomaly, and `derive` and `run` print nothing about it.
 - **There is no baseline count.** To see a baseline sprint's counts, run `telltale report --sprint <id>` on that sprint.
 
 How the minimum group size applies:
 
-- A count is withheld when its row in the time in status table has its figures withheld, or when fewer than `assigneesBehindAFigure` distinct assignees (three by default) are among the issues counted.
+- A count is withheld when that row has, or with nothing left out would have, its figures withheld, or when fewer than `assigneesBehindAFigure` distinct assignees (three by default) are among the issues counted.
 - A count of zero is withheld too, so a zero and a withheld count both read `suppressed`.
 - A sprint with a team smaller than `team` (five by default) has no brief visit lines.
 - With `assigneesBehindAFigure` at zero no count is withheld, and a count of zero reads `0 issues had a visit shorter than 5 minutes`.
-- A shown count can be subtracted from the row's issue count, which gives the number of issues with no brief visit. That number is not checked against the minimum group size.
+- The number in the cycle time line is withheld when the sprint's delivered count is withheld, when fewer than `assigneesBehindAFigure` distinct assignees are among the issues it counts, and when it is zero. With `assigneesBehindAFigure` at zero a number of zero reads `0`.
+- A shown count can be subtracted from that row's issue count, which gives the number of issues with no brief visit. That number is not checked against the minimum group size. Under `exclude` for time in status the table shows the issue count of what remains and not of that row, so the subtraction there gives another number; see [Brief visit treatment](#brief-visit-treatment).
+- The number in the cycle time line can be combined with shown brief visit counts to say something about a withheld one: the issues it counts are often among those the per-status counts count. The number is not withheld for it.
 - Each derive's counts are checked on their own. Deriving under one threshold and then under another gives two counts whose difference is the number of issues with a stay between the two thresholds, and that difference can rest on one or two people. The tool does not prevent this: whoever edits the configuration file is trusted with it, as whoever opens the database file is.
 
 After changing the setting, run `telltale derive`, or `telltale run`, which includes it. Until then `report` and `query` stop with `briefVisitThresholds in the configuration file changed since the derived data was built. Run derive first.` No `backfill` is needed. Writing the same length of time another way (`6`, `6.0`) is not a change.
+
+### Brief visit treatment
+
+`briefVisitTreatment` says what is done with brief visits when a metric is measured. It has two parts, `timeInStatus` and `cycleTime`, and each is `count` or `exclude`. Without the setting, or without a part, the treatment is `count`, and reports are what they are without the setting. The definition is the "Treatment" entry of [`GLOSSARY.md`](GLOSSARY.md).
+
+What each value does to each figure:
+
+| Part | `count` | `exclude` |
+| --- | --- | --- |
+| `timeInStatus` | Nothing. A brief visit counts toward the status's time in status as any stay does. | The time of every brief visit to a listed status is left out of the issue's time in that status. An issue left with no business time in the status is not in the status's row. The row's issue count, median and total, and the baseline median, are of what remains. The time left out is not added to any other status. |
+| `cycleTime` | Nothing. A cycle that starts with a brief visit is in the cycle time figures. | A delivered issue whose cycle starts with a brief visit has no cycle time. It is still delivered: the delivered count does not change, and the issue keeps its point bucket. The bucket's issue count, median and P85, and the baseline's, are of the cycles that remain. A brief visit later in the cycle changes nothing. |
+
+- A treatment applies to every listed status and to every sprint, the baseline sprints included. There is no treatment per status: a status that should not be adjusted is one that is not listed, which also removes its count.
+- A status that is not listed under `briefVisitThresholds` is untouched.
+- The brief visit counts and the number in the footer's cycle time line are the same under either treatment. Under `exclude` for time in status a count is of the issues that were in the status's row before anything was left out.
+- Leaving out is not a correction. No length is estimated or replaced, and the adjusted figures describe the issues that were moved on time, which may not be typical.
+- Samples get smaller. More rows and buckets read `suppressed` than under `count`, and a bucket's P85 can be its largest value.
+- The raw history is not changed by a treatment. Change the setting and derive again to measure the other way.
+
+What a report then shows, with either part as `exclude`:
+
+- **A line under the heading** that names the metrics adjusted. With `exclude` for time in status alone the whole line is `Brief visits are left out of time in status in this report. A row of that table marked "adjusted" is of a status listed for brief visits: its figures are of what remains, and the footer gives the number of its issues that had a brief visit and the number left out of the row.`
+- **A mark on the row of every listed status**, with `exclude` for time in status: `Development (adjusted: see the footer)`. The mark is there whether or not anything was left out of the row in this sprint.
+- **A second number on each brief visit line**, with `exclude` for time in status: `Development: 4 issues had a visit shorter than 5 minutes; those visits are left out of the status's time in status row, and issues that had no other time in the status and so are not in the row's count: 3`. A listed status whose every issue was left out has its line and no row in the table.
+- **One note under the cycle time table**, with `exclude` for cycle time, whatever the table holds: `A delivered issue whose cycle starts with a brief visit has no cycle time and is not in this table (adjusted: see the footer).` The footer's cycle time line then reads `Delivered issues whose cycle starts with a brief visit, which have no cycle time: 4`.
+- **The method note's paragraph on brief visits** states the treatment of each metric, what was left out, why, what leaving out does not do, and that leaving out was added on 2026-11-16, after results had been seen.
+
+How the minimum group size applies:
+
+- Every figure is checked on what remains. A row or a bucket left with fewer than `assigneesBehindAFigure` distinct assignees behind it reads `suppressed` for its figures, and a baseline figure reads `suppressed` when any baseline sprint's adjusted row does.
+- A brief visit count is checked against the row before anything was left out, so it can be shown beside a row that reads `suppressed`.
+- The number of issues left out of a row is withheld when fewer than `assigneesBehindAFigure` distinct assignees are among the issues left out, and when it is zero, so a zero and a withheld number both read `suppressed`. With `assigneesBehindAFigure` at zero it is not withheld, and a number of zero reads `0`.
+- Shown figures can give a withheld number of a listed status, or a bound on it. A footer line with no row in the table shows that the status's left-out number and its brief visit count are each at least one. A shown brief visit count larger than the row's issue count shows that the left-out number is at least their difference. A brief visit count shown beside a row that reads `suppressed` shows that the left-out number is at least one. A withheld left-out number is less than a shown brief visit count, so with one issue in the row it is the number itself. No count is withheld for any of these.
+- A shown brief visit count less a shown left-out number is the number of issues that had a brief visit and are still in the row. That number is not checked against the minimum group size.
+- Under `exclude` for cycle time, the delivered count less the sum of the bucket counts is the number of delivered issues with no cycle time: those that never entered a work status plus those left out. When no issue of the first kind exists, that gives the second number also when the footer withholds it.
+- Each derive's figures are checked on their own. Deriving under `count` and then under `exclude` gives two figures that can be set side by side, which says something about the issues left out even when their count is withheld. The tool does not prevent this, as it does not prevent subtracting the counts of two derives under different thresholds: whoever edits the configuration file is trusted with it.
+
+After changing the setting, run `telltale derive`, or `telltale run`, which includes it. Until then `report` and `query` stop with `briefVisitTreatment in the configuration file changed since the derived data was built. Run derive first.` No `backfill` is needed.
 
 ## Development
 
