@@ -7,7 +7,7 @@ namespace Telltale.Core.Derive;
 
 /// <summary>
 /// Rebuilds all derived data from the raw rows. It is a pure function of the raw data, the
-/// configured status roles, abandoned resolutions, business calendar and brief visit thresholds, and the as-of time, so changing a definition means rerunning it (ADR-0002).
+/// configured status roles, abandoned resolutions, business calendar, brief visit thresholds and treatment of brief visits, and the as-of time, so changing a definition means rerunning it (ADR-0002).
 /// </summary>
 /// <remarks>
 /// Throws <see cref="UserFacingException"/> when an issue is in, or its timeline entered, a status that has no configured role,
