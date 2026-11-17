@@ -58,6 +58,16 @@ public sealed record TelltaleConfig
     /// a number, and a status listed twice.
     /// </summary>
     public BriefVisitThresholdsInMinutes BriefVisitThresholds { get; init; } = BriefVisitThresholdsInMinutes.None;
+
+    /// <summary>
+    /// What is done with brief visits (GLOSSARY: Treatment; owner decision D83), e.g. <c>{ "timeInStatus": "exclude" }</c>:
+    /// each part is <c>count</c> or <c>exclude</c>. The setting may be left out, and so may a part: both mean
+    /// <c>count</c>, under which brief visits are counted and no figure is changed. The file's reader refuses a
+    /// null or anything else that is not an object, a part it does not know, a part written twice and a value
+    /// that is neither label. <see cref="TelltaleSettings.CheckedBriefVisitTreatment"/> refuses <c>exclude</c>
+    /// while no status is listed in <see cref="BriefVisitThresholds"/>: nothing could be left out.
+    /// </summary>
+    public BriefVisitTreatmentSetting BriefVisitTreatment { get; init; } = BriefVisitTreatmentSetting.None;
 }
 
 /// <summary>Where the team's work lives in Jira.</summary>

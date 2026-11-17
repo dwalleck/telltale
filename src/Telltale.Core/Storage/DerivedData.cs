@@ -1,3 +1,5 @@
+using Telltale.Core.Configuration;
+using Telltale.Core.Intervals;
 using Telltale.Core.Workflow;
 
 namespace Telltale.Core.Storage;
@@ -82,9 +84,20 @@ public sealed record IssueMembershipInterval(string IssueId, string SprintId, Da
 
 /// <summary>
 /// One issue's time in one status during one sprint (GLOSSARY: Time in status), measured three ways:
-/// calendar time, business time and business days.
+/// calendar time, business time and business days. The three are the time as recorded: no brief visit is left
+/// out of them, whatever the treatment (GLOSSARY: Treatment), because the team of a sprint and the count of
+/// brief visits are taken from the recorded rows (owner decision D93).
 /// </summary>
-public sealed record SprintStatusTime(string IssueId, string SprintId, string StatusId, TimeSpan CalendarTime, TimeSpan BusinessTime, double BusinessDays);
+public sealed record SprintStatusTime(string IssueId, string SprintId, string StatusId, TimeSpan CalendarTime, TimeSpan BusinessTime, double BusinessDays)
+{
+    /// <summary>
+    /// The business days the time in status figures are taken from: <see cref="BusinessDays"/>, less the
+    /// brief visits the treatment for time in status leaves out (owner decision D84). The same as
+    /// <see cref="BusinessDays"/> when nothing is left out, and zero when nothing remains: the issue is then
+    /// not in the status's row.
+    /// </summary>
+    public double MeasuredBusinessDays { get; init; } = BusinessDays;
+}
 
 /// <summary>
 /// One issue has at least one brief visit to one status that counts toward one sprint (GLOSSARY: Brief visit;
@@ -146,6 +159,7 @@ public sealed record IssueAnomaly(string IssueId, ChangelogAnomalyKind Kind)
 /// <param name="MinimumTeam">The minimum group size's team number (GLOSSARY: Minimum group size): the metric views read it from the rebuild's record and never from the configuration.</param>
 /// <param name="MinimumAssigneesBehindAFigure">The minimum group size's number of assignees behind a figure, read by the views in the same way.</param>
 /// <param name="BriefVisitThresholds">The brief visit thresholds (GLOSSARY: Brief visit) as a JSON object of status ID to minutes, the IDs in order, e.g. <c>{"10001":5,"10005":0.5}</c>; <c>{}</c> when no status is checked. The metric view <c>brief_visits_per_sprint</c> reads the listed statuses and their thresholds from the rebuild's record.</param>
+/// <param name="BriefVisitTreatment">The treatment of brief visits (GLOSSARY: Treatment) as a JSON object of each part and its label, e.g. <c>{"timeInStatus":"exclude"}</c>. Left out, it is <see cref="BriefVisitsCounted"/>: a record made without it is of a rebuild that counted brief visits and changed nothing.</param>
 public sealed record DerivedSource(
     string RawDigest,
     string TimeZone,
@@ -155,7 +169,8 @@ public sealed record DerivedSource(
     string AbandonedResolutionIds,
     long MinimumTeam,
     long MinimumAssigneesBehindAFigure,
-    string BriefVisitThresholds)
+    string BriefVisitThresholds,
+    string BriefVisitTreatment = DerivedSource.BriefVisitsCounted)
 {
     /// <summary><see cref="BriefVisitThresholds"/> when no status is checked. The one place that spells it.</summary>
     public const string NoBriefVisitThresholds = "{}";
@@ -181,6 +196,41 @@ public sealed record DerivedSource(
         }
 
         return System.Text.Json.JsonSerializer.Serialize(minutes);
+    }
+
+    /// <summary>The IDs of the statuses listed in <see cref="BriefVisitThresholds"/>: the statuses the rebuild checked for brief visits, and so the ones a treatment acts on.</summary>
+    public IReadOnlySet<string> BriefVisitStatusIds
+    {
+        get
+        {
+            using var recorded = System.Text.Json.JsonDocument.Parse(BriefVisitThresholds);
+            return recorded.RootElement.EnumerateObject().Select(listed => listed.Name).ToHashSet(StringComparer.Ordinal);
+        }
+    }
+
+    /// <summary><see cref="BriefVisitTreatment"/> when every part is <c>count</c>, which is also what an absent setting means (owner decision D83).</summary>
+    public const string BriefVisitsCounted = "{\"" + BriefVisitTreatmentSetting.TimeInStatusName + "\":\"" + BriefVisitTreatments.Count + "\"}";
+
+    /// <summary><see cref="BriefVisitTreatment"/> for the treatment derive applies: the form the store keeps.</summary>
+    public static string BriefVisitTreatmentOf(BriefVisitTreatmentSetting treatment) =>
+        System.Text.Json.JsonSerializer.Serialize(new SortedDictionary<string, string>(StringComparer.Ordinal)
+        {
+            [BriefVisitTreatmentSetting.TimeInStatusName] = BriefVisitTreatments.LabelOf(treatment.TimeInStatus),
+        });
+
+    /// <summary>
+    /// Whether the rebuild left brief visits out of time in status: read from <see cref="BriefVisitTreatment"/>,
+    /// the record of the treatment derive applied, and never from the configuration.
+    /// </summary>
+    public bool BriefVisitsLeftOutOfTimeInStatus
+    {
+        get
+        {
+            using var recorded = System.Text.Json.JsonDocument.Parse(BriefVisitTreatment);
+            return recorded.RootElement.TryGetProperty(BriefVisitTreatmentSetting.TimeInStatusName, out var label)
+                && BriefVisitTreatments.TryParse(label.GetString(), out var treatment)
+                && BriefVisitTreatments.LeavesOut(treatment);
+        }
     }
 
     /// <summary><see cref="BaselineSprintIds"/> for a list of sprint IDs: the form the store keeps and the views read.</summary>

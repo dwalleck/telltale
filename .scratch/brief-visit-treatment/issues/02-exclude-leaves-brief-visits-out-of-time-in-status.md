@@ -18,32 +18,45 @@ Spec: `../spec.md` (owner decisions D83, D84, D86, D89, D92, D93, D99; "Configur
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A configuration file with `briefVisitTreatment` holding `timeInStatus` as `count` or `exclude` loads; a file without the setting, or without the part, loads and means `count`
-- [ ] Under `exclude`, an issue whose only time in a listed status is a brief visit is not in that status's row for the sprint
-- [ ] Under `exclude`, an issue with a brief visit and a longer stay in the same status stays in the row, with the brief visit's time left out
-- [ ] The row's issue count, median and total are of what remains, and the baseline median is adjusted in the same way
-- [ ] A status whose every issue was left out has no row for that sprint; a baseline sprint with no row for a status does not withhold it
-- [ ] A status that is not listed is untouched, and so is a stay bounded by a changelog anomaly
-- [ ] The treatment applies to every sprint, the baseline sprints included
-- [ ] The span of a brief visit is removed before the intervals are clipped to the sprint window and to membership; a stay of no length has no time to remove
-- [ ] The treatment function has its own tests: a brief stay removed, a brief stay beside a long one, a stay of no length, an open stay, an anomaly-bounded stay, a status not listed, and `count` returning the intervals unchanged
-- [ ] The team of a sprint does not change, whatever was left out
-- [ ] `timeInStatus` as `exclude` with no status listed in `briefVisitThresholds` is refused, with a message that names the file and the setting
-- [ ] A part other than `timeInStatus` is refused, `cycleTime` included, and the message repeats nothing written in the file
-- [ ] The existing brief visit count is still of the issues in the row before anything was left out (D93), and `brief_visits_per_sprint` still has a row for a listed status whose every issue was left out
-- [ ] Under `exclude`, the brief visit count is withheld by the recorded row's check and its own, so it can be shown beside an adjusted row that reads `suppressed` (D99)
-- [ ] Under `count`, `brief_visits_per_sprint` returns what it returns today, to the byte
-- [ ] Under `exclude`, the method note no longer says that no duration was excluded or corrected; under `count` its wording is unchanged
-- [ ] A report written under `exclude` has one line under its heading that names time in status, and a mark on the row of every listed status whether or not anything was left out in the sprint
-- [ ] After the treatment changes, `report` and `query` refuse and say to run `derive`; no `backfill` is needed
-- [ ] The raw tables are identical before and after a derive under `exclude`
-- [ ] Two derives of the same raw data and settings give the same figures
-- [ ] With the part as `count`, or the setting absent, the report and every view's results are identical to those of ticket 01
-- [ ] The anomaly count and the console output of `derive` and `run` are unchanged
-- [ ] The glossary has a "Treatment" entry and a sentence in "Time in status" saying what `exclude` leaves out; the owner decisions list has D83, D84, D86, D89, D92, D93 and D99
-- [ ] The commit message gives the reason and says the change was made on 2026-11-16, after results had been seen
-- [ ] Every existing test passes unchanged
-- [ ] Expected multi-line strings are normalized to LF
-- [ ] All fixtures are synthetic
+- [x] A configuration file with `briefVisitTreatment` holding `timeInStatus` as `count` or `exclude` loads; a file without the setting, or without the part, loads and means `count`
+- [x] Under `exclude`, an issue whose only time in a listed status is a brief visit is not in that status's row for the sprint
+- [x] Under `exclude`, an issue with a brief visit and a longer stay in the same status stays in the row, with the brief visit's time left out
+- [x] The row's issue count, median and total are of what remains, and the baseline median is adjusted in the same way
+- [x] A status whose every issue was left out has no row for that sprint; a baseline sprint with no row for a status does not withhold it
+- [x] A status that is not listed is untouched, and so is a stay bounded by a changelog anomaly
+- [x] The treatment applies to every sprint, the baseline sprints included
+- [x] The span of a brief visit is removed before the intervals are clipped to the sprint window and to membership; a stay of no length has no time to remove
+- [x] The treatment function has its own tests: a brief stay removed, a brief stay beside a long one, a stay of no length, an open stay, an anomaly-bounded stay, a status not listed, and `count` returning the intervals unchanged
+- [x] The team of a sprint does not change, whatever was left out
+- [x] `timeInStatus` as `exclude` with no status listed in `briefVisitThresholds` is refused, with a message that names the file and the setting
+- [x] A part other than `timeInStatus` is refused, `cycleTime` included, and the message repeats nothing written in the file
+- [x] The existing brief visit count is still of the issues in the row before anything was left out (D93), and `brief_visits_per_sprint` still has a row for a listed status whose every issue was left out
+- [x] Under `exclude`, the brief visit count is withheld by the recorded row's check and its own, so it can be shown beside an adjusted row that reads `suppressed` (D99)
+- [x] Under `count`, `brief_visits_per_sprint` returns what it returns today, to the byte
+- [x] Under `exclude`, the method note no longer says that no duration was excluded or corrected; under `count` its wording is unchanged
+- [x] A report written under `exclude` has one line under its heading that names time in status, and a mark on the row of every listed status whether or not anything was left out in the sprint
+- [x] After the treatment changes, `report` and `query` refuse and say to run `derive`; no `backfill` is needed
+- [x] The raw tables are identical before and after a derive under `exclude`
+- [x] Two derives of the same raw data and settings give the same figures
+- [x] With the part as `count`, or the setting absent, the report and every view's results are identical to those of ticket 01
+- [x] The anomaly count and the console output of `derive` and `run` are unchanged
+- [x] The glossary has a "Treatment" entry and a sentence in "Time in status" saying what `exclude` leaves out; the owner decisions list has D83, D84, D86, D89, D92, D93 and D99
+- [x] The commit message gives the reason and says the change was made on 2026-11-16, after results had been seen
+- [x] Every existing test passes unchanged
+- [x] Expected multi-line strings are normalized to LF
+- [x] All fixtures are synthetic
+
+## Comments
+
+Resolved 2026-11-17. Merged into `spec/brief-visit-treatment` as 8408b43 (source `ticket/bvt-02-exclude-leaves-brief-visits-out-of-time-in-status` at 40cf8bb; commits 06e9de2, e2e33ec, b672454, fafbe92, 40cf8bb). It is the first ticket merged; ticket 01 is still in review. The merge had no conflict, and nothing was changed inside it.
+
+- Checks: the merged tree equals the source tree (the branch was cut from the integration tip 67bafe8 and the tip had not moved), so no full check ran at merge. It rests on the implementer's full check on 40cf8bb (record `bvt02-r2-record.json` in the ticket worktree, base 67bafe8): Core 176 and Pipeline 1002 passed, 0 failed, 0 skipped, 0 warnings, format, line endings and the SQL line endings pass. The merge checked the line endings of the 47 changed text files again: pass.
+- Mutations: 18 new records under `.scratch/brief-visit-treatment/mutations/`, 02-m1 to 02-m18, all red (02-m1 to 02-m17 at 06e9de2, 02-m18 at fafbe92). Each stands in for a red-first run of a claim whose test passed when first run; the record's prose says why. Re-pointed with the mutation unchanged and red: brief-status-visits 01-m4, 01-m10 and 03-m5 and jira-flow-report 05-m19 (at 06e9de2), and brief-status-visits 01-m6, 01-m7 and 03-m4 (at fafbe92, to the line without the guard, review fix F2). Rerun red because the view was rewritten around their lines: brief-status-visits 01-m5 to 01-m8 and 03-m1 to 03-m4 (at 06e9de2); after the review fixes, 02-m1, 02-m2 and 02-m6 (at fafbe92). Nothing was rerun at merge: the merge changed no file relative to the source. `-ValidateOnly` passes for all four features at 8408b43 (jira-flow-report 279 edits, optional-suppression 48, brief-status-visits 44, brief-visit-treatment 18). Two claims have no record, as the implementer reported: "two derives give the same figures" and "the raw tables are identical"; no single line states either.
+- Review (root's, by hand at level medium, because the `code-review` skill reviewed another diff; five findings in the worktree's `CODE-REVIEW.md`). Both CONFIRMED findings are fixed in fafbe92, each checked against the diff by the merger: F1 (a test under `exclude` pins that `query` refuses `time_in_status_issue_recorded` by name, by a count and in a subquery; record 02-m18), F4 (`BriefVisitTreatments.IntervalsToMeasure` gives back the timeline's own list when nothing is left out, and `Derivation` measures a second time only when the list is another one; a Core test ran red first; no figure changes). PLAUSIBLE, fixed in fafbe92: F3 (under `exclude` the sentence on what the total sums says brief visits to a listed status are left out, bvt-D10) and F2 (`brief_visits_per_sprint` no longer copies the row's assignee check; see the merger's read). PLAUSIBLE, left by root's disposition, not by a user decision: F5 (the glossary's "Brief visit" entry still says the count is of the issues behind the status's time in status and that no duration is excluded). Ticket 06 has a box for that entry's last sentence; it must change both clauses.
+- Decisions that touched the ticket (user, 2026-11-17). bvt-D5 = D99: the recorded row's check decides the brief visit count. bvt-D7: a refusal is built where the value is first accepted, so this ticket refuses `exclude` with no status listed, an unknown part (`cycleTime` included), a wrong value, a setting that is not an object and a part written twice; ticket 05 finds the last three built. bvt-D8 and bvt-D10 (root applying D8 as worded, told to the user): this ticket gives an `exclude` wording to every method note sentence it makes untrue, five in all, and the wording under `count` is unchanged to the byte. Ticket 04's box on those sentences is met by this work.
+- Existing assertions changed: none. No existing test file is in the diff; the four test classes are new files. The box "every existing test passes unchanged" is ticked on that footing, and the box on `brief_visits_per_sprint` under `count` rests on `BriefVisitCountTests`, `BriefVisitSmallGroupTests` and `WhichVisitsCountTests` passing unchanged and on the setting test that compares every metric view and the whole store with and without the part.
+- Merger's read of 67bafe8..40cf8bb. Figures under `exclude`: every figure of time goes through `time_in_status_issue`, which now reads the measured days, so `time_in_status_per_sprint`, `duration_sample` and the baseline each apply their check to the issues that remain; no shown figure rests on fewer assignees than configured. The new view `time_in_status_issue_recorded` is internal (per issue, no person column, created from the `Derived` folder, refused by `query`). The team of a sprint: `sprint_team` reads `sprint_status_time`, whose rows and recorded columns are unchanged (a row with nothing measured is still written), and a test pins the team of five when the fifth person's only time was left out. `brief_visits_per_sprint` under `count`: the rows are the same (the recorded rows are then the rows of `time_in_status_issue`; team check, done filter, name and position are joined as `time_in_status_per_sprint` joins them), and the flag is the same, because a row with too few assignees has no more behind the issues counted. The removed guard `r.suppressed = 0`: the earlier run kept it so that D62 was written where it is applied. The view's header now states D62 and D99 by number, in the paragraph on the minimum group size, and says why the count's own check is both rules; the comment on `decided`, where the check is written, gives the premise (the counted issues and the rows come from the one view) and the history, without the numbers. That is enough to state the rule, and it is truer than a guard on a flag that is now of what remains. What is lost is the guard's second purpose: nothing holds any more if `counted` and `recorded_row` ever stop reading the same view; both are in this one file, and no test could turn the guard red before either. A listed status with a line and no row shows that its count is at least one even when it reads `suppressed`: accepted by D98. Fixtures are synthetic (`FAKE-<n>`, sprints 41 and 42, the harness's people and workflow, `example.invalid`, values the existing tests already use). No stray file, no project, package or toolkit file, and no change to `CLAUDE.md`. The commit that changes the definition (06e9de2) gives the reason and the date 2026-11-16. `test-anti-patterns`, applied by hand to the four new classes: no critical or high finding; low, three: the identity test asserts only "not the same list" for the left-out case (the content is pinned by the test beside it), the console test's control is "the two stores differ" (the exact rows are pinned elsewhere), and the method note test asserts inside a loop over five sentences.
+- Shape for tickets 03 to 06. Ticket 03 (`cycleTime`): a second part on `BriefVisitTreatmentSetting`, a second key in `DerivedSource.BriefVisitTreatmentOf` and in the constant `BriefVisitsCounted`, the converter's unknown-part message (it names the one part), `TelltaleSettings.CheckedBriefVisitTreatment`, `DerivationSettings`, and the line under the heading (`SprintReport.AppendBriefVisitsLeftOut`). Ticket 04 (the left-out number): per sprint and status, the issues with a row in `time_in_status_issue_recorded` and none in `time_in_status_issue`; the treatment is `run.brief_visit_treatment` (`json_extract(..., '$.timeInStatus')`). Ticket 05 keeps the refusals and checks `discover` where the thresholds are checked. Ticket 06 writes the full method note paragraph, the README, and the glossary's "Brief visit" entry (both clauses, F5).
+- With the user, not settled by this merge: F5 was left to ticket 06 by root, so until ticket 06 the glossary's "Brief visit" entry and its new "Treatment" entry state the count's row and what is done with a brief visit differently. Nothing else is open.

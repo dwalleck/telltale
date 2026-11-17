@@ -10,7 +10,10 @@
 -- the minimum_group_size view gives them to every metric view, and no view reads the configuration or
 -- states a number of its own. brief_visit_thresholds is the briefVisitThresholds setting (GLOSSARY: Brief
 -- visit) as a JSON object of status ID to minutes, the IDs in order ('{"10001":5}'), '{}' when no status is
--- checked: brief_visits_per_sprint reads the listed statuses and their thresholds from it. objects_version identifies the
+-- checked: brief_visits_per_sprint reads the listed statuses and their thresholds from it. brief_visit_treatment
+-- is the briefVisitTreatment setting (GLOSSARY: Treatment) as a JSON object of each part and its label
+-- ('{"timeInStatus":"exclude"}'), every part 'count' when the setting is left out: the treatment derive
+-- applied, which the report states and never reads from the configuration. objects_version identifies the
 -- scripts that created the derived tables and the metric views: when the tool's scripts differ, the views
 -- may lack a rule the tool relies on (the minimum group size, ADR-0003), and nothing is read from them.
 CREATE TABLE run (
@@ -24,5 +27,6 @@ CREATE TABLE run (
     minimum_team        INTEGER NOT NULL,
     minimum_assignees_behind_a_figure INTEGER NOT NULL,
     brief_visit_thresholds TEXT NOT NULL,
+    brief_visit_treatment TEXT NOT NULL,
     objects_version     TEXT NOT NULL
 ) STRICT;

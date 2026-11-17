@@ -422,9 +422,12 @@ public sealed class SqliteStore : ITelltaleStore
         await ExecuteForEachRowAsync(
             connection,
             transaction,
-            "INSERT INTO sprint_status_time (issue_id, sprint_id, status_id, calendar_seconds, business_seconds, business_days) VALUES (@issueId, @sprintId, @statusId, @calendarSeconds, @businessSeconds, @businessDays);",
-            ["@issueId", "@sprintId", "@statusId", "@calendarSeconds", "@businessSeconds", "@businessDays"],
-            derived.SprintStatusTimes.Select(time => new object?[] { time.IssueId, time.SprintId, time.StatusId, time.CalendarTime.TotalSeconds, time.BusinessTime.TotalSeconds, time.BusinessDays }),
+            """
+            INSERT INTO sprint_status_time (issue_id, sprint_id, status_id, calendar_seconds, business_seconds, business_days, measured_business_days)
+            VALUES (@issueId, @sprintId, @statusId, @calendarSeconds, @businessSeconds, @businessDays, @measuredBusinessDays);
+            """,
+            ["@issueId", "@sprintId", "@statusId", "@calendarSeconds", "@businessSeconds", "@businessDays", "@measuredBusinessDays"],
+            derived.SprintStatusTimes.Select(time => new object?[] { time.IssueId, time.SprintId, time.StatusId, time.CalendarTime.TotalSeconds, time.BusinessTime.TotalSeconds, time.BusinessDays, time.MeasuredBusinessDays }),
             cancellationToken);
 
         await ExecuteForEachRowAsync(
@@ -439,13 +442,13 @@ public sealed class SqliteStore : ITelltaleStore
             connection,
             transaction,
             """
-            INSERT INTO run (as_of, raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure, brief_visit_thresholds, objects_version)
-            VALUES (@asOf, @rawDigest, @timeZone, @holidays, @baselineSprintIds, @statusRoles, @abandonedResolutionIds, @minimumTeam, @minimumAssigneesBehindAFigure, @briefVisitThresholds, @objectsVersion);
+            INSERT INTO run (as_of, raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure, brief_visit_thresholds, brief_visit_treatment, objects_version)
+            VALUES (@asOf, @rawDigest, @timeZone, @holidays, @baselineSprintIds, @statusRoles, @abandonedResolutionIds, @minimumTeam, @minimumAssigneesBehindAFigure, @briefVisitThresholds, @briefVisitTreatment, @objectsVersion);
             """,
-            ["@asOf", "@rawDigest", "@timeZone", "@holidays", "@baselineSprintIds", "@statusRoles", "@abandonedResolutionIds", "@minimumTeam", "@minimumAssigneesBehindAFigure", "@briefVisitThresholds", "@objectsVersion"],
+            ["@asOf", "@rawDigest", "@timeZone", "@holidays", "@baselineSprintIds", "@statusRoles", "@abandonedResolutionIds", "@minimumTeam", "@minimumAssigneesBehindAFigure", "@briefVisitThresholds", "@briefVisitTreatment", "@objectsVersion"],
             [[
                 StoredTime.ToStored(derived.AsOf), source.RawDigest, source.TimeZone, source.Holidays, source.BaselineSprintIds, source.StatusRoles, source.AbandonedResolutionIds,
-                source.MinimumTeam, source.MinimumAssigneesBehindAFigure, source.BriefVisitThresholds, DerivedObjectsVersion,
+                source.MinimumTeam, source.MinimumAssigneesBehindAFigure, source.BriefVisitThresholds, source.BriefVisitTreatment, DerivedObjectsVersion,
             ]],
             cancellationToken);
 
@@ -497,7 +500,7 @@ public sealed class SqliteStore : ITelltaleStore
         await RequireDerivedByThisVersionAsync(connection, cancellationToken);
         return await connection.QuerySingleOrDefaultAsync<DerivedSource?>(Command(
             cancellationToken,
-            "SELECT raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure, brief_visit_thresholds FROM run;"));
+            "SELECT raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure, brief_visit_thresholds, brief_visit_treatment FROM run;"));
     }
 
     /// <summary>
