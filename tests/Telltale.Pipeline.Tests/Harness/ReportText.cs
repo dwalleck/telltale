@@ -33,6 +33,13 @@ public static class ReportText
     public static string CyclesThatStartWithBriefVisit(string figure) =>
         $"- Delivered issues whose cycle starts with a brief visit, which are in the cycle time figures: {figure}\n";
 
+    /// <summary>
+    /// The same line when the cycles that start with a brief visit are left out of cycle time (owner decision
+    /// D85): the number is the same (D87), and the line says the issues have no cycle time.
+    /// </summary>
+    public static string CyclesThatStartWithBriefVisitAndHaveNoCycleTime(string figure) =>
+        $"- Delivered issues whose cycle starts with a brief visit, which have no cycle time: {figure}\n";
+
     /// <summary>What follows the two tables: the method note's heading.</summary>
     public const string MethodHeading = "\n## Method\n";
 }

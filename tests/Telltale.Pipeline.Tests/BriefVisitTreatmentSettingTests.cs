@@ -8,7 +8,8 @@ namespace Telltale.Pipeline.Tests;
 /// <summary>
 /// The <c>briefVisitTreatment</c> setting as the configuration file holds it (GLOSSARY: Treatment; owner
 /// decision D83): what loads and what it means, what is refused when the file is loaded, and that a change to
-/// it needs <c>derive</c> and nothing more. Only the part <c>timeInStatus</c> exists yet. What leaving out
+/// it needs <c>derive</c> and nothing more. These are about the part <c>timeInStatus</c>; the part
+/// <c>cycleTime</c> is in <see cref="CycleTimeTreatmentSettingTests"/>. What leaving out
 /// does to the figures is in <see cref="BriefVisitsLeftOutOfTimeInStatusTests"/>.
 /// Sprint 41 runs from Monday 5 January 2026, 09:00, to Monday the 19th, 10:00. Its team is five people, each
 /// with an issue that stays in New; four more issues of four people were caught up through Development in
@@ -93,14 +94,13 @@ public class BriefVisitTreatmentSettingTests
     }
 
     [Test]
-    [Arguments("cycleTime", "\"exclude\"")]
-    [Arguments("cycleTime", "\"count\"")]
+    [Arguments("CycleTime", "\"exclude\"")]
     [Arguments("TimeInStatus", "\"exclude\"")]
     [Arguments("synthetic-pasted-token", "\"synthetic-pasted-value\"")]
     [Arguments("", "5")]
     public async Task A_part_the_tool_does_not_know_is_refused_and_nothing_written_in_the_file_is_repeated(string part, string value)
     {
-        // cycleTime is not a part yet: the tool never accepts a treatment it does not act on.
+        // A part is read by its exact name: one written with another capital is a part the tool does not know.
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.AddSprint41();
         pipeline.Config["briefVisitThresholds"] = new JsonObject { [Workflow.Development.Id] = 5 };
@@ -109,7 +109,7 @@ public class BriefVisitTreatmentSettingTests
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            $"The configuration file {pipeline.ConfigPath} is not valid: briefVisitTreatment has a part the tool does not know. The only part is timeInStatus.\n");
+            $"The configuration file {pipeline.ConfigPath} is not valid: briefVisitTreatment has a part the tool does not know. The parts are timeInStatus and cycleTime.\n");
         await AssertNothingWasFetchedOrStoredAsync(pipeline, exit);
     }
 
@@ -152,7 +152,7 @@ public class BriefVisitTreatmentSettingTests
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            $"The configuration file {pipeline.ConfigPath} is not valid: briefVisitTreatment must be an object with the part timeInStatus; leave the setting out to count brief visits and change no figure.\n");
+            $"The configuration file {pipeline.ConfigPath} is not valid: briefVisitTreatment must be an object with the parts timeInStatus and cycleTime; leave the setting out to count brief visits and change no figure.\n");
         await AssertNothingWasFetchedOrStoredAsync(pipeline, exit);
     }
 

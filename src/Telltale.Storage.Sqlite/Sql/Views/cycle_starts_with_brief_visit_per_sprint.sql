@@ -2,7 +2,9 @@
 -- sprint that counts: how many of the issues delivered in the sprint have a cycle that starts with a brief
 -- visit (issue_cycle.starts_with_brief_visit, which derive decides: the stay that begins at the cycle's start
 -- is a brief visit under its status's threshold). The number says how many cycle times are known to be too
--- short. No figure of any other view is changed by this one.
+-- short. It is the same whatever the treatment for cycle time (GLOSSARY: Treatment): under count the issues
+-- it counts are in the cycle time figures, and under exclude they have no cycle time (owner decision D85).
+-- No figure of any other view is changed by this one.
 -- The view has rows only when a status listed in briefVisitThresholds has the work role: a cycle starts in a
 -- work status, so with none listed no cycle can start with a brief visit, and a row would say nothing. The
 -- listed statuses are the ones the rebuild recorded (run.brief_visit_thresholds) and their roles are

@@ -1,6 +1,10 @@
 -- Cycle time of the issues delivered in each sprint, by point bucket. One row per sprint and bucket that has
 -- at least one cycle time; point_bucket is null for unestimated issues. issue_count is the number of cycle
--- times behind the figures: a delivered issue that never entered a work status has none and is not in it.
+-- times behind the figures: a delivered issue that never entered a work status has none and is not in it,
+-- and neither is one whose cycle starts with a brief visit when the treatment for cycle time leaves such
+-- cycles out (GLOSSARY: Treatment; owner decision D85). Derive decides which issues have a cycle time
+-- (issue_cycle); this view reads what it stored, so every check below counts the assignees of the issues
+-- that still have one.
 --
 -- The median and the P85 are duration_figures' (how each is picked is said there), for business and for
 -- calendar days, which are ranked separately.

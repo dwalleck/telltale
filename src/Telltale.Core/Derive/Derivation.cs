@@ -92,12 +92,15 @@ public static class Derivation
             // when a status is listed. With none listed there is no stay to look at, so no cycle starts with a brief visit.
             IReadOnlyList<Stay> stays = checksBriefVisits ? BriefVisits.Stays(timeline) : [];
 
-            // The one place an issue's cycle is built from its outcome.
+            // The one place an issue's cycle is built from its outcome. The treatment for cycle time is applied
+            // here and nowhere else (GLOSSARY: Treatment): a cycle it leaves out is no cycle from here on, so the
+            // issue is stored as one that never entered a work status is, and stays delivered. Whether the cycle
+            // starts with a brief visit is recorded whatever the treatment (owner decision D87).
             cycles.Add(outcome switch
             {
                 Delivered delivered => DeliveredCycle(
                     issue, delivered, deliverySprints.For(delivered.At), Cycles.Measure(timeline.Entries, roles, delivered.At, calendar), pointChanges[issue.IssueId], reopens,
-                    startsWithBriefVisit: Cycles.StartsWithBriefVisit(stays, roles, settings.BriefVisitThresholds)),
+                    startsWithBriefVisit: Cycles.StartsWithBriefVisit(stays, roles, settings.BriefVisitThresholds), settings.CycleTimeTreatment),
 
                 // An abandoned issue reached done, so it has a cycle end, but it is not a delivery: it belongs to
                 // no delivery sprint and has no cycle time.
@@ -173,19 +176,25 @@ public static class Derivation
     /// <summary>
     /// A delivered issue's cycle, in the bucket of its estimate at the start of its cycle, so a later
     /// re-estimate does not move it (ADR-0006). An issue that never entered a work status has no cycle start;
-    /// its bucket is its estimate at the delivery moment (owner decision D35).
+    /// its bucket is its estimate at the delivery moment (owner decision D35). So it is for an issue whose
+    /// cycle <paramref name="cycleTimeTreatment"/> leaves out because it starts with a brief visit (owner
+    /// decision D85): it is stored in every respect as an issue that never entered a work status is, and
+    /// <paramref name="startsWithBriefVisit"/> is kept beside it.
     /// </summary>
-    private static IssueCycle DeliveredCycle(RawIssue issue, Delivered delivered, string? deliverySprintId, Cycle? cycle, IEnumerable<PointChange> pointChanges, int reopens, bool startsWithBriefVisit) =>
-        IssueCycle.OfDelivered(
+    private static IssueCycle DeliveredCycle(RawIssue issue, Delivered delivered, string? deliverySprintId, Cycle? cycle, IEnumerable<PointChange> pointChanges, int reopens, bool startsWithBriefVisit, BriefVisitTreatment cycleTimeTreatment)
+    {
+        var toMeasure = BriefVisitTreatments.CycleToMeasure(cycle, startsWithBriefVisit, cycleTimeTreatment);
+        return IssueCycle.OfDelivered(
             issue.IssueId,
             delivered.At,
             deliverySprintId,
-            cycle,
-            cycle is { } measured
+            toMeasure,
+            toMeasure is { } measured
                 ? PointHistory.EstimateAt(measured.Start, measured.StartHistoryId, issue.StoryPoints, pointChanges)
                 : PointHistory.EstimateAt(delivered.At, delivered.HistoryId, issue.StoryPoints, pointChanges),
             reopens,
             startsWithBriefVisit);
+    }
 }
 
 /// <summary>Everything a rebuild is decided with besides the raw data and the as-of time: how a delivery is decided, the business calendar, and the brief visit thresholds.</summary>
@@ -196,4 +205,7 @@ public sealed record DerivationSettings(DeliveryRules Delivery, BusinessCalendar
 
     /// <summary>What is done with brief visits when time in status is measured (GLOSSARY: Treatment). Brief visits are counted and nothing is left out unless this says otherwise.</summary>
     public BriefVisitTreatment TimeInStatusTreatment { get; init; } = new CountBriefVisits();
+
+    /// <summary>What is done with a cycle that starts with a brief visit when cycle time is measured (GLOSSARY: Treatment). Every cycle is measured unless this says otherwise.</summary>
+    public BriefVisitTreatment CycleTimeTreatment { get; init; } = new CountBriefVisits();
 }

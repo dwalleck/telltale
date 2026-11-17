@@ -51,7 +51,7 @@ public sealed record TelltaleSettings
     private DerivedSource Recorded { get; init; } = new("", "", "", "", "", "", MinimumGroupSize.Default.Team, MinimumGroupSize.Default.AssigneesBehindAFigure, DerivedSource.NoBriefVisitThresholds);
 
     /// <summary>Everything a rebuild is decided with besides the raw data and the as-of time.</summary>
-    public DerivationSettings Derivation => new(new DeliveryRules(StatusRoles, AbandonedResolutionIds), new BusinessCalendar(TimeZone, Holidays)) { BriefVisitThresholds = BriefVisitThresholds, TimeInStatusTreatment = BriefVisitTreatment.TimeInStatus };
+    public DerivationSettings Derivation => new(new DeliveryRules(StatusRoles, AbandonedResolutionIds), new BusinessCalendar(TimeZone, Holidays)) { BriefVisitThresholds = BriefVisitThresholds, TimeInStatusTreatment = BriefVisitTreatment.TimeInStatus, CycleTimeTreatment = BriefVisitTreatment.CycleTime };
 
     /// <summary>What a rebuild of raw data with the digest <paramref name="rawDigest"/> under these settings is built from.</summary>
     public DerivedSource DerivedFrom(string rawDigest) =>
@@ -83,7 +83,7 @@ public sealed record TelltaleSettings
             ?? throw new SettingRefusedException($"timeZone: '{config.TimeZone}' is not a known IANA time zone ID.");
         var minimumGroupSize = CheckedMinimumGroupSize(config.MinimumGroupSize ?? MinimumGroupSize.Default);
         var briefVisitThresholds = CheckedBriefVisitThresholds(config.BriefVisitThresholds, roles);
-        var briefVisitTreatment = CheckedBriefVisitTreatment(config.BriefVisitTreatment, briefVisitThresholds);
+        var briefVisitTreatment = CheckedBriefVisitTreatment(config.BriefVisitTreatment, briefVisitThresholds, roles);
 
         return new TelltaleSettings
         {
@@ -175,12 +175,33 @@ public sealed record TelltaleSettings
     /// <c>briefVisitTreatment</c> (GLOSSARY: Treatment; owner decision D83) beside the thresholds it is applied
     /// with. A treatment acts on the brief visits to the listed statuses and on nothing else, so one that leaves
     /// brief visits out while no status is listed would leave nothing out, and the owner would be left believing
-    /// figures were adjusted: it is refused. Throws <see cref="SettingRefusedException"/>.
+    /// figures were adjusted: it is refused, for either part. A cycle starts in a status with the work role
+    /// (<paramref name="roles"/>), so leaving out for cycle time while no listed status has that role would
+    /// leave no cycle out either, and is refused for the same reason. Throws <see cref="SettingRefusedException"/>.
     /// </summary>
-    public static BriefVisitTreatmentSetting CheckedBriefVisitTreatment(BriefVisitTreatmentSetting written, IReadOnlyDictionary<string, TimeSpan> thresholds) =>
-        thresholds.Count == 0 && BriefVisitTreatments.LeavesOut(written.TimeInStatus)
-            ? throw new SettingRefusedException($"{BriefVisitTreatmentSetting.Name}.{BriefVisitTreatmentSetting.TimeInStatusName} is {BriefVisitTreatments.Exclude}, and no status is listed in briefVisitThresholds, so no visit would be left out. List a status there, or write {BriefVisitTreatments.Count}.")
-            : written;
+    public static BriefVisitTreatmentSetting CheckedBriefVisitTreatment(BriefVisitTreatmentSetting written, IReadOnlyDictionary<string, TimeSpan> thresholds, StatusRoles roles)
+    {
+        if (thresholds.Count == 0 && BriefVisitTreatments.LeavesOut(written.TimeInStatus))
+        {
+            throw new SettingRefusedException($"{BriefVisitTreatmentSetting.Name}.{BriefVisitTreatmentSetting.TimeInStatusName} is {BriefVisitTreatments.Exclude}, and no status is listed in briefVisitThresholds, so no visit would be left out. List a status there, or write {BriefVisitTreatments.Count}.");
+        }
+
+        if (BriefVisitTreatments.LeavesOut(written.CycleTime))
+        {
+            const string Remedy = $"List a status with the role work there, or write {BriefVisitTreatments.Count}.";
+            if (thresholds.Count == 0)
+            {
+                throw new SettingRefusedException($"{BriefVisitTreatmentSetting.Name}.{BriefVisitTreatmentSetting.CycleTimeName} is {BriefVisitTreatments.Exclude}, and no status is listed in briefVisitThresholds, so no cycle would be left out. {Remedy}");
+            }
+
+            if (!thresholds.Keys.Any(roles.IsWork))
+            {
+                throw new SettingRefusedException($"{BriefVisitTreatmentSetting.Name}.{BriefVisitTreatmentSetting.CycleTimeName} is {BriefVisitTreatments.Exclude}, and no status listed in briefVisitThresholds has the role work, so no cycle could start with a brief visit and none would be left out. {Remedy}");
+            }
+        }
+
+        return written;
+    }
 
     /// <summary>
     /// The length of time a threshold in minutes is, to the nearest step of time the tool measures in (a
