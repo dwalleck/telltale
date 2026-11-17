@@ -27,6 +27,7 @@ Spec: `../spec.md` ("The report", method note; "Documents changed with the code"
 - [ ] The paragraph replaces the sentences tickets 02 to 04 corrected one at a time, and nothing it says is untrue under any of the four combinations of the two parts
 - [ ] The method note says that under `exclude` a listed status's footer line carries a second number, the issues left out of the row, and when it reads `suppressed`
 - [ ] The README's `query` section names the view `brief_visit_treatment` and the two new columns of `brief_visits_per_sprint`, and says that under `count` the left-out number is empty beside a flag of 0
+- [ ] The glossary's "Treatment" entry says where the treatment in force can be read (the view `brief_visit_treatment`, D103)
 - [ ] The README's `discover` paragraph says the setting is kept as a value and in place, and that with more than one fault `discover` and `run` may each report a different one (D104)
 - [ ] The owner decisions list has every one of D83 to D106, each with its source, D88 and D96 included; the D90 row ends as the spec does (a cycle whose first stay is bounded by a changelog anomaly is kept)
 - [ ] No code comment, report text or document cites a decision of the implementation run by its run number (`bvt-D...`): each says the rule in words or cites the owner decision
