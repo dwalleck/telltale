@@ -104,7 +104,7 @@ public static class SprintReport
             """,
             new { sprintId },
             cancellationToken));
-        AppendTimeInStatus(report, baseline, await ReadTimeInStatusAsync(store, sprintId, cancellationToken), adjustedStatusIds);
+        AppendTimeInStatus(report, baseline, await ReadTimeInStatusAsync(store, sprintId, cancellationToken), adjustedStatusIds, leftOutOfTimeInStatus);
         var quality = await ReadDataQualityAsync(store, cancellationToken);
 
         // With no status listed neither brief visit view has rows, so neither is asked. The footer's cycle time
@@ -313,8 +313,9 @@ public static class SprintReport
     /// <summary>
     /// One row per status issues spent time in during the sprint, in board order. A status nobody was in has no row.
     /// The row of a status in <paramref name="adjustedStatusIds"/> carries <see cref="AdjustedMark"/> after its name.
+    /// A table with no row says so in a sentence, worded by <paramref name="leftOutOfTimeInStatus"/>.
     /// </summary>
-    private static void AppendTimeInStatus(StringBuilder report, BaselineColumns baseline, IReadOnlyList<TimeInStatusRow> rows, IReadOnlySet<string> adjustedStatusIds)
+    private static void AppendTimeInStatus(StringBuilder report, BaselineColumns baseline, IReadOnlyList<TimeInStatusRow> rows, IReadOnlySet<string> adjustedStatusIds, bool leftOutOfTimeInStatus)
     {
         report.Append("\n## Time in status\n\n");
         if (rows is [{ IssueCount: null }])
@@ -325,7 +326,12 @@ public static class SprintReport
 
         if (rows.Count == 0)
         {
-            report.Append("No issue of this sprint spent time in a status that is not done.\n");
+            // With brief visits left out the table can have no row because every issue was left out of every
+            // row, and the footer then says how many: "no issue spent time" would be untrue. The sentence is
+            // the same whether or not anything was left out, as the mark on a row is.
+            report.Append(leftOutOfTimeInStatus
+                ? "No issue of this sprint has time in a status that is not done once brief visits are left out (adjusted: see the footer).\n"
+                : "No issue of this sprint spent time in a status that is not done.\n");
             return;
         }
 
