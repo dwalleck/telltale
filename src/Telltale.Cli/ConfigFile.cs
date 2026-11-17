@@ -28,8 +28,9 @@ public static class ConfigFile
 
         // minimumGroupSize is read by hand, so that null, a quoted number or a missing number is refused by name.
         // briefVisitThresholds is too, so that what is refused is named without the status ID it stands under.
+        // briefVisitTreatment is too, so that a part or a value the tool does not know is refused without being repeated.
         // Each setting has a type of its own, and its reader is found by that type.
-        Converters = { new MinimumGroupSizeConverter(), new BriefVisitThresholdsConverter() },
+        Converters = { new MinimumGroupSizeConverter(), new BriefVisitThresholdsConverter(), new BriefVisitTreatmentConverter() },
     };
 
     /// <summary>
