@@ -42,7 +42,7 @@ public class BriefVisitsLeftOutSmallGroupTests
 
     private const string CycleStartsHead = "| sprint_id | issue_count | suppressed |\n| --- | --- | --- |\n";
 
-    private const string Mark = " (adjusted: see the footer)";
+    private const string Mark = ReportText.LeftOut.Mark;
 
     private const string DevelopmentCountWithheld = "- Fake Development: issues with a visit shorter than 5 minutes: suppressed";
 
@@ -81,7 +81,7 @@ public class BriefVisitsLeftOutSmallGroupTests
         // row is the four that remain.
         await Assert.That(await QueryAsync(pipeline, LeftOutSql)).IsEqualTo(LeftOutHead + "| 41 | Fake Development | 4 | 0 | 3 | 0 |\n");
         var report = await pipeline.ReadReportAsync(41);
-        await Assert.That(report).Contains("\n| Fake Development (adjusted: see the footer) | 4 | 2.0 | 8.0 |\n");
+        await Assert.That(report).Contains("\n| Fake Development" + Mark + " | 4 | 2.0 | 8.0 |\n");
         await Assert.That(report).Contains("\n- Fake Development: 4 issues had a visit shorter than 5 minutes" + ReportText.LeftOutOfTheRow("3") + "\n");
 
         // What the owner accepted (D106), as shown: the count less the number left out is the number of issues
@@ -150,7 +150,7 @@ public class BriefVisitsLeftOutSmallGroupTests
             + BucketsHead + "| 41 | 3 | 2 | NULL | NULL | NULL | NULL | 1 |\n");
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).Contains("\nDelivered issues: 3\n");
-        await Assert.That(report).Contains("\n| Fake Development (adjusted: see the footer) | 2 | suppressed | suppressed |\n");
+        await Assert.That(report).Contains("\n| Fake Development" + Mark + " | 2 | suppressed | suppressed |\n");
         await Assert.That(report).Contains(ReportText.CycleTimeHeader + "| 3 | 2 | suppressed | suppressed | suppressed | suppressed |\n");
 
         // One person's issue had the brief visit and was left out: the two counts on the line and the number
@@ -208,7 +208,7 @@ public class BriefVisitsLeftOutSmallGroupTests
         // five issues of five people would be pooled.
         await Assert.That(await QueryAsync(pipeline, BaselineSql)).IsEqualTo(BaselineHead + "| Fake Development | NULL | 1 |\n| bucket 3 | NULL | 1 |\n");
         var report = await pipeline.ReadReportAsync(42);
-        await Assert.That(report).Contains("\n| Fake Development (adjusted: see the footer) | 3 | 3.0 | 9.0 | suppressed |\n");
+        await Assert.That(report).Contains("\n| Fake Development" + Mark + " | 3 | 3.0 | 9.0 | suppressed |\n");
         await Assert.That(report).Contains("\n| 3 | 3 | 3.0 | 3.0 | 3.0 | 3.0 | suppressed | suppressed |\n");
     }
 
@@ -234,7 +234,7 @@ public class BriefVisitsLeftOutSmallGroupTests
 
         // The brief visit count is of all eight, whoever was left out, and the row is eight issues either way.
         var report = await pipeline.ReadReportAsync(41);
-        await Assert.That(report).Contains("\n| Fake Development (adjusted: see the footer) | 8 | 2.0 | 16.0 |\n");
+        await Assert.That(report).Contains("\n| Fake Development" + Mark + " | 8 | 2.0 | 16.0 |\n");
         await Assert.That(report).Contains("\n- Fake Development: 8 issues had a visit shorter than 5 minutes" + ReportText.LeftOutOfTheRow(figure) + "\n");
         await Assert.That(await QueryAsync(pipeline, LeftOutSql)).StartsWith(LeftOutHead + $"| 41 | Fake Development | 8 | 0 | {numberAndFlag} |\n");
     }
@@ -452,8 +452,7 @@ public class BriefVisitsLeftOutSmallGroupTests
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).StartsWith(
             "# Fake Sprint 41 (2026-01-05 to 2026-01-19)\n\n"
-            + "Brief visits are left out of time in status and of cycle time in this report. A row of the time in status table marked \"adjusted\" is of a status listed for brief visits: its figures are of what remains, and the footer gives the number of its issues that had a brief visit and the number left out of the row."
-            + " A delivered issue whose cycle starts with a brief visit has no cycle time: the cycle time table's figures are of the cycles that remain, and the footer gives the number of such issues.\n\n"
+            + ReportText.LeftOut.LineForBoth
             + "Delivered issues: suppressed\n\n## Cycle time by point bucket\n\nsuppressed\n");
         await Assert.That(report).Contains("\n## Time in status\n\nsuppressed\n");
         await Assert.That(report).DoesNotContain("| Fake");

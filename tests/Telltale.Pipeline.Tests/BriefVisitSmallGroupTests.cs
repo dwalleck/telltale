@@ -80,7 +80,7 @@ public class BriefVisitSmallGroupTests
     }
 
     [Test]
-    public async Task No_query_over_the_metric_views_tells_a_count_of_nothing_from_a_withheld_one_or_one_withheld_count_from_another()
+    public async Task No_query_over_the_metric_views_tells_a_count_of_nothing_from_a_withheld_one_or_one_withheld_count_from_another_but_through_the_number_of_cycles_that_start_with_a_brief_visit()
     {
         // Five stores whose Development count in sprint 41 is withheld: nobody had a brief visit; one issue of
         // one person; two issues of two people; four issues of two people; two people's and an unassigned one.

@@ -51,9 +51,9 @@ public class BriefVisitsLeftOutOfCycleTimeTests
 
     [Test]
     [Arguments("count", "count", "| Fake Development | 7 | 0.0 | 12.0 |", "| 3 | 7 | 2.0 | 4.0 | 2.0 | 6.0 |", "which are in the cycle time figures: 4")]
-    [Arguments("exclude", "count", "| Fake Development (adjusted: see the footer) | 3 | 4.0 | 12.0 |", "| 3 | 7 | 2.0 | 4.0 | 2.0 | 6.0 |", "which are in the cycle time figures: 4")]
+    [Arguments("exclude", "count", "| Fake Development" + ReportText.LeftOut.Mark + " | 3 | 4.0 | 12.0 |", "| 3 | 7 | 2.0 | 4.0 | 2.0 | 6.0 |", "which are in the cycle time figures: 4")]
     [Arguments("count", "exclude", "| Fake Development | 7 | 0.0 | 12.0 |", "| 3 | 3 | 4.0 | 4.0 | 6.0 | 6.0 |", "which have no cycle time: 4")]
-    [Arguments("exclude", "exclude", "| Fake Development (adjusted: see the footer) | 3 | 4.0 | 12.0 |", "| 3 | 3 | 4.0 | 4.0 | 6.0 | 6.0 |", "which have no cycle time: 4")]
+    [Arguments("exclude", "exclude", "| Fake Development" + ReportText.LeftOut.Mark + " | 3 | 4.0 | 12.0 |", "| 3 | 3 | 4.0 | 4.0 | 6.0 | 6.0 |", "which have no cycle time: 4")]
     public async Task Each_of_the_four_combinations_of_the_two_parts_gives_its_own_time_in_status_row_cycle_time_bucket_and_footer(
         string timeInStatus, string cycleTime, string developmentRow, string bucketRow, string cycleLineEnding)
     {
@@ -294,11 +294,11 @@ public class BriefVisitsLeftOutOfCycleTimeTests
         await Assert.That(counted).StartsWith(Heading + "Delivered issues: ");
         await Assert.That(cycleTimeLeftOut).StartsWith(
             Heading
-            + "Brief visits are left out of cycle time in this report. A delivered issue whose cycle starts with a brief visit has no cycle time: the cycle time table's figures are of the cycles that remain, and the footer gives the number of such issues.\n\n"
+            + ReportText.LeftOut.LineForCycleTime
             + "Delivered issues: ");
         await Assert.That(bothLeftOut).StartsWith(
             Heading
-            + "Brief visits are left out of time in status and of cycle time in this report. A row of the time in status table marked \"adjusted\" is of a status listed for brief visits: its figures are of what remains, and the footer gives the number of its issues that had a brief visit and the number left out of the row. A delivered issue whose cycle starts with a brief visit has no cycle time: the cycle time table's figures are of the cycles that remain, and the footer gives the number of such issues.\n\n"
+            + ReportText.LeftOut.LineForBoth
             + "Delivered issues: ");
     }
 
@@ -341,7 +341,7 @@ public class BriefVisitsLeftOutOfCycleTimeTests
     }
 
     [Test]
-    public async Task Nothing_else_in_the_report_differs_but_the_method_note_sentences_that_leaving_cycles_out_makes_untrue()
+    public async Task Nothing_else_in_the_report_differs_but_the_line_the_note_the_footer_lines_ending_and_the_method_note_sentences_on_cycle_time()
     {
         // Nobody's cycle starts with a brief visit, so every figure is the same under either treatment.
         await using var pipeline = new PipelineHarness();
@@ -368,7 +368,7 @@ public class BriefVisitsLeftOutOfCycleTimeTests
         await Assert.That(cycleTimeLeftOut).Contains(ReportText.Treatment.TheyHaveNoCycleTime);
         await Assert.That(cycleTimeLeftOut).Contains(ReportText.Treatment.WhenLeavingOutWasAdded("cycle time is"));
         var putBack = cycleTimeLeftOut
-            .Replace("Brief visits are left out of cycle time in this report. A delivered issue whose cycle starts with a brief visit has no cycle time: the cycle time table's figures are of the cycles that remain, and the footer gives the number of such issues.\n\n", "")
+            .Replace(ReportText.LeftOut.LineForCycleTime, "")
             .Replace(NoteUnderTheTable, "")
             .Replace(CycleTimeSentenceLeftOut, "")
             .Replace(WhatIsDoneWithCycleTimeAlone, ReportText.Treatment.NothingIsDone)
@@ -404,8 +404,7 @@ public class BriefVisitsLeftOutOfCycleTimeTests
             + ReportText.Treatment.Why + ReportText.Treatment.WhyForACycle + ReportText.Treatment.WhatLeavingOutDoesNotDo);
         await Assert.That(bothLeftOut.Split(ReportText.Treatment.IsASetting).Length).IsEqualTo(2);
         var putBackToTimeInStatus = bothLeftOut
-            .Replace(" and of cycle time in this report. A row of the time in status table marked", " in this report. A row of that table marked")
-            .Replace(" A delivered issue whose cycle starts with a brief visit has no cycle time: the cycle time table's figures are of the cycles that remain, and the footer gives the number of such issues.", "")
+            .Replace(ReportText.LeftOut.LineForBoth, ReportText.LeftOut.LineForTimeInStatus)
             .Replace(NoteUnderTheTable, "")
             .Replace(CycleTimeSentenceLeftOut, "")
             .Replace(ReportText.Treatment.LeftOutOfBoth, ReportText.Treatment.LeftOutOfTimeInStatusAlone)
@@ -420,8 +419,7 @@ public class BriefVisitsLeftOutOfCycleTimeTests
     private const string Heading = "# Fake Sprint 41 (2026-01-05 to 2026-01-19)\n\n";
 
     /// <summary>The note under the cycle time table when cycles that start with a brief visit are left out (D101), with the empty line that parts it from the table.</summary>
-    private const string NoteUnderTheTable =
-        "\nA delivered issue whose cycle starts with a brief visit has no cycle time and is not in this table (adjusted: see the footer).\n";
+    private const string NoteUnderTheTable = ReportText.LeftOut.NoteUnderTheCycleTimeTable;
 
     /// <summary>The method note's sentences on what cycle time is, as they read under either treatment.</summary>
     private const string CycleTimeSentence =
