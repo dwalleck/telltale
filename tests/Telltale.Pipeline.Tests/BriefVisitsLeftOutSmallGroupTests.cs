@@ -284,6 +284,9 @@ public class BriefVisitsLeftOutSmallGroupTests
 
         // What the first store gives: the withheld number is null beside the shown ones, and no sum or
         // difference holds it. Review in sprint 41 and Development in sprint 42 have a line and no row.
+        // The last two rows. D97: every brief visit count of sprint 41 is shown, so the subtraction gives no
+        // withheld one. D94: left out of cycle time, each sprint's three delivered issues have no cycle time,
+        // which is the number of cycles that start with a brief visit, shown here; counted, all have one.
         await Assert.That(read[0].Attempts).IsEqualTo(
             LeftOutHead
             + """
@@ -304,10 +307,6 @@ public class BriefVisitsLeftOutSmallGroupTests
             | --- | --- | --- | --- |
 
             """.ReplaceLineEndings("\n")
-
-            // D97: every brief visit count of sprint 41 is shown, so the subtraction gives no withheld one.
-            // D94: left out of cycle time, each sprint's three delivered issues have no cycle time, which is
-            // the number of cycles that start with a brief visit, shown here; counted, all have one.
             + $"| 41 | 3 | -8 | {deliveredWithNoCycleTime} |\n"
             + $"| 42 | 3 | 0 | {deliveredWithNoCycleTime} |\n");
         var developmentLine = "\n- Fake Development: 8 issues had a visit shorter than 5 minutes" + ReportText.LeftOutOfTheRow("suppressed") + "\n";
