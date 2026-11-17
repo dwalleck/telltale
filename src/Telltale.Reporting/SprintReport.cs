@@ -319,7 +319,7 @@ public static class SprintReport
         }
 
         report.Append(" A listed status with no row in the time in status table has no line")
-            .Append(numbers.TeamCheck ? $", and a sprint whose team is smaller than {numbers.TeamInWords} has none at all." : ".")
+            .Append(numbers.TeamCheck ? $", and a sprint whose team is smaller than {numbers.TeamInWords} has no line for any listed status." : ".")
             .Append(" This rule was added on 2026-11-12, after the first run on real data: the thresholds were chosen with knowledge of results, and the counts describe data quality and are not a success criterion.\n");
     }
 

@@ -13,9 +13,12 @@
 -- assignees than a figure needs are among the issues counted. While that number is one or more, a count of
 -- nothing has nobody behind it and is null too, so a zero reads as a withheld count does; a number of zero
 -- turns the check off (owner decision D65), and a count of nothing is then shown as 0. An unassigned issue
--- counts toward nobody. The issues counted are among those the per-status counts of brief_visits_per_sprint
--- count, so this number and shown counts there can give a withheld one; the owner accepted that, and the
--- number is not withheld for it (owner decision D97).
+-- counts toward nobody. This number can be combined with shown counts of brief_visits_per_sprint to say
+-- something about a withheld one: the issues it counts are often among those the per-status counts count, and
+-- the subtraction then gives the withheld count or a bound on it. They are not always among them: a per-status
+-- count needs the issue in the status's time in status row and the visit inside the time the sprint counts,
+-- and this number needs only a delivery in the sprint. The owner accepted the combination, and the number is
+-- not withheld for it (owner decision D97).
 CREATE VIEW cycle_starts_with_brief_visit_per_sprint AS
 WITH counted AS (
     SELECT c.delivery_sprint_id AS sprint_id,

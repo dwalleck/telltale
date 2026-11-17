@@ -67,7 +67,7 @@ public class BriefVisitsExplainedTests
             + WhatABriefVisitIs
             + " A count reads \"suppressed\" when its row in the time in status table reads \"suppressed\" for its figures, or when fewer than three distinct assignees are among the issues counted."
             + AZeroAndAWithheldCountReadAlike
-            + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than five has none at all."
+            + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than five has no line for any listed status."
             + WhenTheRuleWasAdded
             + Footer.ReplaceLineEndings("\n")
             + "- Fake Development: 4 issues had a visit shorter than 5 minutes\n"
@@ -112,12 +112,12 @@ public class BriefVisitsExplainedTests
     }
 
     [Test]
-    [Arguments(4, 2, WithheldUnderTwo + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than four has none at all.", "4 issues had")]
-    [Arguments(1, 1, WithheldUnderOne + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than one has none at all.", "4 issues had")]
+    [Arguments(4, 2, WithheldUnderTwo + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than four has no line for any listed status.", "4 issues had")]
+    [Arguments(1, 1, WithheldUnderOne + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than one has no line for any listed status.", "4 issues had")]
     [Arguments(0, 2, WithheldUnderTwo + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ".", "4 issues had")]
-    [Arguments(4, 0, " No count is withheld for the number of assignees behind it, and a count of nothing reads 0." + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than four has none at all.", "4 issues had")]
+    [Arguments(4, 0, " No count is withheld for the number of assignees behind it, and a count of nothing reads 0." + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than four has no line for any listed status.", "4 issues had")]
     [Arguments(0, 0, " No count is withheld for group size, and a count of nothing reads 0." + AStatusWithNoRowHasNoLine + ".", "4 issues had")]
-    [Arguments(5, 5, " A count reads \"suppressed\" when its row in the time in status table reads \"suppressed\" for its figures, or when fewer than five distinct assignees are among the issues counted." + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than five has none at all.", "issues with")]
+    [Arguments(5, 5, " A count reads \"suppressed\" when its row in the time in status table reads \"suppressed\" for its figures, or when fewer than five distinct assignees are among the issues counted." + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than five has no line for any listed status.", "issues with")]
     public async Task The_paragraph_says_what_a_count_reads_in_place_of_a_number_by_the_numbers_in_force(int team, int assigneesBehindAFigure, string whatACountReads, string developmentLineHas)
     {
         // Four people are behind the four issues counted: the count is shown under every pair but five and five.
@@ -167,7 +167,7 @@ public class BriefVisitsExplainedTests
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
 
         await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith(
-            ", and a sprint whose team is smaller than five has none at all."
+            ", and a sprint whose team is smaller than five has no line for any listed status."
             + WhenTheRuleWasAdded
             + Footer.ReplaceLineEndings("\n")
             + ReportText.CyclesThatStartWithBriefVisit("suppressed"));

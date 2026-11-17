@@ -302,8 +302,8 @@ public class BriefVisitCountTests
         await Assert.That(without.Error.ToString()).Contains("Changelog anomalies: 1 across 1 issue");
 
         // Every table and view but the five that hold the setting and the brief visits is the same, row for
-        // row: the anomalies, the footer's counts and every figure of every other view. The issue's cycle holds
-        // the flag that says its cycle starts with a brief visit, and one view counts those flags.
+        // row: the anomalies, the footer's counts and every figure of every other view. One view counts the
+        // cycles that start with a brief visit, and the issues' cycles are compared below, column by column.
         string[] aboutBriefVisits = ["brief_visit", "brief_visits_per_sprint", "run", "issue_cycle", "cycle_starts_with_brief_visit_per_sprint"];
         var storeWithout = BlocksOf(await without.ReadStoreContentAsync());
         var storeWith = BlocksOf(await with.ReadStoreContentAsync());
@@ -314,9 +314,24 @@ public class BriefVisitCountTests
             await Assert.That(storeWith[name]).IsEqualTo(storeWithout[name]);
         }
 
+        // Every issue's cycle is the same in every column but the last, the flag that says the cycle starts
+        // with a brief visit: its start, its end, its days, its bucket, its delivery and its reopens. The flag
+        // is 0 for every issue without the setting, and with it 1 for the four caught-up issues and no other.
+        var cyclesWithout = RowsOf(storeWithout["issue_cycle"]);
+        var cyclesWith = RowsOf(storeWith["issue_cycle"]);
+        string[] caughtUp = [.. Enumerable.Range(1, 4).Select(number => with.Jira.IdOf($"FAKE-{number}"))];
+        await Assert.That(cyclesWithout.Count(row => row.EndsWith(" | 0", StringComparison.Ordinal))).IsEqualTo(cyclesWithout.Count);
+        await Assert.That(cyclesWith.Count(row => row.EndsWith(" | 1", StringComparison.Ordinal))).IsEqualTo(4);
+        await Assert.That(cyclesWith).IsEquivalentTo(
+            cyclesWithout.Select(row => caughtUp.Contains(row[..row.IndexOf(" | ", StringComparison.Ordinal)]) ? row[..^1] + "1" : row),
+            TUnit.Assertions.Enums.CollectionOrdering.Matching);
+
         await Assert.That(storeWithout["brief_visit"]).IsEqualTo("brief_visit\n\n");
         await Assert.That(storeWith["anomaly"]).Contains(with.Jira.IdOf("FAKE-9"));
     }
+
+    /// <summary>The rows of one block of <see cref="BlocksOf"/>, without the name that heads it.</summary>
+    private static List<string> RowsOf(string block) => [.. block.Split('\n', StringSplitOptions.RemoveEmptyEntries).Skip(1)];
 
     /// <summary>Sprint 41 as the harness has it, and a team of five whose issues stay in New through it.</summary>
     private static void AddSprint41WithItsTeam(FakeJira jira)
