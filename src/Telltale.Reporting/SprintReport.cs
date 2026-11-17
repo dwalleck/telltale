@@ -49,8 +49,9 @@ public static class SprintReport
     /// views do, and decides nothing by either: the minimum group size's numbers the derived data was built
     /// under (<see cref="NumbersInForce.Of"/>), which it states, and whether a status was listed under
     /// <c>briefVisitThresholds</c> (<see cref="DerivedSource.BriefVisitsChecked"/>). With a status listed the
-    /// method note explains the footer's brief visit lines, also for a sprint that has none. With no status
-    /// listed the report is what it was before brief visits were counted, and the brief visit view is not read.
+    /// method note explains the footer's brief visit lines, also for a sprint that has none, and the footer
+    /// ends with its cycle time line when a listed status has the work role. With no status
+    /// listed the report is what it was before brief visits were counted, and neither brief visit view is read.
     /// It also takes the treatment of brief visits the rebuild applied (GLOSSARY: Treatment;
     /// <see cref="DerivedSource.BriefVisitsLeftOutOfTimeInStatus"/>): when brief visits were left out of time in
     /// status, the report says so under its heading, marks the row of every listed status, and words the method
@@ -107,6 +108,10 @@ public static class SprintReport
         {
             AppendBriefVisits(report, await store.QueryViewsAsync<BriefVisitsRow>(
                 "SELECT status_name, threshold_minutes, brief_visit_issue_count, suppressed FROM brief_visits_per_sprint WHERE sprint_id = @sprintId ORDER BY board_position;",
+                new { sprintId },
+                cancellationToken));
+            AppendCyclesThatStartWithBriefVisit(report, await store.QueryViewsAsync<CycleStartsRow>(
+                "SELECT issue_count, suppressed FROM cycle_starts_with_brief_visit_per_sprint WHERE sprint_id = @sprintId;",
                 new { sprintId },
                 cancellationToken));
         }
@@ -369,7 +374,7 @@ public static class SprintReport
         report.Append(leftOutOfTimeInStatus
                 ? " A listed status that had no row in the time in status table before anything was left out has no line; one whose every issue was left out has a line and no row"
                 : " A listed status with no row in the time in status table has no line")
-            .Append(numbers.TeamCheck ? $", and a sprint whose team is smaller than {numbers.TeamInWords} has none at all." : ".")
+            .Append(numbers.TeamCheck ? $", and a sprint whose team is smaller than {numbers.TeamInWords} has no line for any listed status." : ".")
             .Append(" This rule was added on 2026-11-12, after the first run on real data: the thresholds were chosen with knowledge of results, and the counts describe data quality and are not a success criterion.\n");
     }
 
@@ -494,6 +499,22 @@ public static class SprintReport
     }
 
     /// <summary>
+    /// The footer's cycle time line (GLOSSARY: Brief visit; owner decisions D87 and D100), directly after its
+    /// brief visit lines: how many of the sprint's delivered issues have a cycle that starts with a brief
+    /// visit, and that they are in the cycle time figures. The view has a row for the sprint only when a listed
+    /// status has the work role, and without a row there is no line. The view withholds the number as it does
+    /// every figure, and a count of nothing with it, so the two read alike.
+    /// </summary>
+    private static void AppendCyclesThatStartWithBriefVisit(StringBuilder report, IReadOnlyList<CycleStartsRow> rows)
+    {
+        foreach (var row in rows)
+        {
+            report.Append("- Delivered issues whose cycle starts with a brief visit, which are in the cycle time figures: ")
+                .Append(Figure(row.Suppressed, row.IssueCount?.ToString(CultureInfo.InvariantCulture))).Append('\n');
+        }
+    }
+
+    /// <summary>
     /// A threshold in minutes as the footer writes it: the shortest digits that identify the number, as it was
     /// written in the configuration file for a threshold of a few decimals (5, 0.5, 0.69), and always in plain
     /// decimal digits. The round-trip format alone turns to an exponent below 0.0001 (1E-05), which a reader of
@@ -603,6 +624,12 @@ public static class SprintReport
         public string StatusName { get; init; } = "";
         public double ThresholdMinutes { get; init; }
         public long? BriefVisitIssueCount { get; init; }
+        public long Suppressed { get; init; } = 1;
+    }
+
+    private sealed class CycleStartsRow
+    {
+        public long? IssueCount { get; init; }
         public long Suppressed { get; init; } = 1;
     }
 

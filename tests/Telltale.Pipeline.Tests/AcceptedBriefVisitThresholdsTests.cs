@@ -37,7 +37,7 @@ public class AcceptedBriefVisitThresholdsTests
             - Fake Development: 4 issues had a visit shorter than 0.5 minutes
             - Fake Review: issues with a visit shorter than 0.25 minutes: suppressed
 
-            """.ReplaceLineEndings("\n"));
+            """.ReplaceLineEndings("\n") + ReportText.CyclesThatStartWithBriefVisit("4"));
         await Assert.That(await QueryAsync(pipeline, ViewSql)).IsEqualTo(
             ViewHead + "| Fake Development | 0.5 | 4 | 0 |\n| Fake Review | 0.25 | NULL | 1 |\n");
     }
@@ -60,7 +60,7 @@ public class AcceptedBriefVisitThresholdsTests
             - Fake Development: 4 issues had a visit shorter than 5 minutes
             - Fake Blocked: 4 issues had a visit shorter than 5 minutes
 
-            """.ReplaceLineEndings("\n"));
+            """.ReplaceLineEndings("\n") + ReportText.CyclesThatStartWithBriefVisit("4"));
     }
 
     [Test]
@@ -88,7 +88,7 @@ public class AcceptedBriefVisitThresholdsTests
         var report = await absent.ReadReportBytesAsync(41);
         await Assert.That(await empty.ReadReportBytesAsync(41)).IsEqualTo(report);
         await Assert.That(await absent.ReadReportAsync(41)).EndsWith("\n- Issues delivered between sprints, in the whole store: suppressed\n");
-        await Assert.That(await listed.ReadReportAsync(41)).EndsWith("\n- Fake Development: 4 issues had a visit shorter than 5 minutes\n");
+        await Assert.That(await listed.ReadReportAsync(41)).EndsWith("\n- Fake Development: 4 issues had a visit shorter than 5 minutes\n" + ReportText.CyclesThatStartWithBriefVisit("4"));
 
         // No rows: every table and view of the store holds the same, the record of the settings included.
         await Assert.That(await empty.ReadStoreContentAsync()).IsEqualTo(await absent.ReadStoreContentAsync());
@@ -134,7 +134,7 @@ public class AcceptedBriefVisitThresholdsTests
 
         await Assert.That(pipeline.Error.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith("\n- Fake Development: 4 issues had a visit shorter than 5 minutes\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith("\n- Fake Development: 4 issues had a visit shorter than 5 minutes\n" + ReportText.CyclesThatStartWithBriefVisit("4"));
     }
 
     /// <summary>Sprint 41 as the harness has it, and a team of five whose issues stay in New through it.</summary>

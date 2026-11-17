@@ -25,6 +25,14 @@ public static class ReportText
         "\n## Time in status\n\n"
         + "| Status | Issues | Median (business days) | Total (business days) | Baseline median (business days) |\n| --- | ---: | ---: | ---: | ---: |\n";
 
+    /// <summary>
+    /// The footer's last line when a work status is listed for brief visits, directly after the brief visit
+    /// lines (owner decisions D87 and D100): the number of delivered issues whose cycle starts with a brief
+    /// visit. <paramref name="figure"/> is the number, or <c>suppressed</c>.
+    /// </summary>
+    public static string CyclesThatStartWithBriefVisit(string figure) =>
+        $"- Delivered issues whose cycle starts with a brief visit, which are in the cycle time figures: {figure}\n";
+
     /// <summary>What follows the two tables: the method note's heading.</summary>
     public const string MethodHeading = "\n## Method\n";
 }

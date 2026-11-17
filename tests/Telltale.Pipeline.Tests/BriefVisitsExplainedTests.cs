@@ -67,10 +67,11 @@ public class BriefVisitsExplainedTests
             + WhatABriefVisitIs
             + " A count reads \"suppressed\" when its row in the time in status table reads \"suppressed\" for its figures, or when fewer than three distinct assignees are among the issues counted."
             + AZeroAndAWithheldCountReadAlike
-            + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than five has none at all."
+            + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than five has no line for any listed status."
             + WhenTheRuleWasAdded
             + Footer.ReplaceLineEndings("\n")
-            + "- Fake Development: 4 issues had a visit shorter than 5 minutes\n");
+            + "- Fake Development: 4 issues had a visit shorter than 5 minutes\n"
+            + ReportText.CyclesThatStartWithBriefVisit("4"));
     }
 
     [Test]
@@ -105,17 +106,18 @@ public class BriefVisitsExplainedTests
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
 
         var report = await pipeline.ReadReportAsync(41);
-        await Assert.That(report).EndsWith(WhenTheRuleWasAdded + Footer.ReplaceLineEndings("\n"));
+        // Review is a work status, so the footer has its cycle time line, and no delivered issue to count.
+        await Assert.That(report).EndsWith(WhenTheRuleWasAdded + Footer.ReplaceLineEndings("\n") + ReportText.CyclesThatStartWithBriefVisit("suppressed"));
         await Assert.That(report).Contains(" The footer's two counts of the whole store read \"suppressed\" when the issues in the whole store have fewer than five distinct assignees, or fewer than three are among the issues counted.\n");
     }
 
     [Test]
-    [Arguments(4, 2, WithheldUnderTwo + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than four has none at all.", "4 issues had")]
-    [Arguments(1, 1, WithheldUnderOne + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than one has none at all.", "4 issues had")]
+    [Arguments(4, 2, WithheldUnderTwo + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than four has no line for any listed status.", "4 issues had")]
+    [Arguments(1, 1, WithheldUnderOne + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than one has no line for any listed status.", "4 issues had")]
     [Arguments(0, 2, WithheldUnderTwo + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ".", "4 issues had")]
-    [Arguments(4, 0, " No count is withheld for the number of assignees behind it, and a count of nothing reads 0." + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than four has none at all.", "4 issues had")]
+    [Arguments(4, 0, " No count is withheld for the number of assignees behind it, and a count of nothing reads 0." + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than four has no line for any listed status.", "4 issues had")]
     [Arguments(0, 0, " No count is withheld for group size, and a count of nothing reads 0." + AStatusWithNoRowHasNoLine + ".", "4 issues had")]
-    [Arguments(5, 5, " A count reads \"suppressed\" when its row in the time in status table reads \"suppressed\" for its figures, or when fewer than five distinct assignees are among the issues counted." + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than five has none at all.", "issues with")]
+    [Arguments(5, 5, " A count reads \"suppressed\" when its row in the time in status table reads \"suppressed\" for its figures, or when fewer than five distinct assignees are among the issues counted." + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than five has no line for any listed status.", "issues with")]
     public async Task The_paragraph_says_what_a_count_reads_in_place_of_a_number_by_the_numbers_in_force(int team, int assigneesBehindAFigure, string whatACountReads, string developmentLineHas)
     {
         // Four people are behind the four issues counted: the count is shown under every pair but five and five.
@@ -145,7 +147,7 @@ public class BriefVisitsExplainedTests
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
 
         var report = await pipeline.ReadReportAsync(41);
-        await Assert.That(report).EndsWith("- Fake Development: 4 issues had a visit shorter than 5 minutes\n" + reviewLine);
+        await Assert.That(report).EndsWith("- Fake Development: 4 issues had a visit shorter than 5 minutes\n" + reviewLine + ReportText.CyclesThatStartWithBriefVisit("4"));
         await Assert.That(report).Contains(paragraphSays);
     }
 
@@ -165,9 +167,10 @@ public class BriefVisitsExplainedTests
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
 
         await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith(
-            ", and a sprint whose team is smaller than five has none at all."
+            ", and a sprint whose team is smaller than five has no line for any listed status."
             + WhenTheRuleWasAdded
-            + Footer.ReplaceLineEndings("\n"));
+            + Footer.ReplaceLineEndings("\n")
+            + ReportText.CyclesThatStartWithBriefVisit("suppressed"));
     }
 
     [Test]
@@ -216,14 +219,16 @@ public class BriefVisitsExplainedTests
         await Assert.That(reported).Contains("\n| Fake Development | 3 | 0.0 | 0.0 | 0.0 |\n");
         await Assert.That(reported).EndsWith(
             "- Issues delivered between sprints, in the whole store: suppressed\n"
-            + "- Fake Development: 3 issues had a visit shorter than 5 minutes\n");
+            + "- Fake Development: 3 issues had a visit shorter than 5 minutes\n"
+            + ReportText.CyclesThatStartWithBriefVisit("3"));
         await Assert.That(reported).DoesNotContain("4 issues had");
         await Assert.That(reported.Split('\n').Count(line => line.Contains("a visit shorter than", StringComparison.Ordinal))).IsEqualTo(1);
 
         // The baseline sprint's count is read by reporting on that sprint.
         await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith(
             "- Issues delivered between sprints, in the whole store: suppressed\n"
-            + "- Fake Development: 4 issues had a visit shorter than 5 minutes\n");
+            + "- Fake Development: 4 issues had a visit shorter than 5 minutes\n"
+            + ReportText.CyclesThatStartWithBriefVisit("4"));
     }
 
     [Test]
@@ -260,8 +265,8 @@ public class BriefVisitsExplainedTests
         }
 
         // The fixture is what it claims: the first store has brief visits and the second has none.
-        await Assert.That(await withBriefVisits.ReadReportAsync(41)).EndsWith("\n- Fake Development: 4 issues had a visit shorter than 5 minutes\n");
-        await Assert.That(await withNone.ReadReportAsync(41)).EndsWith("\n- Fake Development: issues with a visit shorter than 5 minutes: suppressed\n");
+        await Assert.That(await withBriefVisits.ReadReportAsync(41)).EndsWith("\n- Fake Development: 4 issues had a visit shorter than 5 minutes\n" + ReportText.CyclesThatStartWithBriefVisit("4"));
+        await Assert.That(await withNone.ReadReportAsync(41)).EndsWith("\n- Fake Development: issues with a visit shorter than 5 minutes: suppressed\n" + ReportText.CyclesThatStartWithBriefVisit("suppressed"));
 
         // Standard error is where derive logs the anomalies; standard output names the report's path.
         var expectedError = ConsoleOf(withoutTheSetting.Error, withoutTheSetting);
@@ -297,7 +302,9 @@ public class BriefVisitsExplainedTests
 
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith($"\n- Fake Development: {counted} issues had a visit shorter than {printed} minutes\n");
+        // Each of the four issues counted is delivered, and its cycle starts with that visit.
+        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith(
+            $"\n- Fake Development: {counted} issues had a visit shorter than {printed} minutes\n" + ReportText.CyclesThatStartWithBriefVisit($"{counted}"));
         await Assert.That(await HarnessSteps.QueryAsync(pipeline, $"SELECT threshold_minutes = {printed} AS the_same_number FROM brief_visits_per_sprint WHERE sprint_id = '41';"))
             .IsEqualTo("| the_same_number |\n| --- |\n| 1 |\n");
     }
@@ -319,7 +326,8 @@ public class BriefVisitsExplainedTests
         await Assert.That(report).EndsWith(
             WhenTheRuleWasAdded
             + Footer.ReplaceLineEndings("\n")
-            + "- Fake Development: 4 issues had a visit shorter than 5 minutes\n");
+            + "- Fake Development: 4 issues had a visit shorter than 5 minutes\n"
+            + ReportText.CyclesThatStartWithBriefVisit("4"));
     }
 
     /// <summary>What a harness's console writer holds, with the harness's own temporary directory taken out so that two harnesses can be compared.</summary>

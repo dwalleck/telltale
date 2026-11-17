@@ -375,7 +375,8 @@ public class BriefVisitsLeftOutOfTimeInStatusTests
         await Assert.That(await QueryAsync(pipeline, BriefVisitsSql)).IsEqualTo(BriefVisitsHead + "| 41 | Fake Development | 5 | 4 | 0 |\n");
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).DoesNotContain("| Fake Development");
-        await Assert.That(report).EndsWith("\n- Fake Development: 4 issues had a visit shorter than 5 minutes\n");
+        // The number of cycles that start with a brief visit is what it is while brief visits are counted (D87).
+        await Assert.That(report).EndsWith("\n- Fake Development: 4 issues had a visit shorter than 5 minutes\n" + ReportText.CyclesThatStartWithBriefVisit("4"));
     }
 
     [Test]
@@ -404,7 +405,7 @@ public class BriefVisitsLeftOutOfTimeInStatusTests
             + "| 41 | Fake Development | 2 | NULL | NULL | 1 |\n"
             + "| 41 | Fake Review | 3 | 2 | 5.999 | 0 |\n");
         await Assert.That(await QueryAsync(pipeline, BriefVisitsSql)).IsEqualTo(BriefVisitsHead + "| 41 | Fake Development | 5 | 3 | 0 |\n");
-        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith("\n- Fake Development: 3 issues had a visit shorter than 5 minutes\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith("\n- Fake Development: 3 issues had a visit shorter than 5 minutes\n" + ReportText.CyclesThatStartWithBriefVisit("3"));
     }
 
     [Test]
@@ -490,8 +491,8 @@ public class BriefVisitsLeftOutOfTimeInStatusTests
             " Brief visits are counted and nothing more: no duration was excluded or corrected because of one, and every other figure is what it would be without the count."),
         (" A count reads \"suppressed\" when its row in the time in status table would read \"suppressed\" for its figures with nothing left out, or when fewer than three distinct assignees are among the issues counted.",
             " A count reads \"suppressed\" when its row in the time in status table reads \"suppressed\" for its figures, or when fewer than three distinct assignees are among the issues counted."),
-        (" A listed status that had no row in the time in status table before anything was left out has no line; one whose every issue was left out has a line and no row, and a sprint whose team is smaller than five has none at all.",
-            " A listed status with no row in the time in status table has no line, and a sprint whose team is smaller than five has none at all."),
+        (" A listed status that had no row in the time in status table before anything was left out has no line; one whose every issue was left out has a line and no row, and a sprint whose team is smaller than five has no line for any listed status.",
+            " A listed status with no row in the time in status table has no line, and a sprint whose team is smaller than five has no line for any listed status."),
     ];
 
     /// <summary>The store's content (<see cref="PipelineHarness.ReadStoreContentAsync"/>) as one block per table or view, by its name; a block starts with the name.</summary>

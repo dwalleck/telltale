@@ -49,12 +49,20 @@ public sealed record IssueCycle
     public double? PointBucket { get; private init; }
 
     /// <summary>
+    /// Whether the issue's cycle starts with a brief visit (GLOSSARY: Brief visit; owner decisions D87 and D90;
+    /// <see cref="Cycles.StartsWithBriefVisit"/>). True for delivered issues only, and for none when no status
+    /// is listed. It is a flag and nothing else: no duration, no time.
+    /// </summary>
+    public bool StartsWithBriefVisit { get; private init; }
+
+    /// <summary>
     /// A delivered issue. <paramref name="deliverySprintId"/> is null when the delivery fell between sprints,
     /// <paramref name="cycle"/> when the issue never entered a work-role status, and
-    /// <paramref name="pointBucket"/> when it is unestimated.
+    /// <paramref name="pointBucket"/> when it is unestimated. <paramref name="startsWithBriefVisit"/> says
+    /// whether its cycle starts with a brief visit.
     /// </summary>
-    public static IssueCycle OfDelivered(string issueId, DateTimeOffset deliveredAt, string? deliverySprintId, Cycle? cycle, double? pointBucket, int reopenCount) =>
-        new(issueId, reopenCount) { CycleEnd = deliveredAt, Delivered = true, DeliverySprintId = deliverySprintId, Cycle = cycle, PointBucket = pointBucket };
+    public static IssueCycle OfDelivered(string issueId, DateTimeOffset deliveredAt, string? deliverySprintId, Cycle? cycle, double? pointBucket, int reopenCount, bool startsWithBriefVisit) =>
+        new(issueId, reopenCount) { CycleEnd = deliveredAt, Delivered = true, DeliverySprintId = deliverySprintId, Cycle = cycle, PointBucket = pointBucket, StartsWithBriefVisit = startsWithBriefVisit };
 
     /// <summary>An abandoned issue: it reached done at <paramref name="closedAt"/>, which is its cycle end, and that is not a delivery.</summary>
     public static IssueCycle OfAbandoned(string issueId, DateTimeOffset closedAt, int reopenCount) =>
@@ -100,9 +108,9 @@ public sealed record SprintBriefVisit(string IssueId, string SprintId, string St
 
 /// <summary>
 /// A status the configuration gives a role, with its place in board order (the order the configuration
-/// lists the statuses in, from 1) and whether its role is done.
+/// lists the statuses in, from 1), whether its role is done and whether its role is work.
 /// </summary>
-public sealed record BoardStatus(string StatusId, int Position, bool IsDone);
+public sealed record BoardStatus(string StatusId, int Position, bool IsDone, bool IsWork);
 
 /// <summary>The ways an issue's changelog can fail to line up. Each has one fixed message.</summary>
 public enum ChangelogAnomalyKind
