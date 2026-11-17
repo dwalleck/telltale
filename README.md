@@ -328,8 +328,8 @@ What a report then shows. A status's row, here and in the next list, is its row 
 
 - **One line per listed status at the end of the footer**, in board order, for each listed status that has such a row. A shown count reads `Development: 4 issues had a visit shorter than 5 minutes`. A withheld one reads `Development: issues with a visit shorter than 5 minutes: suppressed`.
 - **The count is of issues in that row**, each counted once, so it is never larger than that row's issue count. Under `exclude` for time in status it can be larger than the issue count the table shows.
-- **One more line when a listed status has the role `work`**, after those: `Delivered issues whose cycle starts with a brief visit, which are in the cycle time figures: 4`. A cycle starts with a brief visit when the stay that begins where the cycle starts is one. The line is there for every sprint, also one with a team smaller than `team`, where it reads `suppressed`.
-- **A paragraph at the end of the method note** says what a brief visit is, that brief visits are counted and no figure was excluded or corrected, what the footer's last line counts, and that the rule was added on 2026-11-12, after the first run on real data.
+- **One more line when a listed status has the role `work`**, after those: `Delivered issues whose cycle starts with a brief visit, which are in the cycle time figures: 4`. That is its wording while brief visits are counted for cycle time, the default; under `exclude` for cycle time it says the issues have no cycle time. A cycle starts with a brief visit when the stay that begins where the cycle starts is one. The line is there for every sprint, also one with a team smaller than `team`, where it reads `suppressed`.
+- **A paragraph at the end of the method note** says what a brief visit is, what the footer's last line counts and that the line was added on 2026-11-16, and that the rule was added on 2026-11-12, after the first run on real data. While brief visits are counted for both metrics, the default, it says that they are counted and no figure was excluded or corrected; when either metric leaves them out it says what was left out and why instead.
 - **No other figure changes**, unless `briefVisitTreatment` says so (see [Brief visit treatment](#brief-visit-treatment)). The medians, totals and counts are what they are without the setting, and so is the footer's changelog anomaly count: a brief visit is not a changelog anomaly, and `derive` and `run` print nothing about it.
 - **There is no baseline count.** To see a baseline sprint's counts, run `telltale report --sprint <id>` on that sprint.
 
@@ -407,7 +407,7 @@ Report and query assertions normalize both actual output and multiline expected 
 
 ### Trying the executable without Jira
 
-`eng/SeedStore` writes a working folder that a published `telltale` can `derive`, `report` and `query`, with no Jira site and no secrets. Use it to try a build by hand or to check what this README says against the executable.
+`eng/SeedStore` writes a working folder that a published `telltale` can `derive`, `report` and `query`, with no Jira site and no secrets (and only with no hashing salt stored: see the last point below). Use it to try a build by hand or to check what this README says against the executable.
 
 ```
 dotnet run --project eng/SeedStore -- <working folder>
@@ -423,6 +423,7 @@ telltale query "SELECT * FROM delivered_per_sprint"
 - **`--brief-visit-threshold <status>=<minutes>`** writes an entry of `briefVisitThresholds` and may be repeated, for example `development=5`. A status is its ID or its name without "Fake"; `--help` lists them.
 - **The working folder must be empty or new**, unless `--force` is given, which replaces the configuration file and the store and leaves other files alone. A folder inside a checkout of this repository is always refused.
 - `backfill`, `sync`, `run` and `discover` call Jira, so they do not work on a seeded store. To change a setting afterwards, edit the configuration file and run `telltale derive`.
+- **A laptop that has a hashing salt stored refuses a seeded store.** On Windows the published executable reads the hashing salt from Windows Credential Manager and from nowhere else. The seeded store's fake people are hashed with the tests' salt, so where a salt has been stored, as on the laptop that runs against real data, `derive`, `report` and `query` stop with the message that the salt in the secret store is not the one the people in the database were hashed with. That message's advice does not fit a seeded store: `backfill` calls Jira, and the stored salt must stay as it is, because the real store's people are hashed with it. Today a seeded store can be tried only where no hashing salt is stored: on a machine or account that has none in Credential Manager, or on macOS or Linux with no salt in the environment.
 
 ## Further reading
 

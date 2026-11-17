@@ -68,7 +68,7 @@ The third choice, replacing a brief visit with a length from another source, is 
 26. As a reader, I want the method note to say why brief visits were left out, so that I do not take it for trimming of inconvenient results.
 27. As a reader, I want the method note to say what leaving them out does not do, so that I do not take the adjusted figure for a corrected one.
 28. As a reader, I want the method note to say the rule was added after results had been seen, and when.
-29. As the project owner, I want a report under `count` for both parts to differ from today's only by the one new cycle time line in the footer.
+29. As the project owner, I want a report under `count` for both parts to differ from today's only by the one new cycle time line in the footer and the method note's sentences about it (D109).
 
 ### Privacy
 
@@ -112,9 +112,9 @@ Each narrows something the decisions' words do not settle. The owner confirmed t
 6. **D95. Two derives can be compared.** A figure under `count` and the same figure under `exclude` can be set side by side by deriving twice, which says something about the issues left out even when their count is withheld. This is accepted and recorded, as D79 is: whoever edits the configuration file is trusted with it.
 7. **D96. Which treatment the evaluation is judged under** is the owner's to choose and is written in `docs/context/pilot-plan.md`, with its date and reason. This spec does not choose it. The owner chose on 2026-11-17, before the setting was built: `exclude` for both parts. The pilot plan's "Brief visits" section is the record.
 
-### Decisions made at the start of the implementation run (2026-11-17)
+### Decisions made during the implementation run (2026-11-17)
 
-The exploration before ticket 01 found places where this spec did not fit the code. The owner decided each one. Where one differs from a sentence elsewhere in this spec, the decision stands.
+D97 to D101 were made at the start of the run: the exploration before ticket 01 found places where this spec did not fit the code. The others were made later, in the reviews, and each says where. The owner decided each one. Where one differs from a sentence elsewhere in this spec, the decision stands.
 
 - **D97.** The number of delivered issues whose cycle starts with a brief visit can be combined with shown brief visit counts to say something about a withheld one: the issues it counts are often among those the per-status counts count, and the subtraction then gives the withheld count or a bound on it. This is accepted and recorded, as D78 and D94 are. The number is not withheld for it. The probe that proves a zero cannot be told from a withheld count pins this as shown.
 - **D98.** (Widened on 2026-11-17, while ticket 04 was built and again in its review.) Under `exclude`, shown figures can give a withheld number of a listed status, or a bound on it. A footer line with no row in the time in status table shows that the status's left-out number and its brief visit count are each at least one, even when they read `suppressed`. A shown brief visit count larger than the row's issue count shows that the left-out number is at least their difference, and a brief visit count shown beside a row that reads `suppressed` shows that it is at least one. A withheld left-out number is also less than a shown brief visit count, so with one issue in the row it is the number itself. This is accepted and recorded, as D78, D94 and D97 are. The line stays, so that a status does not leave the report unexplained, and no count is withheld for it.
@@ -123,9 +123,12 @@ The exploration before ticket 01 found places where this spec did not fit the co
 - **D101.** Under `exclude` for cycle time, the note under the cycle time table is printed whatever the table holds, also when it is the single word `suppressed` or says no issue has a cycle time.
 - **D102.** (Decided on 2026-11-17 in the review of ticket 03.) Under `exclude` for cycle time, a delivered issue whose cycle starts with a brief visit keeps the point bucket it has under `count`: its estimate at the start of its cycle (ADR-0006), not at delivery. It has no cycle time, but it did enter a work status, so its start is what it was (D90), and the seat value inputs do not change with the treatment (D85). The sentence "stored as delivered with no cycle time, as an issue that never entered a work status is" is read as being about the cycle time only.
 - **D103.** (Decided on 2026-11-17, from the cross-ticket review of tickets 01 to 03.) A metric view gives the treatment the derived data was built under, one value for time in status and one for cycle time, so that a figure read through `query` can be told from the same figure under the other treatment.
+- **D104.** (Decided on 2026-11-17, in the review of ticket 05.) When a configuration file has more than one fault, `discover` and `run` may each report a different one: each checks in its own order and stops at the first. Each message is true of the file, and correcting one fault brings the next. For a file with one fault `discover` prints the message `run` would give.
+- **D105.** (Decided on 2026-11-17, in the review of ticket 05.) `discover` prints no part of a key written under `briefVisitTreatment`, also when the key is written twice: a key typed there could be a secret pasted into the wrong place. This narrows D74 for this setting. D108 widens it.
 - **D106.** (Decided on 2026-11-17, in the review of ticket 04.) The brief visit count of a status less its left-out number is the number of issues that had a brief visit and are still in the row, and it can rest on fewer assignees than a figure needs. The tool neither defines nor withholds that number. This is accepted and recorded, as D78 is.
 - **D107.** (Decided on 2026-11-17, in the review of ticket 06.) A cycle that starts with a brief visit is left out because it starts when the board was updated and not when the work started. That usually makes it too short; where an issue was moved into a work status and straight back out before the work began (D91), it makes it too long. The report, the glossary and the code say it in these terms and not as too short alone.
 - **D108.** (Decided on 2026-11-17, from the merge of ticket 05 and the final review.) `discover` prints no part of a key written twice, in any setting and at any depth of the configuration file: what was typed as a key could be a secret pasted into the wrong place. It says that a key is written twice and under which setting when that setting's name is one the tool knows. This replaces what D74 allowed and widens D105.
+- **D109.** (Decided on 2026-11-17, from the final review.) Where the footer has the cycle time line, the method note says what the line counts and that it was added on 2026-11-16, after results had been seen, under either treatment. The date is the day the line was decided (D87), as the date the note gives for the brief visit count is.
 
 Two changes of ticket scope were decided with them and are in the tickets: a refusal is built in the ticket that first accepts the value it refuses, and each ticket corrects the sentence of the method note that it makes untrue.
 
@@ -178,7 +181,7 @@ Exact wording is the implementer's, within the report's existing style, and is f
   - what leaving out does not do: the time the work really took is still recorded under the earlier status, the figures describe the issues that were moved on time, which may not be typical, and no length was estimated or replaced;
   - that the rule was added on 2026-11-16, after results had been seen;
   - that a zero and a withheld count both read `suppressed`.
-- With both parts as `count`, the report is what it is today plus the cycle time footer line and the method note's sentence about it. With no status listed it is byte for byte what it is today, apart from the as-of time.
+- With both parts as `count`, the report is what it is today plus the cycle time footer line and the method note's sentences about it: what the line counts, whether the issues it counts are in the cycle time figures, what its number reads when withheld, and when the line was added (D109). With no status listed it is byte for byte what it is today, apart from the as-of time.
 
 ### Documents changed with the code
 

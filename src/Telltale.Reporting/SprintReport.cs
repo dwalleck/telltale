@@ -541,8 +541,10 @@ public static class SprintReport
     /// <summary>
     /// The paragraph's sentences on the footer's cycle time line (owner decisions D87 and D100), written only
     /// when the footer has the line: what the line counts, whether the issues it counts are in the cycle time
-    /// figures, what the number reads in place of a number, and that the line was added on 2026-11-16 (D89),
+    /// figures, what the number reads in place of a number, and that the line was added on 2026-11-16,
     /// so that the date the paragraph gives next, for the rule on brief visits, is not read as the line's.
+    /// The sentences are there under either treatment, and the date is the day the line was decided (D87),
+    /// as the date given for the rule on brief visits is the day that rule was decided (owner decision D109).
     /// What the number reads follows the numbers in force, as the view
     /// does (<c>cycle_starts_with_brief_visit_per_sprint</c>): the number is withheld when the sprint's
     /// delivered count is, which holds the team check, so a sprint short of a team has the line and it reads

@@ -17,7 +17,7 @@ The project owner (a senior .NET engineer) needs to justify AI plan upgrades to 
 
 ## What is open
 
-**Update, Nov 17, 2026:** brief visits can be left out of time in status and of cycle time, and it is built: the optional setting `briefVisitTreatment`. The spec is `.scratch/brief-visit-treatment/spec.md`; the decisions are D83 to D106 in `docs/decisions.md`.
+**Update, Nov 17, 2026:** brief visits can be left out of time in status and of cycle time, and it is built: the optional setting `briefVisitTreatment`. The spec is `.scratch/brief-visit-treatment/spec.md`; the decisions are D83 to D109 in `docs/decisions.md`.
 
 **Update, Nov 13, 2026:** brief status visits are counted, and it is built: the optional setting `briefVisitThresholds` lists statuses and thresholds, and each sprint report's footer says how many issues had a visit to a listed status shorter than its threshold. No existing figure changes. The spec is `.scratch/brief-status-visits/spec.md`; the decisions are D58 to D63 and D71 to D80 in `docs/decisions.md`.
 
