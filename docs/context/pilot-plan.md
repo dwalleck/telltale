@@ -59,7 +59,7 @@ The evaluation is judged with brief visits left out (`exclude`) of both time in 
 - **What the adjusted figures are:** figures of the issues that were moved on time. Small issues are left out more often than large ones, so cycle time is read by point bucket and never as one figure for a sprint. The number of delivered issues whose cycle starts with a brief visit is read beside it, for the baseline and for each evaluation sprint (D87).
 - **Later:** a start taken from another source, such as the first commit on the issue's branch or a pull request event, is a second reading when it is built (D88). It is a lower bound, because work begins before the first commit. It does not replace this treatment unless a dated commit here says so.
 
-The thresholds are company configuration and are not in this repository.
+The thresholds are company configuration and are not in this repository. The owner fixed them on 2026-11-17, before the pilot started, and their dated record is kept on company systems. The SHA-256 fingerprint of that record's thresholds, salted so that it gives nothing away, is `535c5f51b95c496155de3c7493a479dbdb16fadea3a52646af0c6805abd704a1`; the record says how to check it. A changed threshold needs a new dated record and a new fingerprint here.
 
 ## The pilot
 
