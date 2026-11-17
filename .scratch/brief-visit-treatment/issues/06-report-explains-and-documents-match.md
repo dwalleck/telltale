@@ -25,7 +25,9 @@ Spec: `../spec.md` ("The report", method note; "Documents changed with the code"
 - [ ] The glossary's "Brief visit" entry agrees with the "Treatment" entry in both clauses: which row the count is of (the row before anything was left out, D93), and the sentence that says no duration is excluded or corrected because of one
 - [ ] `CLAUDE.md` names D94, D95, D97 and D98 among the recorded exceptions to the minimum group size rule, beside D37, D78 and D79 (the owner consented on 2026-11-17, run decision bvt-D12); nothing else in `CLAUDE.md` changes
 - [ ] The paragraph replaces the sentences tickets 02 to 04 corrected one at a time, and nothing it says is untrue under any of the four combinations of the two parts
-- [ ] The owner decisions list has every one of D83 to D101, each with its source
+- [ ] The owner decisions list has every one of D83 to D102, each with its source, D88 and D96 included; the D90 row ends as the spec does (a cycle whose first stay is bounded by a changelog anomaly is kept)
+- [ ] No code comment, report text or document cites a decision of the implementation run by its run number (`bvt-D...`): each says the rule in words or cites the owner decision
+- [ ] The comments and sentences the build order left untrue are corrected (the cross-ticket review's X10 names four: one in the report's code, one in the time in status view, one in the derive, one in the README)
 - [ ] The project handoff document has one dated line pointing at the spec
 - [ ] Nothing in a commit, a test or a document holds a real sprint ID, status ID, threshold or report value
 - [ ] Expected multi-line strings are normalized to LF
