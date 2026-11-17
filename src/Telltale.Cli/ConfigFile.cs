@@ -47,7 +47,7 @@ public static class ConfigFile
     /// file before it calls Jira (owner decision D70).
     /// </summary>
     internal static void RequireMinimumGroupSize(JsonNode? written, string path) =>
-        RequireSetting<MinimumGroupSize>(written, numbers => TelltaleSettings.CheckedMinimumGroupSize(numbers), path);
+        RequireSetting<MinimumGroupSize, MinimumGroupSize>(TextOf(written), numbers => TelltaleSettings.CheckedMinimumGroupSize(numbers), path);
 
     /// <summary>
     /// Reads and checks the <c>briefVisitThresholds</c> that the file at <paramref name="path"/> holds as
@@ -57,17 +57,45 @@ public static class ConfigFile
     /// thresholds are checked, and the statuses wait for the check of the text about to be written.
     /// <c>discover</c> asks this of an existing file before it calls Jira (owner decision D70). One thing
     /// never reaches it: a status listed twice stops <c>discover</c> earlier, where it parses the file, with
-    /// that reader's own message and not this one's.
+    /// that reader's own message and not this one's. Returns the thresholds, checked, for the check of the
+    /// setting that is applied with them (<see cref="RequireBriefVisitTreatment"/>).
     /// </summary>
-    internal static void RequireBriefVisitThresholds(JsonNode? written, StatusRoles? roles, string path) =>
-        RequireSetting<BriefVisitThresholdsInMinutes>(written, thresholds => TelltaleSettings.CheckedBriefVisitThresholds(thresholds, roles), path);
+    internal static IReadOnlyDictionary<string, TimeSpan> RequireBriefVisitThresholds(JsonNode? written, StatusRoles? roles, string path) =>
+        RequireSetting<BriefVisitThresholdsInMinutes, IReadOnlyDictionary<string, TimeSpan>>(TextOf(written), thresholds => TelltaleSettings.CheckedBriefVisitThresholds(thresholds, roles), path);
 
-    /// <summary>One setting, read from what the file holds for it and then checked by its rule. A null in the file reaches the setting's converter as the JSON null it is, and is refused there.</summary>
-    private static void RequireSetting<T>(JsonNode? written, Action<T> check, string path)
+    /// <summary>
+    /// Reads and checks the <c>briefVisitTreatment</c> that the file at <paramref name="path"/> holds, by the
+    /// converter and the rule <see cref="ReadAsync"/> applies to it, and with the same message for whatever
+    /// they refuse. <paramref name="written"/> is the setting's own text, cut from the file as it was typed
+    /// and not written out again from what was parsed: the setting's reader then sees what <c>run</c>'s
+    /// reader sees, a value that is no text at all included.
+    /// <paramref name="thresholds"/> are the file's thresholds, checked, and empty when it lists none: the
+    /// setting is refused when it leaves brief visits out and there are none to leave out. <paramref name="roles"/>
+    /// are the file's status roles, or null when it has none yet: then whether a listed status has the work
+    /// role waits for the check of the text about to be written, as the listed statuses do (owner decision
+    /// D73). <c>discover</c> asks this of an existing file before it calls Jira (owner decision D70).
+    /// </summary>
+    internal static void RequireBriefVisitTreatment(string written, IReadOnlyDictionary<string, TimeSpan> thresholds, StatusRoles? roles, string path) =>
+        RequireSetting<BriefVisitTreatmentSetting, BriefVisitTreatmentSetting>(written, treatment => TelltaleSettings.CheckedBriefVisitTreatment(treatment, thresholds, roles), path);
+
+    /// <summary>
+    /// Reads the <c>briefVisitTreatment</c> that the file at <paramref name="path"/> holds as the text
+    /// <paramref name="written"/>, by the converter <see cref="ReadAsync"/> reads it with, and applies no
+    /// rule. <c>discover</c> asks this of a file its own reader could not read: when the fault is under this
+    /// setting, the setting's reader names it, and repeats nothing written there (owner decision D105).
+    /// </summary>
+    internal static void RequireReadableBriefVisitTreatment(string written, string path) =>
+        RequireSetting<BriefVisitTreatmentSetting, BriefVisitTreatmentSetting>(written, treatment => treatment, path);
+
+    /// <summary>What the file holds for a setting, as JSON text. A JSON <c>null</c> is a null node.</summary>
+    private static string TextOf(JsonNode? written) => written?.ToJsonString() ?? "null";
+
+    /// <summary>One setting, read from the JSON text the file holds for it and then checked by its rule, which gives the setting as checked. A null in the file reaches the setting's converter as the JSON null it is, and is refused there.</summary>
+    private static TChecked RequireSetting<T, TChecked>(string written, Func<T, TChecked> check, string path)
     {
         try
         {
-            check(JsonSerializer.Deserialize<T>(written?.ToJsonString() ?? "null", Options)!);
+            return check(JsonSerializer.Deserialize<T>(written, Options)!);
         }
         catch (Exception exception) when (IsRefusal(exception))
         {
