@@ -160,20 +160,22 @@ public class DiscoverBriefVisitTreatmentTests
     }
 
     [Test]
-    public async Task A_rerun_on_a_file_with_a_part_written_twice_stops_before_jira_is_called_and_leaves_the_file_as_it_is()
+    [Arguments("timeInStatus", "briefVisitTreatment.timeInStatus is written twice.")]
+    [Arguments("synthetic-pasted-token", UnknownPart)]
+    public async Task A_rerun_on_a_file_with_a_key_written_twice_under_the_setting_says_what_run_says_and_prints_no_part_of_the_key(string key, string refusal)
     {
-        // discover's own reader stops at a key written twice, before any setting is checked (owner decision
-        // D74). The key it names here is one of the tool's two part names, never a value.
+        // Owner decision D105. discover's own reader stops at a key written twice and quotes it (D74); a key
+        // typed under this setting could be a secret, so here the setting's reader speaks instead.
         await using var pipeline = new PipelineHarness();
         await DiscoverAsSetupAsync(pipeline, DiscoverTests.FirstDiscover);
         await EditWrittenConfigAsync(pipeline, config =>
         {
             config["briefVisitThresholds"] = new JsonObject { [Workflow.Development.Id] = 5 };
-            config["briefVisitTreatment"] = new JsonObject { ["timeInStatus"] = "exclude" };
+            config["briefVisitTreatment"] = new JsonObject { [key] = "exclude" };
         });
-        const string Once = "\"timeInStatus\":\"exclude\"";
-        var twice = (await File.ReadAllTextAsync(pipeline.ConfigPath)).Replace(Once, Once + ",\"timeInStatus\":\"synthetic-pasted-token\"", StringComparison.Ordinal);
-        await Assert.That(twice).Contains(Once + ",\"timeInStatus\":\"synthetic-pasted-token\"");
+        var once = $"\"{key}\":\"exclude\"";
+        var twice = (await File.ReadAllTextAsync(pipeline.ConfigPath)).Replace(once, $"{once},{once}", StringComparison.Ordinal);
+        await Assert.That(twice).Contains($"{once},{once}");
         await File.WriteAllTextAsync(pipeline.ConfigPath, twice);
         var requestsBefore = pipeline.Jira.Handler.Requests.Count;
         pipeline.Out.GetStringBuilder().Clear();
@@ -183,16 +185,133 @@ public class DiscoverBriefVisitTreatmentTests
 
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(ran).IsEqualTo(1);
-        var error = pipeline.Error.ToString().ReplaceLineEndings("\n");
-        await Assert.That(error).StartsWith($"The configuration file {pipeline.ConfigPath} cannot be read (");
-        await Assert.That(error).EndsWith(
-            "), so it was left as it is. Correct it or move it away, then run discover again.\n"
-            + $"The configuration file {pipeline.ConfigPath} is not valid: briefVisitTreatment.timeInStatus is written twice.\n");
-        await Assert.That(error).DoesNotContain("synthetic-pasted-token");
-        await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(requestsBefore);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"discover did not write {pipeline.ConfigPath}, because run would refuse it: The configuration file {pipeline.ConfigPath} is not valid: {refusal}\n"
+            + $"The configuration file {pipeline.ConfigPath} is not valid: {refusal}\n");
         await Assert.That(pipeline.Out.ToString()).IsEmpty();
+        await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(requestsBefore);
         await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(twice);
         await Assert.That((await pipeline.ReadAllFilesAsync()).Keys).IsEquivalentTo(["telltale.json"]);
+    }
+
+    [Test]
+    public async Task A_key_written_twice_under_another_setting_is_still_refused_by_discovers_own_reader()
+    {
+        // D105 narrows D74 for briefVisitTreatment only: elsewhere discover's reader says what it said.
+        await using var pipeline = new PipelineHarness();
+        await DiscoverAsSetupAsync(pipeline, DiscoverTests.FirstDiscover);
+        await EditWrittenConfigAsync(pipeline, config =>
+        {
+            config["briefVisitThresholds"] = new JsonObject { [Workflow.Development.Id] = 5 };
+            config["briefVisitTreatment"] = new JsonObject { ["timeInStatus"] = "exclude" };
+        });
+        var once = $"\"{Workflow.Development.Id}\":5";
+        var twice = (await File.ReadAllTextAsync(pipeline.ConfigPath)).Replace(once, $"{once},{once}", StringComparison.Ordinal);
+        await Assert.That(twice).Contains($"{once},{once}");
+        await File.WriteAllTextAsync(pipeline.ConfigPath, twice);
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(RerunThatChangesTheTimeZone);
+
+        await Assert.That(exit).IsEqualTo(1);
+        var error = pipeline.Error.ToString().ReplaceLineEndings("\n");
+        await Assert.That(error).StartsWith($"The configuration file {pipeline.ConfigPath} cannot be read (");
+        await Assert.That(error).EndsWith("), so it was left as it is. Correct it or move it away, then run discover again.\n");
+        await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(twice);
+    }
+
+    [Test]
+    public async Task A_rerun_refuses_a_value_that_is_not_text_json_can_hold_as_run_does_before_jira_is_called()
+    {
+        // An escape for half of a character pair: no text at all, so neither label. It is refused as any other value is.
+        await using var pipeline = new PipelineHarness();
+        await DiscoverAsSetupAsync(pipeline, DiscoverTests.FirstDiscover);
+        await EditWrittenConfigAsync(pipeline, config =>
+        {
+            config["briefVisitThresholds"] = new JsonObject { [Workflow.Development.Id] = 5 };
+            config["briefVisitTreatment"] = new JsonObject { ["timeInStatus"] = "to-be-replaced" };
+        });
+        var unpaired = (await File.ReadAllTextAsync(pipeline.ConfigPath)).Replace("\"to-be-replaced\"", "\"\\uD800\"", StringComparison.Ordinal);
+        await Assert.That(unpaired).Contains("\"timeInStatus\":\"\\uD800\"");
+        await File.WriteAllTextAsync(pipeline.ConfigPath, unpaired);
+        var requestsBefore = pipeline.Jira.Handler.Requests.Count;
+        pipeline.Out.GetStringBuilder().Clear();
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(RerunThatChangesTheTimeZone);
+        var ran = await pipeline.RunWithFilesAsTheyAreAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(ran).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"discover did not write {pipeline.ConfigPath}, because run would refuse it: The configuration file {pipeline.ConfigPath} is not valid: {TimeInStatusValue}\n"
+            + $"The configuration file {pipeline.ConfigPath} is not valid: {TimeInStatusValue}\n");
+        await Assert.That(pipeline.Out.ToString()).IsEmpty();
+        await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(requestsBefore);
+        await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(unpaired);
+    }
+
+    [Test]
+    public async Task With_two_faults_in_the_file_discover_and_run_each_report_the_first_one_they_find()
+    {
+        // Owner decision D104. Development's threshold is zero and the treatment has a part the tool does not
+        // know. discover checks setting by setting and stops at the threshold; run reads the whole file first
+        // and stops at the part. Each message is true of the file, and nothing is fetched or written.
+        await using var pipeline = new PipelineHarness();
+        await DiscoverAsSetupAsync(pipeline, DiscoverTests.FirstDiscover);
+        await EditWrittenConfigAsync(pipeline, config =>
+        {
+            config["briefVisitThresholds"] = new JsonObject { [Workflow.Development.Id] = 0 };
+            config["briefVisitTreatment"] = new JsonObject { ["synthetic-pasted-token"] = "exclude" };
+        });
+        var edited = await File.ReadAllTextAsync(pipeline.ConfigPath);
+        var requestsBefore = pipeline.Jira.Handler.Requests.Count;
+        pipeline.Out.GetStringBuilder().Clear();
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(RerunThatChangesTheTimeZone);
+        var ran = await pipeline.RunWithFilesAsTheyAreAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(ran).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"discover did not write {pipeline.ConfigPath}, because run would refuse it: The configuration file {pipeline.ConfigPath} is not valid: "
+            + "briefVisitThresholds: every threshold must be written as a number of minutes greater than zero, and one is not.\n"
+            + $"The configuration file {pipeline.ConfigPath} is not valid: {UnknownPart}\n");
+        await Assert.That(pipeline.Out.ToString()).IsEmpty();
+        await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(requestsBefore);
+        await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(edited);
+    }
+
+    [Test]
+    public async Task A_rerun_keeps_a_setting_written_first_in_the_file_with_comments_and_a_trailing_comma()
+    {
+        // The file as an owner may lay it out by hand. The setting is kept as the value it is, and in its
+        // place; the comments go with every rewrite, as discover says.
+        await using var pipeline = new PipelineHarness();
+        await DiscoverAsSetupAsync(pipeline, DiscoverTests.FirstDiscover);
+        await EditWrittenConfigAsync(pipeline, config => config["briefVisitThresholds"] = new JsonObject { [Workflow.Development.Id] = 5 });
+        var written = await File.ReadAllTextAsync(pipeline.ConfigPath);
+        await Assert.That(written).StartsWith("{");
+        const string ByHand =
+            """
+            {
+              /* What is done with brief visits. */
+              "briefVisitTreatment": {
+                // Left out of both.
+                "cycleTime": "exclude",
+                "timeInStatus": "exclude",
+              },
+
+            """;
+        await File.WriteAllTextAsync(pipeline.ConfigPath, ByHand + written[1..]);
+        pipeline.Out.GetStringBuilder().Clear();
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(RerunThatChangesTheTimeZone);
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        var rewritten = await ReadWrittenConfigAsync(pipeline);
+        await Assert.That(rewritten["timeZone"]!.GetValue<string>()).IsEqualTo("Europe/London");
+        await Assert.That(rewritten.AsObject().First().Key).IsEqualTo("briefVisitTreatment");
+        await Assert.That(rewritten["briefVisitTreatment"]?.ToJsonString()).IsEqualTo("""{"cycleTime":"exclude","timeInStatus":"exclude"}""");
     }
 
     [Test]

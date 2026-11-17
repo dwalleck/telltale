@@ -87,6 +87,22 @@ public class RefusedBriefVisitTreatmentTests
 
     [Test]
     [MethodDataSource(nameof(EveryCommand))]
+    public async Task A_value_that_is_not_text_json_can_hold_is_refused_by_every_command_as_any_other_value_is(string command)
+    {
+        // An escape for half of a character pair: no text at all, so neither label.
+        await using var pipeline = new PipelineHarness();
+        ListDevelopment(pipeline);
+        pipeline.Config["briefVisitTreatment"] = new JsonObject { ["timeInStatus"] = "to-be-replaced" };
+        pipeline.RawConfig = pipeline.Config.ToJsonString().Replace("\"to-be-replaced\"", "\"\\uD800\"", StringComparison.Ordinal);
+        await Assert.That(pipeline.RawConfig).Contains("\"timeInStatus\":\"\\uD800\"");
+
+        var exit = await RunAsync(pipeline, command);
+
+        await AssertRefusedAsync(pipeline, exit, "briefVisitTreatment.timeInStatus must be written as \"count\" or \"exclude\".");
+    }
+
+    [Test]
+    [MethodDataSource(nameof(EveryCommand))]
     public async Task A_part_written_twice_is_refused_by_every_command_and_neither_value_is_repeated(string command)
     {
         await using var pipeline = new PipelineHarness();

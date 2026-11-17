@@ -69,9 +69,26 @@ internal sealed class BriefVisitTreatmentConverter : JsonConverter<BriefVisitTre
         }
 
         // A number, a boolean, a null, a list and an object are not labels, and neither is any other text.
-        return reader.TokenType == JsonTokenType.String && BriefVisitTreatments.TryParse(reader.GetString(), out var treatment)
+        return reader.TokenType == JsonTokenType.String && BriefVisitTreatments.TryParse(TextOf(ref reader), out var treatment)
             ? treatment
             : throw new JsonException($"{Setting}.{part} must be written as \"{BriefVisitTreatments.Count}\" or \"{BriefVisitTreatments.Exclude}\".");
+    }
+
+    /// <summary>
+    /// The text of the string the reader stands on, or null when it is no text at all: JSON can spell half of
+    /// a character pair (<c>"\uD800"</c>), which no string can hold. That is no label either, and is refused
+    /// as any other value is, not by the reader's own failure.
+    /// </summary>
+    private static string? TextOf(ref Utf8JsonReader reader)
+    {
+        try
+        {
+            return reader.GetString();
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Nothing writes the setting: <c>discover</c> carries over the text the file has, and no configuration is ever serialised.</summary>
