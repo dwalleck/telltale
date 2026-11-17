@@ -83,6 +83,14 @@ public class BriefVisitsLeftOutSmallGroupTests
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).Contains("\n| Fake Development (adjusted: see the footer) | 4 | 2.0 | 8.0 |\n");
         await Assert.That(report).Contains("\n- Fake Development: 4 issues had a visit shorter than 5 minutes" + ReportText.LeftOutOfTheRow("3") + "\n");
+
+        // What the owner accepted (D106), as shown: the count less the number left out is the number of issues
+        // that had a brief visit and are still in the row. Here it is one person's issue. The tool neither
+        // defines nor withholds that number.
+        await Assert.That(await QueryAsync(
+            pipeline,
+            "SELECT brief_visit_issue_count - left_out_issue_count AS had_a_brief_visit_and_are_still_in_the_row FROM brief_visits_per_sprint;")).IsEqualTo(
+            "| had_a_brief_visit_and_are_still_in_the_row |\n| --- |\n| 1 |\n");
     }
 
     [Test]
@@ -232,8 +240,13 @@ public class BriefVisitsLeftOutSmallGroupTests
     }
 
     [Test]
-    public async Task No_query_over_the_metric_views_tells_nothing_left_out_from_a_withheld_number_or_one_withheld_number_from_another()
+    [Arguments(true, 3)]
+    [Arguments(false, 0)]
+    public async Task No_query_over_the_metric_views_tells_nothing_left_out_from_a_withheld_number_or_one_withheld_number_from_another(
+        bool leftOutOfCycleTimeToo, int deliveredWithNoCycleTime)
     {
+        // Run with brief visits left out of time in status and of cycle time, and of time in status alone.
+        // (Left out of cycle time alone there is no number left out of a row to withhold.)
         // Five stores whose number left out of Development in sprint 41 is withheld: nobody was left out; one
         // issue of one person; two issues of two people; four issues of two people; two people's and an
         // unassigned one. Around it are figures a reader could try to subtract from: the row's issue count and
@@ -241,13 +254,18 @@ public class BriefVisitsLeftOutSmallGroupTests
         // in the same sprint and of Development in sprint 42. Then a store whose number is shown: three issues
         // of three people.
         // What this test claims is that the withheld number cannot be recovered, or told from nothing, in
-        // these stores. It does not claim that for every store: the tests below pin what the owner accepted.
+        // these stores. It does not claim that for every store. What the owner accepted is pinned here as these
+        // stores show it, and case by case in the tests around this one: a line with no row (D98: Review in
+        // sprint 41 and Development in sprint 42, whose numbers are shown); the delivered count less the
+        // bucket counts (D94); the number of cycles less the shown brief visit counts (D97), which holds
+        // nothing here because no brief visit count is withheld beside it.
         string[] withheld = ["", "1", "1,3", "1,2,3,4", "1,3,8"];
         var read = new List<(string Reports, string Views, string Attempts)>();
         foreach (var leftOut in withheld.Append("1,3,5"))
         {
             await using var pipeline = new PipelineHarness();
             AddStore(pipeline, Numbers(leftOut));
+            LeaveBriefVisitsOut(pipeline, leftOutOfCycleTimeToo);
             await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"], ["report", "--sprint", "42"]);
 
             read.Add((
@@ -258,7 +276,10 @@ public class BriefVisitsLeftOutSmallGroupTests
                     LeftOutSql,
                     "SELECT SUM(left_out_issue_count) AS shown, COUNT(left_out_issue_count) AS numbers, SUM(left_out_suppressed) AS withheld FROM brief_visits_per_sprint;",
                     "SELECT b.sprint_id, b.status_name, t.issue_count, t.suppressed AS row_suppressed, b.brief_visit_issue_count - t.issue_count AS more_counted_than_remain, t.issue_count + b.left_out_issue_count AS row_before "
-                    + "FROM brief_visits_per_sprint b LEFT JOIN time_in_status_per_sprint t ON t.sprint_id = b.sprint_id AND t.status_id = b.status_id ORDER BY b.sprint_id, b.board_position;")));
+                    + "FROM brief_visits_per_sprint b LEFT JOIN time_in_status_per_sprint t ON t.sprint_id = b.sprint_id AND t.status_id = b.status_id ORDER BY b.sprint_id, b.board_position;",
+                    "SELECT c.sprint_id, c.issue_count AS cycles, c.issue_count - (SELECT SUM(b.brief_visit_issue_count) FROM brief_visits_per_sprint b WHERE b.sprint_id = c.sprint_id) AS less_the_shown_counts, "
+                    + "d.delivered_count - COALESCE((SELECT SUM(k.issue_count) FROM cycle_time_per_sprint_and_bucket k WHERE k.sprint_id = c.sprint_id), 0) AS delivered_with_no_cycle_time "
+                    + "FROM cycle_starts_with_brief_visit_per_sprint c JOIN delivered_per_sprint d ON d.sprint_id = c.sprint_id ORDER BY c.sprint_id;")));
         }
 
         // What the first store gives: the withheld number is null beside the shown ones, and no sum or
@@ -279,12 +300,20 @@ public class BriefVisitsLeftOutSmallGroupTests
             | 41 | Fake Review | NULL | NULL | NULL | NULL |
             | 42 | Fake Development | NULL | NULL | NULL | NULL |
             | 42 | Fake Review | 3 | 0 | NULL | NULL |
+            | sprint_id | cycles | less_the_shown_counts | delivered_with_no_cycle_time |
+            | --- | --- | --- | --- |
 
-            """.ReplaceLineEndings("\n"));
+            """.ReplaceLineEndings("\n")
+
+            // D97: every brief visit count of sprint 41 is shown, so the subtraction gives no withheld one.
+            // D94: left out of cycle time, each sprint's three delivered issues have no cycle time, which is
+            // the number of cycles that start with a brief visit, shown here; counted, all have one.
+            + $"| 41 | 3 | -8 | {deliveredWithNoCycleTime} |\n"
+            + $"| 42 | 3 | 0 | {deliveredWithNoCycleTime} |\n");
         var developmentLine = "\n- Fake Development: 8 issues had a visit shorter than 5 minutes" + ReportText.LeftOutOfTheRow("suppressed") + "\n";
         await Assert.That(read[0].Reports).Contains(
             developmentLine + "- Fake Review: 3 issues had a visit shorter than 2 minutes" + ReportText.LeftOutOfTheRow("3") + "\n"
-            + ReportText.CyclesThatStartWithBriefVisitAndHaveNoCycleTime("3"));
+            + (leftOutOfCycleTimeToo ? ReportText.CyclesThatStartWithBriefVisitAndHaveNoCycleTime("3") : ReportText.CyclesThatStartWithBriefVisit("3")));
 
         // The marks are there with nothing left out, so a mark cannot tell nothing from a withheld number.
         await Assert.That(read[0].Reports).Contains("\n| Fake Development" + Mark + " | 8 | 2.0 | 16.0 |\n");
@@ -351,18 +380,22 @@ public class BriefVisitsLeftOutSmallGroupTests
     }
 
     [Test]
-    [Arguments(1, 3, 2, 1, "| 2 | suppressed | suppressed |")]
-    [Arguments(3, 5, 3, 2, "| 3 | 2.0 | 6.0 |")]
-    public async Task A_shown_brief_visit_count_beside_what_remains_of_its_row_gives_a_lower_bound_of_a_withheld_number_left_out(
-        int withALongStayToo, int briefVisits, int remain, int atLeastLeftOut, string rowCells)
+    [Arguments(1, true, 3, 2, 1, 2, "| 2 | suppressed | suppressed |")]
+    [Arguments(3, false, 5, 3, 2, 4, "| 3 | 2.0 | 6.0 |")]
+    [Arguments(1, false, 3, 1, 2, 2, "| 1 | suppressed | suppressed |")]
+    public async Task A_shown_brief_visit_count_beside_what_remains_of_its_row_bounds_a_withheld_number_left_out_and_with_one_issue_in_the_row_gives_it(
+        int withALongStayToo, bool andOneWithNoBriefVisit, int briefVisits, int remain, int atLeastLeftOut, int atMostLeftOut, string rowCells)
     {
-        // What the owner accepted (D98, as widened on 2026-11-17), as shown. Two people's issues were caught up through Development and left out, so
-        // the number left out is two and withheld. One or three more people's issues had a brief visit and a
-        // stay of two days, and with one, a fourth person's issue did two days there. The brief visit count is
-        // of the row before (D93, D99) and is shown; the row's issue count is of what remains and is always
-        // shown. Every issue left out had a brief visit, so the count less the row's issue count is the least
-        // the withheld number can be: it is not nothing. With one such issue the row that remains has two
-        // people behind it and reads "suppressed" beside the shown count, which says the same.
+        // What the owner accepted (D98, as widened twice on 2026-11-17), as shown. Two people's issues were
+        // caught up through Development and left out, so the number left out is two and withheld. One or three
+        // more people's issues had a brief visit and a stay of two days, and in the first case a fourth
+        // person's issue did two days there with no brief visit. The brief visit count is of the row before
+        // (D93, D99) and is shown; the row's issue count is of what remains and is always shown. Every issue
+        // left out had a brief visit, so the count less the row's issue count is the least the withheld number
+        // can be: it is not nothing. A row that remains with two people or one behind it reads "suppressed"
+        // beside the shown count, which says the same. And a withheld number is less than a shown count (were
+        // it the count, the same issues and people would be behind both), so with one issue in the row the
+        // least and the most meet: the withheld number is two.
         await using var pipeline = new PipelineHarness();
         AddSprint41WithItsTeam(pipeline.Jira);
         Scenarios.CaughtUp(pipeline.Jira, "FAKE-1", People.One);
@@ -377,7 +410,7 @@ public class BriefVisitsLeftOutSmallGroupTests
                 .Moved(Local(2026, 1, 12, 9), Workflow.Done);
         }
 
-        if (withALongStayToo == 1)
+        if (andOneWithNoBriefVisit)
         {
             AddTwoDaysInDevelopment(pipeline.Jira, "FAKE-11", People.Four);
         }
@@ -392,10 +425,10 @@ public class BriefVisitsLeftOutSmallGroupTests
         await Assert.That(report).Contains($"\n- Fake Development: {briefVisits} issues had a visit shorter than 5 minutes" + ReportText.LeftOutOfTheRow("suppressed") + "\n");
         await Assert.That(await QueryAsync(
             pipeline,
-            "SELECT b.brief_visit_issue_count, t.issue_count, b.brief_visit_issue_count - t.issue_count AS at_least_left_out, b.left_out_issue_count, b.left_out_suppressed "
+            "SELECT b.brief_visit_issue_count, t.issue_count, b.brief_visit_issue_count - t.issue_count AS at_least_left_out, b.brief_visit_issue_count - 1 AS at_most_left_out, b.left_out_issue_count, b.left_out_suppressed "
             + "FROM brief_visits_per_sprint b JOIN time_in_status_per_sprint t ON t.sprint_id = b.sprint_id AND t.status_id = b.status_id;")).IsEqualTo(
-            "| brief_visit_issue_count | issue_count | at_least_left_out | left_out_issue_count | left_out_suppressed |\n| --- | --- | --- | --- | --- |\n"
-            + $"| {briefVisits} | {remain} | {atLeastLeftOut} | NULL | 1 |\n");
+            "| brief_visit_issue_count | issue_count | at_least_left_out | at_most_left_out | left_out_issue_count | left_out_suppressed |\n| --- | --- | --- | --- | --- | --- |\n"
+            + $"| {briefVisits} | {remain} | {atLeastLeftOut} | {atMostLeftOut} | NULL | 1 |\n");
     }
 
     [Test]

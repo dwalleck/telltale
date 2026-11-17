@@ -35,8 +35,11 @@
 -- row in time_in_status_per_sprint shows that every issue of the status was left out, so that its number and
 -- its count are each at least one also when they are withheld. A shown count larger than the issue count of
 -- the status's row there shows that the number is at least their difference, and a count shown beside a row
--- that is suppressed there shows that it is at least one. The owner accepted each, and no count is withheld
--- for it (D98).
+-- that is suppressed there shows that it is at least one. A withheld number is also less than a shown count
+-- (were it the count, the same issues would be behind both), so with one issue in the row it is the number
+-- itself. The owner accepted each, and no count is withheld for it (D98). A shown count less a shown number
+-- is how many issues had a brief visit and are still in the row, which can rest on fewer assignees than a
+-- figure needs: this view neither defines nor withholds that number (D106).
 CREATE VIEW brief_visits_per_sprint AS
 WITH threshold AS (
     SELECT CAST(j.key AS TEXT) AS status_id, CAST(j.value AS REAL) AS threshold_minutes
