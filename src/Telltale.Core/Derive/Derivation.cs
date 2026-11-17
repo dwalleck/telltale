@@ -88,10 +88,15 @@ public static class Derivation
             var reopens = Cycles.ReopenCount(timeline.Entries, roles);
             var outcome = Delivery.Of(issue.StatusId, issue.ResolutionId, timeline.Entries, delivery);
 
+            // The issue's stays are the same for its cycle and for every sprint: worked out once, when first needed.
+            IReadOnlyList<Stay>? stays = null;
+
             // The one place an issue's cycle is built from its outcome.
             cycles.Add(outcome switch
             {
-                Delivered delivered => DeliveredCycle(issue, delivered, deliverySprints.For(delivered.At), Cycles.Measure(timeline.Entries, roles, delivered.At, calendar), pointChanges[issue.IssueId], reopens),
+                Delivered delivered => DeliveredCycle(
+                    issue, delivered, deliverySprints.For(delivered.At), Cycles.Measure(timeline.Entries, roles, delivered.At, calendar), pointChanges[issue.IssueId], reopens,
+                    startsWithBriefVisit: checksBriefVisits && Cycles.StartsWithBriefVisit(stays ??= BriefVisits.Stays(timeline), roles, settings.BriefVisitThresholds)),
 
                 // An abandoned issue reached done, so it has a cycle end, but it is not a delivery: it belongs to
                 // no delivery sprint and has no cycle time.
@@ -107,8 +112,6 @@ public static class Derivation
             // gives nothing, so it is not measured at all: most issues were in one or two of the board's sprints.
             var memberOf = membership.Intervals.Select(interval => interval.SprintId).ToHashSet(StringComparer.Ordinal);
 
-            // The issue's stays are the same for every sprint: worked out once, when the first sprint needs them.
-            IReadOnlyList<Stay>? stays = null;
             foreach (var window in windows.Where(counted => memberOf.Contains(counted.SprintId)))
             {
                 // The time this sprint counts of this issue, worked out once for the time in status and the brief visits.
@@ -133,7 +136,7 @@ public static class Derivation
             cycles,
             memberships,
             sprintStatusTimes,
-            [.. roles.StatusIds.Select((statusId, index) => new BoardStatus(statusId, index + 1, roles.IsDone(statusId)))])
+            [.. roles.StatusIds.Select((statusId, index) => new BoardStatus(statusId, index + 1, roles.IsDone(statusId), roles.IsWork(statusId)))])
         {
             AsOf = asOf,
             Anomalies = anomalies,
@@ -147,7 +150,7 @@ public static class Derivation
     /// re-estimate does not move it (ADR-0006). An issue that never entered a work status has no cycle start;
     /// its bucket is its estimate at the delivery moment (owner decision D35).
     /// </summary>
-    private static IssueCycle DeliveredCycle(RawIssue issue, Delivered delivered, string? deliverySprintId, Cycle? cycle, IEnumerable<PointChange> pointChanges, int reopens) =>
+    private static IssueCycle DeliveredCycle(RawIssue issue, Delivered delivered, string? deliverySprintId, Cycle? cycle, IEnumerable<PointChange> pointChanges, int reopens, bool startsWithBriefVisit) =>
         IssueCycle.OfDelivered(
             issue.IssueId,
             delivered.At,
@@ -156,7 +159,8 @@ public static class Derivation
             cycle is { } measured
                 ? PointHistory.EstimateAt(measured.Start, measured.StartHistoryId, issue.StoryPoints, pointChanges)
                 : PointHistory.EstimateAt(delivered.At, delivered.HistoryId, issue.StoryPoints, pointChanges),
-            reopens);
+            reopens,
+            startsWithBriefVisit);
 }
 
 /// <summary>Everything a rebuild is decided with besides the raw data and the as-of time: how a delivery is decided, the business calendar, and the brief visit thresholds.</summary>

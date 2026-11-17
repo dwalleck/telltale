@@ -51,7 +51,8 @@ public class WhichVisitsCountTests
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
 
         await Assert.That(await QueryAsync(pipeline, CountsSql)).IsEqualTo(CountsHead + DevelopmentCounted);
-        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith("\n- Fake Development: 1 issue had a visit shorter than 5 minutes\n");
+        // The issue's cycle starts with its two days in Development, so it does not start with a brief visit.
+        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith("\n- Fake Development: 1 issue had a visit shorter than 5 minutes\n" + ReportText.CyclesThatStartWithBriefVisit("0"));
     }
 
     [Test]
@@ -72,7 +73,8 @@ public class WhichVisitsCountTests
 
         await Assert.That(await QueryAsync(pipeline, CountsSql)).IsEqualTo(CountsHead + "| 41 | Fake Review | 1 | 0 |\n");
         var report = await pipeline.ReadReportAsync(41);
-        await Assert.That(report).EndsWith("\n- Fake Review: 0 issues had a visit shorter than 5 minutes\n");
+        // The issue's cycle starts with the stay of no length in Development, which is a brief visit.
+        await Assert.That(report).EndsWith("\n- Fake Review: 0 issues had a visit shorter than 5 minutes\n" + ReportText.CyclesThatStartWithBriefVisit("1"));
         await Assert.That(report).DoesNotContain("Fake Development:");
     }
 
@@ -94,9 +96,9 @@ public class WhichVisitsCountTests
     }
 
     [Test]
-    [Arguments(29, "1 issue had a visit shorter than 0.5 minutes")]
-    [Arguments(30, "0 issues had a visit shorter than 0.5 minutes")]
-    public async Task A_threshold_of_half_a_minute_is_applied_as_written(int secondsInDevelopment, string expectedLine)
+    [Arguments(29, "1 issue had a visit shorter than 0.5 minutes", "1")]
+    [Arguments(30, "0 issues had a visit shorter than 0.5 minutes", "0")]
+    public async Task A_threshold_of_half_a_minute_is_applied_as_written(int secondsInDevelopment, string expectedLine, string cyclesThatStartWithOne)
     {
         await using var pipeline = SprintFortyOne();
         var wednesday = Local(2026, 1, 7, 10);
@@ -108,7 +110,7 @@ public class WhichVisitsCountTests
 
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
 
-        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith($"\n- Fake Development: {expectedLine}\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith($"\n- Fake Development: {expectedLine}\n" + ReportText.CyclesThatStartWithBriefVisit(cyclesThatStartWithOne));
     }
 
     [Test]
@@ -197,7 +199,7 @@ public class WhichVisitsCountTests
             - Issues delivered between sprints, in the whole store: 0
             - Fake Review: 0 issues had a visit shorter than 5 minutes
 
-            """.ReplaceLineEndings("\n"));
+            """.ReplaceLineEndings("\n") + ReportText.CyclesThatStartWithBriefVisit("0"));
     }
 
     [Test]

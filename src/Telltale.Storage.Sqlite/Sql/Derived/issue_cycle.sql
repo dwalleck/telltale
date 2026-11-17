@@ -8,6 +8,11 @@
 -- delivered, or it never entered a work status). point_bucket is set for delivered issues only: null for
 -- one that is unestimated, and for every issue that is not delivered, whatever its estimate.
 -- reopen_count is the number of transitions out of a done status, for every issue, delivered or not.
+-- starts_with_brief_visit is 1 when the issue is delivered and its cycle starts with a brief visit (GLOSSARY:
+-- Brief visit; owner decision D90): the stay that begins at the cycle's start is a brief visit under its
+-- status's threshold. Derive decides (Cycles.cs); cycle_starts_with_brief_visit_per_sprint counts the issues
+-- and applies the minimum group size. It is 0 for every issue when no status is listed. It is a flag and
+-- nothing else: no duration, no time.
 CREATE TABLE issue_cycle (
     issue_id           TEXT PRIMARY KEY,
     cycle_start        TEXT NULL,
@@ -17,5 +22,6 @@ CREATE TABLE issue_cycle (
     point_bucket       REAL NULL,
     delivered          INTEGER NOT NULL,
     delivery_sprint_id TEXT NULL,
-    reopen_count       INTEGER NOT NULL
+    reopen_count       INTEGER NOT NULL,
+    starts_with_brief_visit INTEGER NOT NULL
 ) STRICT;

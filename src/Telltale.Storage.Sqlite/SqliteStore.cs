@@ -400,14 +400,14 @@ public sealed class SqliteStore : ITelltaleStore
             connection,
             transaction,
             """
-            INSERT INTO issue_cycle (issue_id, cycle_start, cycle_end, calendar_days, business_days, point_bucket, delivered, delivery_sprint_id, reopen_count)
-            VALUES (@issueId, @cycleStart, @cycleEnd, @calendarDays, @businessDays, @pointBucket, @delivered, @deliverySprintId, @reopenCount);
+            INSERT INTO issue_cycle (issue_id, cycle_start, cycle_end, calendar_days, business_days, point_bucket, delivered, delivery_sprint_id, reopen_count, starts_with_brief_visit)
+            VALUES (@issueId, @cycleStart, @cycleEnd, @calendarDays, @businessDays, @pointBucket, @delivered, @deliverySprintId, @reopenCount, @startsWithBriefVisit);
             """,
-            ["@issueId", "@cycleStart", "@cycleEnd", "@calendarDays", "@businessDays", "@pointBucket", "@delivered", "@deliverySprintId", "@reopenCount"],
+            ["@issueId", "@cycleStart", "@cycleEnd", "@calendarDays", "@businessDays", "@pointBucket", "@delivered", "@deliverySprintId", "@reopenCount", "@startsWithBriefVisit"],
             derived.IssueCycles.Select(cycle => new object?[]
             {
                 cycle.IssueId, StoredTime.ToStored(cycle.Cycle?.Start), StoredTime.ToStored(cycle.CycleEnd), cycle.Cycle?.CalendarDays, cycle.Cycle?.BusinessDays,
-                cycle.PointBucket, cycle.Delivered ? 1L : 0L, cycle.DeliverySprintId, (long)cycle.ReopenCount,
+                cycle.PointBucket, cycle.Delivered ? 1L : 0L, cycle.DeliverySprintId, (long)cycle.ReopenCount, cycle.StartsWithBriefVisit ? 1L : 0L,
             }),
             cancellationToken);
 
@@ -430,9 +430,9 @@ public sealed class SqliteStore : ITelltaleStore
         await ExecuteForEachRowAsync(
             connection,
             transaction,
-            "INSERT INTO board_status (status_id, position, is_done) VALUES (@statusId, @position, @isDone);",
-            ["@statusId", "@position", "@isDone"],
-            derived.BoardStatuses.Select(status => new object?[] { status.StatusId, (long)status.Position, status.IsDone ? 1L : 0L }),
+            "INSERT INTO board_status (status_id, position, is_done, is_work) VALUES (@statusId, @position, @isDone, @isWork);",
+            ["@statusId", "@position", "@isDone", "@isWork"],
+            derived.BoardStatuses.Select(status => new object?[] { status.StatusId, (long)status.Position, status.IsDone ? 1L : 0L, status.IsWork ? 1L : 0L }),
             cancellationToken);
 
         await ExecuteForEachRowAsync(
