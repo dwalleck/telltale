@@ -1,3 +1,5 @@
+using Telltale.Core.Workflow;
+
 namespace Telltale.Core.Intervals;
 
 /// <summary>Brief visits are counted and no figure is changed because of one: what the tool does when nothing else is chosen.</summary>
@@ -16,9 +18,11 @@ public union BriefVisitTreatment(CountBriefVisits, ExcludeBriefVisits);
 
 /// <summary>
 /// The treatment of brief visits, applied (GLOSSARY: Treatment): the one place a treatment changes what is
-/// measured. It sits between finding an issue's stays (<see cref="BriefVisits.Stays"/>) and measuring its time
-/// in status (<see cref="TimeInStatus.During"/>), and reads the brief visit rule (<see cref="BriefVisits.IsBrief"/>)
-/// without restating it.
+/// measured, with one function for each metric a treatment can change. For time in status it sits between
+/// finding an issue's stays (<see cref="BriefVisits.Stays"/>) and measuring its time in status
+/// (<see cref="TimeInStatus.During"/>), and reads the brief visit rule (<see cref="BriefVisits.IsBrief"/>)
+/// without restating it. For cycle time it sits between measuring a delivered issue's cycle and storing it,
+/// and reads whether the cycle starts with a brief visit without deciding it.
 /// </summary>
 public static class BriefVisitTreatments
 {
@@ -84,6 +88,25 @@ public static class BriefVisitTreatments
         {
             CountBriefVisits => intervals,
             ExcludeBriefVisits => WithoutBriefVisits(intervals, stays, thresholds),
+        };
+
+    /// <summary>
+    /// The cycle a delivered issue's cycle time is taken from, under <paramref name="treatment"/>.
+    /// <paramref name="cycle"/> is the issue's cycle (<see cref="Cycles.Measure"/>), null when it never entered
+    /// a work-role status, and <paramref name="startsWithBriefVisit"/> says whether that cycle starts with a
+    /// brief visit (<see cref="Cycles.StartsWithBriefVisit"/>; owner decisions D90 and D91). Under
+    /// <see cref="CountBriefVisits"/> the cycle is measured as it is. Under <see cref="ExcludeBriefVisits"/> a
+    /// cycle that starts with a brief visit is left out (owner decision D85): the issue then has no cycle
+    /// time, as one that never entered a work status has none, and is delivered all the same. Its point
+    /// bucket is not decided here and does not change (owner decision D102). A brief visit
+    /// later in the cycle leaves nothing out, because a cycle is measured from its start to the delivery and
+    /// not as a sum of stays.
+    /// </summary>
+    public static Cycle? CycleToMeasure(Cycle? cycle, bool startsWithBriefVisit, BriefVisitTreatment treatment) =>
+        treatment switch
+        {
+            CountBriefVisits => cycle,
+            ExcludeBriefVisits => startsWithBriefVisit ? null : cycle,
         };
 
     private static IReadOnlyList<StatusInterval> WithoutBriefVisits(IReadOnlyList<StatusInterval> intervals, IReadOnlyList<Stay> stays, IReadOnlyDictionary<string, TimeSpan> thresholds)

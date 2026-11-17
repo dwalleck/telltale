@@ -12,7 +12,7 @@
 -- visit) as a JSON object of status ID to minutes, the IDs in order ('{"10001":5}'), '{}' when no status is
 -- checked: brief_visits_per_sprint reads the listed statuses and their thresholds from it. brief_visit_treatment
 -- is the briefVisitTreatment setting (GLOSSARY: Treatment) as a JSON object of each part and its label
--- ('{"timeInStatus":"exclude"}'), every part 'count' when the setting is left out: the treatment derive
+-- ('{"cycleTime":"count","timeInStatus":"exclude"}'), every part 'count' when the setting is left out: the treatment derive
 -- applied, which the report states and never reads from the configuration. objects_version identifies the
 -- scripts that created the derived tables and the metric views: when the tool's scripts differ, the views
 -- may lack a rule the tool relies on (the minimum group size, ADR-0003), and nothing is read from them.

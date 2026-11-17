@@ -39,7 +39,11 @@ public sealed record IssueCycle
 
     public int ReopenCount { get; }
 
-    /// <summary>The issue's cycle time. Null when it has none: it is not delivered, or it never entered a work-role status.</summary>
+    /// <summary>
+    /// The issue's cycle time. Null when it has none: it is not delivered, or it never entered a work-role status,
+    /// or its cycle starts with a brief visit and the treatment for cycle time leaves such cycles out (GLOSSARY:
+    /// Treatment; owner decision D85).
+    /// </summary>
     public Cycle? Cycle { get; private init; }
 
     /// <summary>
@@ -57,9 +61,9 @@ public sealed record IssueCycle
 
     /// <summary>
     /// A delivered issue. <paramref name="deliverySprintId"/> is null when the delivery fell between sprints,
-    /// <paramref name="cycle"/> when the issue never entered a work-role status, and
+    /// <paramref name="cycle"/> when the issue never entered a work-role status or its cycle was left out, and
     /// <paramref name="pointBucket"/> when it is unestimated. <paramref name="startsWithBriefVisit"/> says
-    /// whether its cycle starts with a brief visit.
+    /// whether its cycle starts with a brief visit, which is recorded also when the cycle was left out for it.
     /// </summary>
     public static IssueCycle OfDelivered(string issueId, DateTimeOffset deliveredAt, string? deliverySprintId, Cycle? cycle, double? pointBucket, int reopenCount, bool startsWithBriefVisit) =>
         new(issueId, reopenCount) { CycleEnd = deliveredAt, Delivered = true, DeliverySprintId = deliverySprintId, Cycle = cycle, PointBucket = pointBucket, StartsWithBriefVisit = startsWithBriefVisit };
@@ -159,7 +163,7 @@ public sealed record IssueAnomaly(string IssueId, ChangelogAnomalyKind Kind)
 /// <param name="MinimumTeam">The minimum group size's team number (GLOSSARY: Minimum group size): the metric views read it from the rebuild's record and never from the configuration.</param>
 /// <param name="MinimumAssigneesBehindAFigure">The minimum group size's number of assignees behind a figure, read by the views in the same way.</param>
 /// <param name="BriefVisitThresholds">The brief visit thresholds (GLOSSARY: Brief visit) as a JSON object of status ID to minutes, the IDs in order, e.g. <c>{"10001":5,"10005":0.5}</c>; <c>{}</c> when no status is checked. The metric view <c>brief_visits_per_sprint</c> reads the listed statuses and their thresholds from the rebuild's record.</param>
-/// <param name="BriefVisitTreatment">The treatment of brief visits (GLOSSARY: Treatment) as a JSON object of each part and its label, e.g. <c>{"timeInStatus":"exclude"}</c>. Left out, it is <see cref="BriefVisitsCounted"/>: a record made without it is of a rebuild that counted brief visits and changed nothing.</param>
+/// <param name="BriefVisitTreatment">The treatment of brief visits (GLOSSARY: Treatment) as a JSON object of each part and its label, the parts in order, e.g. <c>{"cycleTime":"count","timeInStatus":"exclude"}</c>. Left out, it is <see cref="BriefVisitsCounted"/>: a record made without it is of a rebuild that counted brief visits and changed nothing.</param>
 public sealed record DerivedSource(
     string RawDigest,
     string TimeZone,
@@ -209,12 +213,14 @@ public sealed record DerivedSource(
     }
 
     /// <summary><see cref="BriefVisitTreatment"/> when every part is <c>count</c>, which is also what an absent setting means (owner decision D83).</summary>
-    public const string BriefVisitsCounted = "{\"" + BriefVisitTreatmentSetting.TimeInStatusName + "\":\"" + BriefVisitTreatments.Count + "\"}";
+    public const string BriefVisitsCounted =
+        "{\"" + BriefVisitTreatmentSetting.CycleTimeName + "\":\"" + BriefVisitTreatments.Count + "\",\"" + BriefVisitTreatmentSetting.TimeInStatusName + "\":\"" + BriefVisitTreatments.Count + "\"}";
 
     /// <summary><see cref="BriefVisitTreatment"/> for the treatment derive applies: the form the store keeps.</summary>
     public static string BriefVisitTreatmentOf(BriefVisitTreatmentSetting treatment) =>
         System.Text.Json.JsonSerializer.Serialize(new SortedDictionary<string, string>(StringComparer.Ordinal)
         {
+            [BriefVisitTreatmentSetting.CycleTimeName] = BriefVisitTreatments.LabelOf(treatment.CycleTime),
             [BriefVisitTreatmentSetting.TimeInStatusName] = BriefVisitTreatments.LabelOf(treatment.TimeInStatus),
         });
 
@@ -222,15 +228,21 @@ public sealed record DerivedSource(
     /// Whether the rebuild left brief visits out of time in status: read from <see cref="BriefVisitTreatment"/>,
     /// the record of the treatment derive applied, and never from the configuration.
     /// </summary>
-    public bool BriefVisitsLeftOutOfTimeInStatus
+    public bool BriefVisitsLeftOutOfTimeInStatus => LeftOutOf(BriefVisitTreatmentSetting.TimeInStatusName);
+
+    /// <summary>
+    /// Whether the rebuild left the cycles that start with a brief visit out of cycle time: read from
+    /// <see cref="BriefVisitTreatment"/>, as <see cref="BriefVisitsLeftOutOfTimeInStatus"/> is.
+    /// </summary>
+    public bool BriefVisitsLeftOutOfCycleTime => LeftOutOf(BriefVisitTreatmentSetting.CycleTimeName);
+
+    /// <summary>Whether <see cref="BriefVisitTreatment"/> records, for <paramref name="part"/>, a treatment that leaves brief visits out.</summary>
+    private bool LeftOutOf(string part)
     {
-        get
-        {
-            using var recorded = System.Text.Json.JsonDocument.Parse(BriefVisitTreatment);
-            return recorded.RootElement.TryGetProperty(BriefVisitTreatmentSetting.TimeInStatusName, out var label)
-                && BriefVisitTreatments.TryParse(label.GetString(), out var treatment)
-                && BriefVisitTreatments.LeavesOut(treatment);
-        }
+        using var recorded = System.Text.Json.JsonDocument.Parse(BriefVisitTreatment);
+        return recorded.RootElement.TryGetProperty(part, out var label)
+            && BriefVisitTreatments.TryParse(label.GetString(), out var treatment)
+            && BriefVisitTreatments.LeavesOut(treatment);
     }
 
     /// <summary><see cref="BaselineSprintIds"/> for a list of sprint IDs: the form the store keeps and the views read.</summary>
