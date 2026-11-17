@@ -50,4 +50,69 @@ public static class ReportText
 
     /// <summary>What follows the two tables: the method note's heading.</summary>
     public const string MethodHeading = "\n## Method\n";
+
+    /// <summary>
+    /// The sentences of the method note's paragraph on brief visits that say what is done with them
+    /// (GLOSSARY: Treatment; owner decisions D83 to D89), stated once for the test classes that expect them.
+    /// The paragraph whole, under each combination of the two treatments, is pinned in
+    /// <c>BriefVisitTreatmentExplainedTests</c>.
+    /// </summary>
+    public static class Treatment
+    {
+        /// <summary>While both metrics count brief visits: the sentence the paragraph had before a treatment could be chosen.</summary>
+        public const string NothingIsDone =
+            " Brief visits are counted and nothing more: no duration was excluded or corrected because of one, and every other figure is what it would be without the count.";
+
+        /// <summary>When either metric leaves brief visits out: where the treatment is set. The sentence that follows says which is in force for each metric.</summary>
+        public const string IsASetting =
+            " What is done with brief visits is set for time in status and for cycle time separately (briefVisitTreatment in the configuration file).";
+
+        public const string LeftOutOfTimeInStatusAlone = " In this report they are left out of time in status and counted for cycle time.";
+
+        public const string LeftOutOfCycleTimeAlone = " In this report they are counted for time in status and left out of cycle time.";
+
+        public const string LeftOutOfBoth = " In this report they are left out of time in status and of cycle time.";
+
+        /// <summary>What is left out of time in status, in the words of owner decision D84.</summary>
+        public const string TimeInStatusIsLeftOut =
+            " The time of every brief visit to a listed status is left out of the issue's time in that status, and an issue left with no business time in the status is not in its row: the row's count, median and total, and the baseline median, are of what remains.";
+
+        /// <summary>What is left out of cycle time, in the words of owner decision D85.</summary>
+        public const string CycleTimeIsLeftOut =
+            " A delivered issue whose cycle starts with a brief visit has no cycle time. It is still delivered: the delivered count does not change, and the cycle time table's counts, medians and P85s, and the baseline's, are of the cycles that remain.";
+
+        public const string Why =
+            " The reason: a stay shorter than the threshold is too short to be the work, and its usual cause is an issue moved through several statuses at once after the work was done, so its recorded length says when the board was updated and not how long the work took.";
+
+        /// <summary>Follows <see cref="Why"/> when cycle time leaves brief visits out.</summary>
+        public const string WhyForACycle = " A cycle that starts with such a stay starts when the board was updated, not when the work began.";
+
+        public const string WhatLeavingOutDoesNotDo =
+            " Leaving out is not a correction: the time the work took is still recorded under the earlier status, the adjusted figures describe the issues that were moved on time, which may not be typical, and no length was estimated or replaced."
+            + " No other figure was changed because of a brief visit.";
+
+        /// <summary>The second number of a listed status's footer line, there when time in status leaves brief visits out. What it reads when withheld follows it, by the numbers in force.</summary>
+        public const string TheSecondNumber =
+            " A listed status's line goes on to a second number: how many of the issues with a brief visit had no other time in the status and so are not in the row's count.";
+
+        /// <summary>Under the default numbers.</summary>
+        public const string TheSecondNumberReadsSuppressed =
+            " It reads \"suppressed\" when fewer than three distinct assignees are among the issues left out, and so also when nobody was left out.";
+
+        /// <summary>What the footer's cycle time line counts. It is there when a listed status has the work role, under either treatment.</summary>
+        public const string TheCycleTimeLine =
+            " The footer's last line gives how many of the sprint's delivered issues have a cycle that starts with a brief visit: the stay that begins where the cycle starts is one.";
+
+        public const string TheyAreInTheFigures = " Those issues are in the cycle time figures.";
+
+        public const string TheyHaveNoCycleTime = " Those issues have no cycle time.";
+
+        /// <summary>Under the default numbers.</summary>
+        public const string TheCycleNumberReadsSuppressed =
+            " Its number reads \"suppressed\" when the sprint's delivered count does, as for a sprint whose team is smaller than five, when fewer than three distinct assignees are among the issues it counts, and when it is nothing.";
+
+        /// <summary>The paragraph's last sentence when a metric leaves brief visits out (owner decision D89). <paramref name="metrics"/> is "time in status is", "cycle time is" or "time in status and cycle time are".</summary>
+        public static string WhenLeavingOutWasAdded(string metrics) =>
+            $" Leaving brief visits out was added on 2026-11-16, after results had been seen, and it changes how {metrics} measured.";
+    }
 }

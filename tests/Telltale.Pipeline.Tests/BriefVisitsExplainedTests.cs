@@ -39,6 +39,12 @@ public class BriefVisitsExplainedTests
 
     private const string AStatusWithNoRowHasNoLine = " A listed status with no row in the time in status table has no line";
 
+    // The sentences on the footer's cycle time line, which the footer has here because Development is a work
+    // status. What the number reads in place of a number follows the numbers in force.
+    private const string TheCycleTimeLine = ReportText.Treatment.TheCycleTimeLine + ReportText.Treatment.TheyAreInTheFigures;
+
+    private const string TheCycleNumberReadsSuppressed = ReportText.Treatment.TheCycleNumberReadsSuppressed;
+
     private const string WhenTheRuleWasAdded =
         " This rule was added on 2026-11-12, after the first run on real data: the thresholds were chosen with knowledge of results, and the counts describe data quality and are not a success criterion.\n";
 
@@ -68,6 +74,7 @@ public class BriefVisitsExplainedTests
             + " A count reads \"suppressed\" when its row in the time in status table reads \"suppressed\" for its figures, or when fewer than three distinct assignees are among the issues counted."
             + AZeroAndAWithheldCountReadAlike
             + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than five has no line for any listed status."
+            + TheCycleTimeLine + TheCycleNumberReadsSuppressed
             + WhenTheRuleWasAdded
             + Footer.ReplaceLineEndings("\n")
             + "- Fake Development: 4 issues had a visit shorter than 5 minutes\n"
@@ -112,12 +119,12 @@ public class BriefVisitsExplainedTests
     }
 
     [Test]
-    [Arguments(4, 2, WithheldUnderTwo + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than four has no line for any listed status.", "4 issues had")]
-    [Arguments(1, 1, WithheldUnderOne + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than one has no line for any listed status.", "4 issues had")]
-    [Arguments(0, 2, WithheldUnderTwo + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ".", "4 issues had")]
-    [Arguments(4, 0, " No count is withheld for the number of assignees behind it, and a count of nothing reads 0." + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than four has no line for any listed status.", "4 issues had")]
-    [Arguments(0, 0, " No count is withheld for group size, and a count of nothing reads 0." + AStatusWithNoRowHasNoLine + ".", "4 issues had")]
-    [Arguments(5, 5, " A count reads \"suppressed\" when its row in the time in status table reads \"suppressed\" for its figures, or when fewer than five distinct assignees are among the issues counted." + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than five has no line for any listed status.", "issues with")]
+    [Arguments(4, 2, WithheldUnderTwo + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than four has no line for any listed status." + TheCycleTimeLine + " Its number reads \"suppressed\" when the sprint's delivered count does, as for a sprint whose team is smaller than four, when fewer than two distinct assignees are among the issues it counts, and when it is nothing.", "4 issues had")]
+    [Arguments(1, 1, WithheldUnderOne + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than one has no line for any listed status." + TheCycleTimeLine + " Its number reads \"suppressed\" when the sprint's delivered count does, as for a sprint whose team is smaller than one, when fewer than one distinct assignee is among the issues it counts, and when it is nothing.", "4 issues had")]
+    [Arguments(0, 2, WithheldUnderTwo + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + "." + TheCycleTimeLine + " Its number reads \"suppressed\" when the sprint's delivered count does, when fewer than two distinct assignees are among the issues it counts, and when it is nothing.", "4 issues had")]
+    [Arguments(4, 0, " No count is withheld for the number of assignees behind it, and a count of nothing reads 0." + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than four has no line for any listed status." + TheCycleTimeLine + " Its number reads \"suppressed\" when the sprint's delivered count does, as for a sprint whose team is smaller than four, and a number of nothing reads 0.", "4 issues had")]
+    [Arguments(0, 0, " No count is withheld for group size, and a count of nothing reads 0." + AStatusWithNoRowHasNoLine + "." + TheCycleTimeLine + " Its number is not withheld, and a number of nothing reads 0.", "4 issues had")]
+    [Arguments(5, 5, " A count reads \"suppressed\" when its row in the time in status table reads \"suppressed\" for its figures, or when fewer than five distinct assignees are among the issues counted." + AZeroAndAWithheldCountReadAlike + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than five has no line for any listed status." + TheCycleTimeLine + " Its number reads \"suppressed\" when the sprint's delivered count does, as for a sprint whose team is smaller than five, when fewer than five distinct assignees are among the issues it counts, and when it is nothing.", "issues with")]
     public async Task The_paragraph_says_what_a_count_reads_in_place_of_a_number_by_the_numbers_in_force(int team, int assigneesBehindAFigure, string whatACountReads, string developmentLineHas)
     {
         // Four people are behind the four issues counted: the count is shown under every pair but five and five.
@@ -168,6 +175,7 @@ public class BriefVisitsExplainedTests
 
         await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith(
             ", and a sprint whose team is smaller than five has no line for any listed status."
+            + TheCycleTimeLine + TheCycleNumberReadsSuppressed
             + WhenTheRuleWasAdded
             + Footer.ReplaceLineEndings("\n")
             + ReportText.CyclesThatStartWithBriefVisit("suppressed"));

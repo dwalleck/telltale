@@ -50,13 +50,14 @@ public static class SprintReport
     /// under (<see cref="NumbersInForce.Of"/>), which it states, and whether a status was listed under
     /// <c>briefVisitThresholds</c> (<see cref="DerivedSource.BriefVisitsChecked"/>). With a status listed the
     /// method note explains the footer's brief visit lines, also for a sprint that has none, and the footer
-    /// ends with its cycle time line when a listed status has the work role. With no status
-    /// listed the report is what it was before brief visits were counted, and neither brief visit view is read.
+    /// ends with its cycle time line when a listed status has the work role, which the note then explains
+    /// too. With no status listed the report is what it was before brief visits were counted, and neither
+    /// brief visit view is read.
     /// It also takes the treatment of brief visits the rebuild applied (GLOSSARY: Treatment;
     /// <see cref="DerivedSource.BriefVisitsLeftOutOfTimeInStatus"/>): when brief visits were left out of time in
     /// status, the report says so under its heading, marks the row of every listed status, and words the method
-    /// note's paragraph on brief visits accordingly. While they are counted, the report is what it was before a
-    /// treatment could be chosen. When the cycles that start with a brief visit were left out of cycle time
+    /// note's paragraph on brief visits accordingly. While both metrics count them, the report is what it was
+    /// before a treatment could be chosen. When the cycles that start with a brief visit were left out of cycle time
     /// (<see cref="DerivedSource.BriefVisitsLeftOutOfCycleTime"/>), the report says so under its heading, puts
     /// one note under the cycle time table whatever the table holds, says in the footer's cycle time line that
     /// the issues have no cycle time, and words the method note accordingly.
@@ -104,10 +105,20 @@ public static class SprintReport
             cancellationToken));
         AppendTimeInStatus(report, baseline, await ReadTimeInStatusAsync(store, sprintId, cancellationToken), adjustedStatusIds);
         var quality = await ReadDataQualityAsync(store, cancellationToken);
-        AppendMethodNote(report, quality, numbers, briefVisitsChecked, leftOutOfTimeInStatus, leftOutOfCycleTime, baselineSprintIds, withheldBaselineSprints);
+
+        // With no status listed neither brief visit view has rows, so neither is asked. The footer's cycle time
+        // line is read before the method note is written, because the note explains the line only when the
+        // footer has it: the view has a row for the sprint only when a listed status has the work role.
+        IReadOnlyList<CycleStartsRow> cycleStarts = briefVisitsChecked
+            ? await store.QueryViewsAsync<CycleStartsRow>(
+                "SELECT issue_count, suppressed FROM cycle_starts_with_brief_visit_per_sprint WHERE sprint_id = @sprintId;",
+                new { sprintId },
+                cancellationToken)
+            : [];
+        var briefVisits = new BriefVisitsInTheReport(briefVisitsChecked, leftOutOfTimeInStatus, leftOutOfCycleTime, HasCycleTimeLine: cycleStarts.Count > 0);
+        AppendMethodNote(report, quality, numbers, briefVisits, baselineSprintIds, withheldBaselineSprints);
         AppendFooter(report, quality);
 
-        // With no status listed the view has no rows, so it is not asked.
         if (briefVisitsChecked)
         {
             // The number of issues left out of a row is asked for only when brief visits were left out: while
@@ -118,10 +129,7 @@ public static class SprintReport
                     : "SELECT status_name, threshold_minutes, brief_visit_issue_count, suppressed FROM brief_visits_per_sprint WHERE sprint_id = @sprintId ORDER BY board_position;",
                 new { sprintId },
                 cancellationToken));
-            AppendCyclesThatStartWithBriefVisit(report, leftOutOfCycleTime, await store.QueryViewsAsync<CycleStartsRow>(
-                "SELECT issue_count, suppressed FROM cycle_starts_with_brief_visit_per_sprint WHERE sprint_id = @sprintId;",
-                new { sprintId },
-                cancellationToken));
+            AppendCyclesThatStartWithBriefVisit(report, leftOutOfCycleTime, cycleStarts);
         }
 
         return report.ToString();
@@ -227,7 +235,7 @@ public static class SprintReport
         if (leftOutOfTimeInStatus)
         {
             report.Append(" A row of ").Append(both ? "the time in status table" : "that table")
-                .Append(" marked \"adjusted\" is of a status listed for brief visits: its figures are of what remains, and the footer gives the number of its issues that had a brief visit.");
+                .Append(" marked \"adjusted\" is of a status listed for brief visits: its figures are of what remains, and the footer gives the number of its issues that had a brief visit and the number left out of the row.");
         }
 
         if (leftOutOfCycleTime)
@@ -344,18 +352,19 @@ public static class SprintReport
     /// built under (<see cref="AppendMinimumGroupSize"/>). The time zone is the one derive stored. The paragraph
     /// on brief visits is its last, and is there only when a status is listed (<see cref="AppendBriefVisitsExplained"/>).
     /// </summary>
-    private static void AppendMethodNote(StringBuilder report, DataQualityRow quality, NumbersInForce numbers, bool briefVisitsChecked, bool leftOutOfTimeInStatus, bool leftOutOfCycleTime, IReadOnlyList<string> baselineSprintIds, IReadOnlyList<string> withheldBaselineSprints)
+    private static void AppendMethodNote(StringBuilder report, DataQualityRow quality, NumbersInForce numbers, BriefVisitsInTheReport briefVisits, IReadOnlyList<string> baselineSprintIds, IReadOnlyList<string> withheldBaselineSprints)
     {
+        var (briefVisitsChecked, leftOutOfTimeInStatus, leftOutOfCycleTime, _) = briefVisits;
         report.Append("\n## Method\n\n")
             .Append("- Durations are in business days: days that are neither a weekend nor a company holiday, each counted in full (24 hours) in the team's time zone (").Append(quality.TimeZone).Append("). Calendar days are shown alongside: elapsed time divided by 24 hours.\n")
             .Append("- Cycle time runs from an issue's first entry into a work status to its last entry into a done status, for delivered issues only. It belongs to the sprint in which the issue was delivered.")
 
-            // Under exclude for cycle time not every delivered issue that entered a work status has one (bvt-D8).
+            // Under exclude for cycle time not every delivered issue that entered a work status has one (owner decision D85).
             .Append(leftOutOfCycleTime ? " A delivered issue whose cycle starts with a brief visit has no cycle time (see the paragraph on brief visits below).\n" : "\n")
             .Append("- The median is the middle value, or the mean of the two middle values. The P85 is the smallest value with at least 85% of the values at or below it.\n")
             .Append("- Time in status includes delivered and unfinished issues in statuses before done, clipped to the sprint window and each issue's membership intervals. An issue counts toward a status only if it spent more than zero business days there. Total business days sum that time across all contributing issues, including repeated visits")
 
-            // Under exclude a repeated visit that is brief is not in the total, so the sentence says so (bvt-D10).
+            // Under exclude a repeated visit that is brief is not in the total, so the sentence says so (owner decision D84).
             .Append(leftOutOfTimeInStatus ? " and leaving out brief visits to a status listed for them (see the paragraph on brief visits below)" : "")
             .Append("; this is accumulated issue time, not effort or the sprint's elapsed duration. Totals and medians use the same privacy rules.\n");
         AppendMinimumGroupSize(report, numbers, briefVisitsChecked);
@@ -366,7 +375,8 @@ public static class SprintReport
             report.Append("- The baseline columns pool every issue of the baseline sprints, a list fixed in the configuration (sprints ").AppendJoin(", ", baselineSprintIds)
                 .Append("), each a completed sprint")
 
-                // Under exclude for either metric the pool is of what remains, as the sprint's own figures are (bvt-D10).
+                // Under exclude for either metric the pool is of what remains, as the sprint's own figures are (owner
+                // decisions D83 to D85: a treatment applies to the baseline sprints too).
                 .Append(leftOutOfTimeInStatus || leftOutOfCycleTime ? ", with brief visits left out as they are in this report's own figures (see the paragraph on brief visits below). " : ". ")
                 .Append(WhenABaselineFigureIsNotShown(numbers)).Append('\n');
         }
@@ -380,50 +390,57 @@ public static class SprintReport
             .Append("- Work that has since been removed from Jira stays in the figures until the next backfill.\n");
         if (briefVisitsChecked)
         {
-            AppendBriefVisitsExplained(report, numbers, leftOutOfTimeInStatus, leftOutOfCycleTime);
+            AppendBriefVisitsExplained(report, numbers, briefVisits);
         }
     }
 
     /// <summary>
-    /// The method note's paragraph on brief visits (GLOSSARY: Brief visit; owner decisions D60 to D62), written
-    /// only when a status is listed. It says what a brief visit is, that brief visits are counted and no figure
-    /// was changed because of one, what a count reads in place of a number, and that the rule was added after
-    /// the first run on real data. What a count reads follows the numbers in force (D67), as the view does
-    /// (<c>brief_visits_per_sprint</c>): while a figure needs assignees behind it, a count of nothing has nobody
-    /// behind it and is withheld as a count with too few is; with that number at zero no count is withheld and
-    /// a count of nothing is printed as 0. The lines come from the time in status table's rows, so a sprint
-    /// short of a team has none.
-    /// With <paramref name="leftOutOfTimeInStatus"/> (GLOSSARY: Treatment; owner decisions D84, D93, D99) four
-    /// sentences have another wording, as the sentence on what the total sums has in the paragraph on time in
-    /// status (<see cref="AppendMethodNote"/>), because each would be untrue: which row the count is measured against
-    /// (the one before anything was left out), what is done with a brief visit, which row's check withholds a
-    /// count, and that a status whose every issue was left out has a line and no row. Under <c>count</c> every
-    /// sentence is what it was before a treatment could be chosen.
-    /// With <paramref name="leftOutOfCycleTime"/> (owner decision D85) the sentence on what is done with a
-    /// brief visit says that a delivered issue whose cycle starts with one has no cycle time and is still
-    /// delivered, alone or after what it says of time in status; the sentence on what cycle time is has its
-    /// other wording in <see cref="AppendMethodNote"/>. With both metrics under <c>count</c> the sentence is
-    /// what it was.
+    /// What the report was told about brief visits by the record of the derived data and by the views, for the
+    /// method note: whether a status is listed, whether brief visits were left out of time in status and of
+    /// cycle time (GLOSSARY: Treatment), and whether the footer has its cycle time line, which it has when a
+    /// listed status has the work role.
     /// </summary>
-    private static void AppendBriefVisitsExplained(StringBuilder report, NumbersInForce numbers, bool leftOutOfTimeInStatus, bool leftOutOfCycleTime)
+    private readonly record struct BriefVisitsInTheReport(bool Checked, bool LeftOutOfTimeInStatus, bool LeftOutOfCycleTime, bool HasCycleTimeLine);
+
+    /// <summary>
+    /// The method note's paragraph on brief visits (GLOSSARY: Brief visit, Treatment; owner decisions D60 to
+    /// D62 and D83 to D89), written only when a status is listed. It says what a brief visit is, what the
+    /// footer's lines count, what is done with brief visits, what a count reads in place of a number, which
+    /// statuses have a line, and when each rule was added.
+    /// While both metrics count brief visits the paragraph is what it was before a treatment could be chosen,
+    /// plus the sentences on the footer's cycle time line when the footer has it
+    /// (<see cref="AppendCycleTimeLineExplained"/>). When either metric leaves them out, the sentence that
+    /// brief visits are counted and nothing more gives way to <see cref="AppendTreatmentExplained"/>, and the
+    /// paragraph ends by saying that leaving out was added on 2026-11-16, after results had been seen (D89).
+    /// With brief visits left out of time in status (D84, D93, D99), three more sentences have another
+    /// wording, because each would be untrue: which row the count is measured against (the one before
+    /// anything was left out), which row's check withholds a count, and that a status whose every issue was
+    /// left out has a line and no row. The paragraph then also says that a listed status's line carries a
+    /// second number, the issues left out of the row, and what that number reads when it is withheld.
+    /// What a count reads follows the numbers in force (D67), as the views do (<c>brief_visits_per_sprint</c>):
+    /// while a figure needs assignees behind it, a count of nothing has nobody behind it and is withheld as a
+    /// count with too few is; with that number at zero no count is withheld and a count of nothing is printed
+    /// as 0. A sprint short of a team has no line for a listed status, because the view has no row for it,
+    /// and still has the cycle time line.
+    /// </summary>
+    private static void AppendBriefVisitsExplained(StringBuilder report, NumbersInForce numbers, BriefVisitsInTheReport briefVisits)
     {
+        var (_, leftOutOfTimeInStatus, leftOutOfCycleTime, hasCycleTimeLine) = briefVisits;
         report.Append("- A brief visit is one unbroken stay in a status that ended and was shorter than the status's threshold.")
             .Append(" It is measured in clock time over the issue's whole history: weekends and holidays count, and the stay is not clipped to the sprint.")
             .Append(leftOutOfTimeInStatus
                 ? " For each status the configuration file lists (briefVisitThresholds), the footer gives how many of the issues that were in the status's time in status row before anything was left out had a brief visit during the time the row counts."
-                : " For each status the configuration file lists (briefVisitThresholds), the footer gives how many of the issues in the status's time in status row had a brief visit during the time the row counts.")
-            .Append(leftOutOfTimeInStatus
-                ? " The time of every brief visit to a listed status is left out of the issue's time in that status (briefVisitTreatment in the configuration file), and an issue left with no business time in the status is not in its row: the row's count, median and total, and the baseline median, are of what remains."
-                : "")
+                : " For each status the configuration file lists (briefVisitThresholds), the footer gives how many of the issues in the status's time in status row had a brief visit during the time the row counts.");
+        if (leftOutOfTimeInStatus || leftOutOfCycleTime)
+        {
+            AppendTreatmentExplained(report, leftOutOfTimeInStatus, leftOutOfCycleTime);
+        }
+        else
+        {
+            report.Append(" Brief visits are counted and nothing more: no duration was excluded or corrected because of one, and every other figure is what it would be without the count.");
+        }
 
-            // The setting is named once, by whichever of the two sentences comes first.
-            .Append(leftOutOfCycleTime
-                ? $" A delivered issue whose cycle starts with a brief visit has no cycle time{(leftOutOfTimeInStatus ? "" : " (briefVisitTreatment in the configuration file)")}. It is still delivered: the delivered count does not change, and the cycle time table's counts, medians and P85s, and the baseline's, are of the cycles that remain."
-                : "")
-            .Append(leftOutOfTimeInStatus || leftOutOfCycleTime
-                ? " No other figure was changed because of a brief visit, and no duration was estimated or replaced."
-                : " Brief visits are counted and nothing more: no duration was excluded or corrected because of one, and every other figure is what it would be without the count.")
-            .Append(" A short median in the time in status table does not show how many issues had a brief visit.");
+        report.Append(" A short median in the time in status table does not show how many issues had a brief visit.");
         if (numbers.FigureCheck)
         {
             report.Append(leftOutOfTimeInStatus
@@ -438,11 +455,96 @@ public static class SprintReport
                 .Append(", and a count of nothing reads 0.");
         }
 
+        // The second number of a listed status's line is there only when brief visits are left out of time in
+        // status. The view withholds it by the same check and the same number as the count.
+        if (leftOutOfTimeInStatus)
+        {
+            report.Append(" A listed status's line goes on to a second number: how many of the issues with a brief visit had no other time in the status and so are not in the row's count.")
+                .Append(numbers.FigureCheck
+                    ? $" It reads \"suppressed\" when fewer than {numbers.AssigneesBehindAFigure(distinct: true)} {numbers.BehindAFigureAre} among the issues left out, and so also when nobody was left out."
+                    : " It is not withheld either, and reads 0 when nobody was left out.");
+        }
+
         report.Append(leftOutOfTimeInStatus
                 ? " A listed status that had no row in the time in status table before anything was left out has no line; one whose every issue was left out has a line and no row"
                 : " A listed status with no row in the time in status table has no line")
-            .Append(numbers.TeamCheck ? $", and a sprint whose team is smaller than {numbers.TeamInWords} has no line for any listed status." : ".")
-            .Append(" This rule was added on 2026-11-12, after the first run on real data: the thresholds were chosen with knowledge of results, and the counts describe data quality and are not a success criterion.\n");
+            .Append(numbers.TeamCheck ? $", and a sprint whose team is smaller than {numbers.TeamInWords} has no line for any listed status." : ".");
+        if (hasCycleTimeLine)
+        {
+            AppendCycleTimeLineExplained(report, numbers, leftOutOfCycleTime);
+        }
+
+        report.Append(" This rule was added on 2026-11-12, after the first run on real data: the thresholds were chosen with knowledge of results, and the counts describe data quality and are not a success criterion.");
+        if (leftOutOfTimeInStatus || leftOutOfCycleTime)
+        {
+            report.Append(" Leaving brief visits out was added on 2026-11-16, after results had been seen, and it changes how ")
+                .Append(leftOutOfTimeInStatus && leftOutOfCycleTime ? "time in status and cycle time are" : leftOutOfTimeInStatus ? "time in status is" : "cycle time is")
+                .Append(" measured.");
+        }
+
+        report.Append('\n');
+    }
+
+    /// <summary>
+    /// The sentences of the paragraph on brief visits that are there only when brief visits are left out of a
+    /// metric (GLOSSARY: Treatment), in place of the sentence that they are counted and nothing more: the
+    /// treatment in force for each of the two metrics, what was left out (owner decisions D84 and D85), why,
+    /// and what leaving out does not do. Nothing here depends on the sprint or on the numbers in force.
+    /// The reason given for a cycle is that it starts when the board was updated. It is not said to be too
+    /// short: a move into a work status and straight back out, with the real start later (D91), starts the
+    /// cycle too early.
+    /// </summary>
+    private static void AppendTreatmentExplained(StringBuilder report, bool leftOutOfTimeInStatus, bool leftOutOfCycleTime)
+    {
+        report.Append(" What is done with brief visits is set for time in status and for cycle time separately (briefVisitTreatment in the configuration file). In this report they are ")
+            .Append(leftOutOfTimeInStatus && leftOutOfCycleTime ? "left out of time in status and of cycle time"
+                : leftOutOfTimeInStatus ? "left out of time in status and counted for cycle time"
+                : "counted for time in status and left out of cycle time")
+            .Append('.');
+        if (leftOutOfTimeInStatus)
+        {
+            report.Append(" The time of every brief visit to a listed status is left out of the issue's time in that status, and an issue left with no business time in the status is not in its row: the row's count, median and total, and the baseline median, are of what remains.");
+        }
+
+        if (leftOutOfCycleTime)
+        {
+            report.Append(" A delivered issue whose cycle starts with a brief visit has no cycle time. It is still delivered: the delivered count does not change, and the cycle time table's counts, medians and P85s, and the baseline's, are of the cycles that remain.");
+        }
+
+        report.Append(" The reason: a stay shorter than the threshold is too short to be the work, and its usual cause is an issue moved through several statuses at once after the work was done, so its recorded length says when the board was updated and not how long the work took.");
+        if (leftOutOfCycleTime)
+        {
+            report.Append(" A cycle that starts with such a stay starts when the board was updated, not when the work began.");
+        }
+
+        report.Append(" Leaving out is not a correction: the time the work took is still recorded under the earlier status, the adjusted figures describe the issues that were moved on time, which may not be typical, and no length was estimated or replaced.")
+            .Append(" No other figure was changed because of a brief visit.");
+    }
+
+    /// <summary>
+    /// The paragraph's sentences on the footer's cycle time line (owner decisions D87 and D100), written only
+    /// when the footer has the line: what the line counts, whether the issues it counts are in the cycle time
+    /// figures, and what the number reads in place of a number. That follows the numbers in force, as the view
+    /// does (<c>cycle_starts_with_brief_visit_per_sprint</c>): the number is withheld when the sprint's
+    /// delivered count is, which holds the team check, so a sprint short of a team has the line and it reads
+    /// "suppressed"; while a figure needs assignees behind it, the number is also withheld when too few are
+    /// behind the issues it counts, and a number of nothing with it.
+    /// </summary>
+    private static void AppendCycleTimeLineExplained(StringBuilder report, NumbersInForce numbers, bool leftOutOfCycleTime)
+    {
+        report.Append(" The footer's last line gives how many of the sprint's delivered issues have a cycle that starts with a brief visit: the stay that begins where the cycle starts is one.")
+            .Append(leftOutOfCycleTime ? " Those issues have no cycle time." : " Those issues are in the cycle time figures.");
+        if (!numbers.TeamCheck && !numbers.FigureCheck)
+        {
+            report.Append(" Its number is not withheld, and a number of nothing reads 0.");
+            return;
+        }
+
+        report.Append(" Its number reads \"suppressed\" when the sprint's delivered count does")
+            .Append(numbers.TeamCheck ? $", as for a sprint whose team is smaller than {numbers.TeamInWords}" : "")
+            .Append(numbers.FigureCheck
+                ? $", when fewer than {numbers.AssigneesBehindAFigure(distinct: true)} {numbers.BehindAFigureAre} among the issues it counts, and when it is nothing."
+                : ", and a number of nothing reads 0.");
     }
 
     /// <summary>

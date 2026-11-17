@@ -21,7 +21,10 @@ WITH status_time AS (
            SUM(t.business_days) AS total_business_days,
            COUNT(DISTINCT i.assignee_hash) AS assignees
     -- An issue counts toward a status only if it spent business time there (owner decision D21):
-    -- time_in_status_issue says which issues those are, for this view and for every other.
+    -- time_in_status_issue says which issues those are once any brief visit has been left out, for this view,
+    -- for duration_sample and through it the baseline. brief_visits_per_sprint measures its count against the
+    -- row before anything was left out (time_in_status_issue_recorded, owner decision D93), and reads this one
+    -- only to tell which issues were left out.
     FROM time_in_status_issue t
     LEFT JOIN issue i ON i.issue_id = t.issue_id
     GROUP BY t.sprint_id, t.status_id
