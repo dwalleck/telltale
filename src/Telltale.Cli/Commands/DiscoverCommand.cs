@@ -30,6 +30,9 @@ internal static class DiscoverCommand
         AllowDuplicateProperties = false,
     };
 
+    /// <summary>The thresholds of a file that has no <c>briefVisitThresholds</c>: no status is listed.</summary>
+    private static readonly IReadOnlyDictionary<string, TimeSpan> NoBriefVisitThresholds = new Dictionary<string, TimeSpan>();
+
     public static Command Create(AppServices services)
     {
         var siteUrl = new Option<string?>("--site-url") { Description = "The Jira site, e.g. https://example.atlassian.net/. Needed the first time." };
@@ -157,12 +160,22 @@ internal static class DiscoverCommand
         // They are refused here in the same way. Once the file has roles discover adds none, so the statuses
         // listed are checked against them now. A file with no roles yet gets them from Jira, so there only
         // the thresholds are checked now, and the statuses by the check of the text about to be written.
-        if (root.TryGetPropertyValue("briefVisitThresholds", out var briefVisitThresholds))
+        // The treatment of brief visits is the owner's in the same way and is checked with them: what it is,
+        // and whether a status is listed for it to act on, now; whether a listed status has the work role,
+        // now when the file has roles, and otherwise by that later check (owner decision D73).
+        var hasThresholds = root.TryGetPropertyValue("briefVisitThresholds", out var briefVisitThresholds);
+        var hasTreatment = root.ContainsKey(BriefVisitTreatmentSetting.Name);
+        if (hasThresholds || hasTreatment)
         {
             try
             {
                 var roles = fileHadNoRoles ? null : StatusRoles.Parse(statusRoles.Select(role => KeyValuePair.Create(role.Key, RoleText(role.Value))));
-                ConfigFile.RequireBriefVisitThresholds(briefVisitThresholds, roles, path);
+                var thresholds = hasThresholds ? ConfigFile.RequireBriefVisitThresholds(briefVisitThresholds, roles, path) : NoBriefVisitThresholds;
+                if (hasTreatment)
+                {
+                    // The file was read, so the setting is written once, and here is its text.
+                    ConfigFile.RequireBriefVisitTreatment(AsWritten(previous!, BriefVisitTreatmentSetting.Name).Single(), thresholds, roles, path);
+                }
             }
             catch (UserFacingException exception)
             {
@@ -496,8 +509,73 @@ internal static class DiscoverCommand
         }
         catch (JsonException exception)
         {
+            RequireReadableBriefVisitTreatment(text, path);
             throw Unreadable(path, exception.Message, exception);
         }
+    }
+
+    /// <summary>
+    /// For a file discover's own reader refused. That reader's message quotes a key that is written twice
+    /// (owner decision D74), and a key typed under <c>briefVisitTreatment</c> could be a secret pasted into
+    /// the wrong place. So the setting is first read by its own reader, which refuses a part written twice
+    /// and a part it does not know by the setting's name and repeats nothing: discover then says what run
+    /// would say, and prints no part of such a key (owner decision D105). A file whose fault is elsewhere
+    /// comes back from here and gets the reader's message, as before.
+    /// </summary>
+    private static void RequireReadableBriefVisitTreatment(string text, string path)
+    {
+        IReadOnlyList<string> written;
+        try
+        {
+            written = AsWritten(text, BriefVisitTreatmentSetting.Name);
+        }
+        catch (JsonException)
+        {
+            // Not JSON as far as the setting, or inside it: the fault is not a key written twice.
+            return;
+        }
+
+        foreach (var setting in written)
+        {
+            try
+            {
+                ConfigFile.RequireReadableBriefVisitTreatment(setting, path);
+            }
+            catch (UserFacingException exception)
+            {
+                throw RunWouldRefuse(path, exception);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The text of every value the file's top level holds under <paramref name="name"/>, as it was typed:
+    /// one for a file that can be read, more when the setting is written twice, none when it is absent.
+    /// Throws <see cref="JsonException"/> for text that is not JSON.
+    /// </summary>
+    private static List<string> AsWritten(string text, string name)
+    {
+        var utf8 = Encoding.UTF8.GetBytes(text);
+        var reader = new Utf8JsonReader(utf8, new JsonReaderOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
+        var written = new List<string>();
+        if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
+        {
+            return written;
+        }
+
+        while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+        {
+            var isNamed = reader.ValueTextEquals(name);
+            reader.Read();
+            var start = (int)reader.TokenStartIndex;
+            reader.Skip();
+            if (isNamed)
+            {
+                written.Add(Encoding.UTF8.GetString(utf8, start, (int)reader.BytesConsumed - start));
+            }
+        }
+
+        return written;
     }
 
     /// <summary>A section of the file, added when the file does not have it yet.</summary>
