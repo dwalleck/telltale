@@ -108,14 +108,32 @@ public static class Derivation
             var memberOf = membership.Intervals.Select(interval => interval.SprintId).ToHashSet(StringComparer.Ordinal);
 
             // The issue's stays are the same for every sprint: worked out once, when the first sprint needs them.
+            // So are the intervals its time in status is measured from, which the treatment decides.
             IReadOnlyList<Stay>? stays = null;
+            IReadOnlyList<StatusInterval>? toMeasure = null;
             foreach (var window in windows.Where(counted => memberOf.Contains(counted.SprintId)))
             {
                 // The time this sprint counts of this issue, worked out once for the time in status and the brief visits.
                 var countedTime = TimeInStatus.CountedTime(window, membership.Intervals, asOf);
-                sprintStatusTimes.AddRange(TimeInStatus.During(countedTime, timeline.Intervals, calendar, asOf)
+                var recorded = TimeInStatus.During(countedTime, timeline.Intervals, calendar, asOf);
+
+                // The one place a treatment is applied (GLOSSARY: Treatment): to the issue's whole history, before
+                // anything is clipped to the sprint. The recorded time stays beside what is measured, because the
+                // team of a sprint and the count of brief visits are taken from it. With no status listed there
+                // is no brief visit to treat, and what is measured is what is recorded.
+                var measured = checksBriefVisits
+                    ? TimeInStatus.During(
+                        countedTime,
+                        toMeasure ??= BriefVisitTreatments.IntervalsToMeasure(timeline.Intervals, stays ??= BriefVisits.Stays(timeline), settings.BriefVisitThresholds, settings.TimeInStatusTreatment),
+                        calendar,
+                        asOf)
+                    : recorded;
+                sprintStatusTimes.AddRange(recorded
                     .OrderBy(pair => pair.Key, StringComparer.Ordinal)
-                    .Select(pair => new SprintStatusTime(issue.IssueId, window.SprintId, pair.Key, pair.Value.CalendarTime, pair.Value.BusinessTime, pair.Value.BusinessDays)));
+                    .Select(pair => new SprintStatusTime(issue.IssueId, window.SprintId, pair.Key, pair.Value.CalendarTime, pair.Value.BusinessTime, pair.Value.BusinessDays)
+                    {
+                        MeasuredBusinessDays = measured.GetValueOrDefault(pair.Key)?.BusinessDays ?? 0,
+                    }));
 
                 // A brief visit is not a changelog anomaly: nothing here adds to the anomalies or to what derive logs.
                 if (checksBriefVisits)
@@ -164,4 +182,7 @@ public sealed record DerivationSettings(DeliveryRules Delivery, BusinessCalendar
 {
     /// <summary>The threshold of every status checked for brief visits (GLOSSARY: Brief visit), by status ID. Empty when nothing is checked.</summary>
     public IReadOnlyDictionary<string, TimeSpan> BriefVisitThresholds { get; init; } = new Dictionary<string, TimeSpan>();
+
+    /// <summary>What is done with brief visits when time in status is measured (GLOSSARY: Treatment). Brief visits are counted and nothing is left out unless this says otherwise.</summary>
+    public BriefVisitTreatment TimeInStatusTreatment { get; init; } = new CountBriefVisits();
 }

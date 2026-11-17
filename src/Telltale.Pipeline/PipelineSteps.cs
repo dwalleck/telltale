@@ -348,6 +348,13 @@ public sealed class PipelineSteps
             throw new UserFacingException("briefVisitThresholds in the configuration file changed since the derived data was built. Run derive first.");
         }
 
+        // The measured time in status was built under the treatment the last derive recorded, and the report
+        // states that treatment. Deriving again is all it takes: the treatment decides nothing about what is fetched.
+        if (derivedFrom.BriefVisitTreatment != current.BriefVisitTreatment)
+        {
+            throw new UserFacingException("briefVisitTreatment in the configuration file changed since the derived data was built. Run derive first.");
+        }
+
         // Each check above compares the fields it knows and says which setting changed. This one compares the
         // two records whole, so that a field added later and forgotten above still stops the command: the
         // message is less exact, and stale derived data is never passed off as current.
