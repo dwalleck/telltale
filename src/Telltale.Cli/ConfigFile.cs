@@ -1,6 +1,8 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using Telltale.Core;
 using Telltale.Core.Configuration;
 using Telltale.Core.Workflow;
@@ -31,6 +33,9 @@ public static class ConfigFile
         // briefVisitTreatment is too, so that a part or a value the tool does not know is refused without being repeated.
         // Each setting has a type of its own, and its reader is found by that type.
         Converters = { new MinimumGroupSizeConverter(), new BriefVisitThresholdsConverter(), new BriefVisitTreatmentConverter() },
+
+        // The reader the runtime would choose anyway, named so that the settings it maps can be asked for (KnownSettings).
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
     };
 
     /// <summary>
@@ -103,6 +108,99 @@ public static class ConfigFile
         }
     }
 
+    /// <summary>
+    /// What a walk over every key of a configuration file found, at any depth and before any setting is read.
+    /// </summary>
+    /// <param name="KeyIsNotText">
+    /// A key is spelled with an escape for half of a character pair (<c>"\uD800"</c>). No text can hold it, so
+    /// no reader can give its name, and the reader's own failure on it is not one a command reports plainly.
+    /// </param>
+    /// <param name="KeyIsWrittenTwice">A key is written twice in one object, in whatever spelling.</param>
+    /// <param name="SettingOfKeyWrittenTwice">
+    /// The setting the first such key is under, when it is under one whose name the tool knows; null at the
+    /// top level of the file, in a file whose root is not an object, and under a name the tool does not know.
+    /// It is one of the tool's own names, never text taken from the file.
+    /// </param>
+    internal readonly record struct KeyFaults(bool KeyIsNotText, bool KeyIsWrittenTwice, string? SettingOfKeyWrittenTwice);
+
+    /// <summary>The names of the settings the reader maps, as the file spells them.</summary>
+    private static readonly Lazy<IReadOnlyList<string>> KnownSettings = new(() => [.. Options.GetTypeInfo(typeof(TelltaleConfig)).Properties.Select(property => property.Name)]);
+
+    /// <summary>
+    /// Walks every key of <paramref name="utf8"/>, the file's content without a byte order mark, as leniently
+    /// as the file is read (comments, trailing commas). It gives back facts and no text of the file, so that
+    /// what a command says about a key never repeats it: what was typed as a key could be a secret pasted
+    /// into the wrong place (owner decisions D43, D108). Content that is not JSON has no fault here: the
+    /// reader that reads the file says what is wrong with it.
+    /// </summary>
+    internal static KeyFaults FindKeyFaults(ReadOnlySpan<byte> utf8)
+    {
+        if (utf8.StartsWith(Encoding.UTF8.Preamble))
+        {
+            utf8 = utf8[Encoding.UTF8.Preamble.Length..];
+        }
+
+        var reader = new Utf8JsonReader(utf8, new JsonReaderOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
+
+        // The keys seen so far in each object that is open; a list has none.
+        var open = new Stack<HashSet<string>?>();
+        var faults = default(KeyFaults);
+        string? topLevelKey = null;
+        try
+        {
+            while (reader.Read())
+            {
+                switch (reader.TokenType)
+                {
+                    case JsonTokenType.StartObject:
+                        open.Push(new HashSet<string>(StringComparer.Ordinal));
+                        break;
+                    case JsonTokenType.StartArray:
+                        open.Push(null);
+                        break;
+                    case JsonTokenType.EndObject or JsonTokenType.EndArray:
+                        open.Pop();
+                        break;
+                    case JsonTokenType.PropertyName:
+                        string key;
+                        try
+                        {
+                            key = reader.GetString()!;
+                        }
+                        catch (InvalidOperationException)
+                        {
+                            faults = faults with { KeyIsNotText = true };
+                            break;
+                        }
+
+                        var atTopLevel = open.Count == 1;
+                        if (!open.Peek()!.Add(key) && !faults.KeyIsWrittenTwice)
+                        {
+                            var setting = atTopLevel ? null : KnownSettings.Value.FirstOrDefault(known => known == topLevelKey);
+                            faults = faults with { KeyIsWrittenTwice = true, SettingOfKeyWrittenTwice = setting };
+                        }
+
+                        if (atTopLevel)
+                        {
+                            topLevelKey = key;
+                        }
+
+                        break;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            return default;
+        }
+
+        return faults;
+    }
+
+    /// <summary>What every command says of a file in which a key is no text (<see cref="KeyFaults.KeyIsNotText"/>). It repeats nothing of the file.</summary>
+    internal static UserFacingException KeyIsNotText(string path) =>
+        new($"The configuration file {path} is not valid: a key is written with an escape for half of a character pair, which no text can hold.");
+
     /// <summary>What refuses a setting: the reader, or the setting's rule.</summary>
     private static bool IsRefusal(Exception exception) => exception is JsonException or SettingRefusedException;
 
@@ -128,9 +226,17 @@ public static class ConfigFile
     /// </summary>
     public static async Task<TelltaleSettings> ReadAsync(Stream stream, string path, bool requireDone = true, CancellationToken cancellationToken = default)
     {
+        using var content = new MemoryStream();
+        await stream.CopyToAsync(content, cancellationToken);
+        if (FindKeyFaults(content.ToArray()).KeyIsNotText)
+        {
+            throw KeyIsNotText(path);
+        }
+
+        content.Position = 0;
         try
         {
-            var config = await JsonSerializer.DeserializeAsync<TelltaleConfig>(stream, Options, cancellationToken)
+            var config = await JsonSerializer.DeserializeAsync<TelltaleConfig>(content, Options, cancellationToken)
                 ?? throw new UserFacingException($"The configuration file {path} is empty.");
             return TelltaleSettings.From(config, requireDone);
         }
