@@ -20,7 +20,7 @@ public union BriefVisitTreatment(CountBriefVisits, ExcludeBriefVisits);
 /// The treatment of brief visits, applied (GLOSSARY: Treatment): the one place a treatment changes what is
 /// measured, with one function for each metric a treatment can change. For time in status it sits between
 /// finding an issue's stays (<see cref="BriefVisits.Stays"/>) and measuring its time in status
-/// (<see cref="TimeInStatus.During"/>), and reads the brief visit rule (<see cref="BriefVisits.IsBrief"/>)
+/// (<see cref="TimeInStatus.During"/>), and reads the brief visit rule (<see cref="BriefVisits.IsBriefVisit"/>)
 /// without restating it. For cycle time it sits between measuring a delivered issue's cycle and storing it,
 /// and reads whether the cycle starts with a brief visit without deciding it.
 /// </summary>
@@ -112,7 +112,7 @@ public static class BriefVisitTreatments
     private static IReadOnlyList<StatusInterval> WithoutBriefVisits(IReadOnlyList<StatusInterval> intervals, IReadOnlyList<Stay> stays, IReadOnlyDictionary<string, TimeSpan> thresholds)
     {
         var briefVisits = stays
-            .Where(stay => thresholds.TryGetValue(stay.StatusId, out var threshold) && BriefVisits.IsBrief(stay, threshold))
+            .Where(stay => BriefVisits.IsBriefVisit(stay, thresholds))
             .ToList();
         if (briefVisits.Count == 0)
         {

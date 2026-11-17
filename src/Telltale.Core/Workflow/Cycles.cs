@@ -52,8 +52,7 @@ public static class Cycles
     /// </summary>
     public static bool StartsWithBriefVisit(IReadOnlyList<Stay> stays, StatusRoles roles, IReadOnlyDictionary<string, TimeSpan> thresholds) =>
         stays.FirstOrDefault(stay => roles.IsWork(stay.StatusId)) is { } first
-        && thresholds.TryGetValue(first.StatusId, out var threshold)
-        && BriefVisits.IsBrief(first, threshold);
+        && BriefVisits.IsBriefVisit(first, thresholds);
 
     /// <summary>
     /// How many times the issue was reopened: its transitions out of a done-role status into one that is not
