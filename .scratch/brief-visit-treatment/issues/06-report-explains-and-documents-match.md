@@ -22,7 +22,8 @@ Spec: `../spec.md` ("The report", method note; "Documents changed with the code"
 - [ ] The README's "What a report shows" has the new lines, its `query` section has the new view and the new column, and `derive` is listed as needed after a treatment change
 - [ ] The README notes that two derives under different treatments can be compared, beside its existing note on thresholds (D79, D95)
 - [ ] The README's refusal messages match the ones the tool gives
-- [ ] The glossary's last sentence of "Brief visit" no longer says nothing is done with one
+- [ ] The glossary's "Brief visit" entry agrees with the "Treatment" entry in both clauses: which row the count is of (the row before anything was left out, D93), and the sentence that says no duration is excluded or corrected because of one
+- [ ] `CLAUDE.md` names D94, D95, D97 and D98 among the recorded exceptions to the minimum group size rule, beside D37, D78 and D79 (the owner consented on 2026-11-17, run decision bvt-D12); nothing else in `CLAUDE.md` changes
 - [ ] The paragraph replaces the sentences tickets 02 to 04 corrected one at a time, and nothing it says is untrue under any of the four combinations of the two parts
 - [ ] The owner decisions list has every one of D83 to D101, each with its source
 - [ ] The project handoff document has one dated line pointing at the spec
