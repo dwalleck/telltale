@@ -177,9 +177,12 @@ public sealed record TelltaleSettings
     /// brief visits out while no status is listed would leave nothing out, and the owner would be left believing
     /// figures were adjusted: it is refused, for either part. A cycle starts in a status with the work role
     /// (<paramref name="roles"/>), so leaving out for cycle time while no listed status has that role would
-    /// leave no cycle out either, and is refused for the same reason. Throws <see cref="SettingRefusedException"/>.
+    /// leave no cycle out either, and is refused for the same reason. <c>discover</c> asks this of an existing
+    /// file before it calls Jira, and passes no roles when the file has none yet: then the rule on the work
+    /// role is not applied, and waits for the roles. Throws <see cref="SettingRefusedException"/>; no message
+    /// repeats anything written in the file but the tool's own words for a part and a treatment.
     /// </summary>
-    public static BriefVisitTreatmentSetting CheckedBriefVisitTreatment(BriefVisitTreatmentSetting written, IReadOnlyDictionary<string, TimeSpan> thresholds, StatusRoles roles)
+    public static BriefVisitTreatmentSetting CheckedBriefVisitTreatment(BriefVisitTreatmentSetting written, IReadOnlyDictionary<string, TimeSpan> thresholds, StatusRoles? roles)
     {
         if (thresholds.Count == 0 && BriefVisitTreatments.LeavesOut(written.TimeInStatus))
         {
@@ -194,7 +197,7 @@ public sealed record TelltaleSettings
                 throw new SettingRefusedException($"{BriefVisitTreatmentSetting.Name}.{BriefVisitTreatmentSetting.CycleTimeName} is {BriefVisitTreatments.Exclude}, and no status is listed in briefVisitThresholds, so no cycle would be left out. {Remedy}");
             }
 
-            if (!thresholds.Keys.Any(roles.IsWork))
+            if (roles is not null && !thresholds.Keys.Any(roles.IsWork))
             {
                 throw new SettingRefusedException($"{BriefVisitTreatmentSetting.Name}.{BriefVisitTreatmentSetting.CycleTimeName} is {BriefVisitTreatments.Exclude}, and no status listed in briefVisitThresholds has the role work, so no cycle could start with a brief visit and none would be left out. {Remedy}");
             }

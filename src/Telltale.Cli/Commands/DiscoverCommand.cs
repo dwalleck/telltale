@@ -30,6 +30,9 @@ internal static class DiscoverCommand
         AllowDuplicateProperties = false,
     };
 
+    /// <summary>The thresholds of a file that has no <c>briefVisitThresholds</c>: no status is listed.</summary>
+    private static readonly IReadOnlyDictionary<string, TimeSpan> NoBriefVisitThresholds = new Dictionary<string, TimeSpan>();
+
     public static Command Create(AppServices services)
     {
         var siteUrl = new Option<string?>("--site-url") { Description = "The Jira site, e.g. https://example.atlassian.net/. Needed the first time." };
@@ -157,12 +160,21 @@ internal static class DiscoverCommand
         // They are refused here in the same way. Once the file has roles discover adds none, so the statuses
         // listed are checked against them now. A file with no roles yet gets them from Jira, so there only
         // the thresholds are checked now, and the statuses by the check of the text about to be written.
-        if (root.TryGetPropertyValue("briefVisitThresholds", out var briefVisitThresholds))
+        // The treatment of brief visits is the owner's in the same way and is checked with them: what it is,
+        // and whether a status is listed for it to act on, now; whether a listed status has the work role,
+        // now when the file has roles, and otherwise by that later check (owner decision D73).
+        var hasThresholds = root.TryGetPropertyValue("briefVisitThresholds", out var briefVisitThresholds);
+        var hasTreatment = root.TryGetPropertyValue(BriefVisitTreatmentSetting.Name, out var briefVisitTreatment);
+        if (hasThresholds || hasTreatment)
         {
             try
             {
                 var roles = fileHadNoRoles ? null : StatusRoles.Parse(statusRoles.Select(role => KeyValuePair.Create(role.Key, RoleText(role.Value))));
-                ConfigFile.RequireBriefVisitThresholds(briefVisitThresholds, roles, path);
+                var thresholds = hasThresholds ? ConfigFile.RequireBriefVisitThresholds(briefVisitThresholds, roles, path) : NoBriefVisitThresholds;
+                if (hasTreatment)
+                {
+                    ConfigFile.RequireBriefVisitTreatment(briefVisitTreatment, thresholds, roles, path);
+                }
             }
             catch (UserFacingException exception)
             {
