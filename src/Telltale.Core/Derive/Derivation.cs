@@ -88,15 +88,16 @@ public static class Derivation
             var reopens = Cycles.ReopenCount(timeline.Entries, roles);
             var outcome = Delivery.Of(issue.StatusId, issue.ResolutionId, timeline.Entries, delivery);
 
-            // The issue's stays are the same for its cycle and for every sprint: worked out once, when first needed.
-            IReadOnlyList<Stay>? stays = null;
+            // The issue's stays are the same for its cycle and for every sprint: worked out once, here, and only
+            // when a status is listed. With none listed there is no stay to look at, so no cycle starts with a brief visit.
+            IReadOnlyList<Stay> stays = checksBriefVisits ? BriefVisits.Stays(timeline) : [];
 
             // The one place an issue's cycle is built from its outcome.
             cycles.Add(outcome switch
             {
                 Delivered delivered => DeliveredCycle(
                     issue, delivered, deliverySprints.For(delivered.At), Cycles.Measure(timeline.Entries, roles, delivered.At, calendar), pointChanges[issue.IssueId], reopens,
-                    startsWithBriefVisit: checksBriefVisits && Cycles.StartsWithBriefVisit(stays ??= BriefVisits.Stays(timeline), roles, settings.BriefVisitThresholds)),
+                    startsWithBriefVisit: Cycles.StartsWithBriefVisit(stays, roles, settings.BriefVisitThresholds)),
 
                 // An abandoned issue reached done, so it has a cycle end, but it is not a delivery: it belongs to
                 // no delivery sprint and has no cycle time.
@@ -123,7 +124,7 @@ public static class Derivation
                 // A brief visit is not a changelog anomaly: nothing here adds to the anomalies or to what derive logs.
                 if (checksBriefVisits)
                 {
-                    briefVisits.AddRange(BriefVisits.During(countedTime, stays ??= BriefVisits.Stays(timeline), settings.BriefVisitThresholds)
+                    briefVisits.AddRange(BriefVisits.During(countedTime, stays, settings.BriefVisitThresholds)
                         .Order(StringComparer.Ordinal)
                         .Select(statusId => new SprintBriefVisit(issue.IssueId, window.SprintId, statusId)));
                 }
