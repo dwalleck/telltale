@@ -19,9 +19,9 @@ One markdown file per sprint, with:
 - **Time in status:** how many issues spent time in each workflow status, their median time and total business days. Totals sum issue time within the sprint and membership windows, not effort.
 - **Baseline columns:** cycle-time medians and P85s and time-in-status medians pooled over a fixed list of earlier sprints, for comparison.
 - **Method note and data quality footer:** how the figures were computed and what was left out.
-- **Brief visit lines in the footer:** when the configuration lists statuses under `briefVisitThresholds`, one line for each listed status that has a row in the sprint's time in status table says how many of the issues in that row had a visit shorter than the status's threshold, or reads `suppressed`. A listed status with no row has no line, and a sprint whose tables are withheld has none. No figure is changed because of a brief visit unless `briefVisitTreatment` says so. See [Brief visit thresholds](#brief-visit-thresholds).
+- **Brief visit lines in the footer:** when the configuration lists statuses under `briefVisitThresholds`, one line for each listed status that has a row in the sprint's time in status table, or had one before any brief visit was left out, says how many of the issues in the row before anything was left out had a visit shorter than the status's threshold, or reads `suppressed`. A listed status that had no such row has no line, and a sprint whose tables are withheld has none. No figure is changed because of a brief visit unless `briefVisitTreatment` says so. See [Brief visit thresholds](#brief-visit-thresholds).
 - **A cycle time line in the footer:** when a listed status has the role `work`, the footer's last line says how many of the sprint's delivered issues have a cycle that starts with a brief visit, or reads `suppressed`.
-- **What leaving brief visits out adds:** when `briefVisitTreatment` sets `exclude` for time in status or for cycle time, a line under the heading says which of the two were adjusted, the row of every listed status is marked `(adjusted: see the footer)`, the cycle time table has a note under it, each brief visit line goes on to the number of issues left out of the row, and the method note says what was left out, why, and what that does not do. See [Brief visit treatment](#brief-visit-treatment).
+- **What leaving brief visits out adds:** when `briefVisitTreatment` sets `exclude` for time in status or for cycle time, a line under the heading says which of the two were adjusted, and the method note says what was left out, why, and what that does not do. With `exclude` for time in status, the row of every listed status is marked `(adjusted: see the footer)` and each brief visit line goes on to the number of issues left out of the row. With `exclude` for cycle time, the cycle time table has a note under it. See [Brief visit treatment](#brief-visit-treatment).
 
 Time is counted in business days in the team's time zone, skipping weekends and the configured holidays. The definitions are in [`GLOSSARY.md`](GLOSSARY.md).
 
@@ -324,10 +324,10 @@ The setting changes only this rule. Person fields are still hashed before they a
 - A threshold is applied to the nearest ten-millionth of a second, and one that rounds to less than that is refused. The report prints the threshold as applied, in plain digits. `0.5` is thirty seconds exactly.
 - A stay exactly as long as the threshold is not brief.
 
-What a report then shows:
+What a report then shows. A status's row, here and in the next list, is its row in the sprint's time in status table before any brief visit was left out. While brief visits are counted, the default, that is the row the table shows. Under `exclude` for time in status the table shows what remains, which can be fewer issues or no row at all; see [Brief visit treatment](#brief-visit-treatment).
 
-- **One line per listed status at the end of the footer**, in board order, for each listed status that has a row in the sprint's time in status table. A shown count reads `Development: 4 issues had a visit shorter than 5 minutes`. A withheld one reads `Development: issues with a visit shorter than 5 minutes: suppressed`.
-- **The count is of issues in that status's time in status row**, each counted once, so it is never larger than the row's issue count.
+- **One line per listed status at the end of the footer**, in board order, for each listed status that has such a row. A shown count reads `Development: 4 issues had a visit shorter than 5 minutes`. A withheld one reads `Development: issues with a visit shorter than 5 minutes: suppressed`.
+- **The count is of issues in that row**, each counted once, so it is never larger than that row's issue count. Under `exclude` for time in status it can be larger than the issue count the table shows.
 - **One more line when a listed status has the role `work`**, after those: `Delivered issues whose cycle starts with a brief visit, which are in the cycle time figures: 4`. A cycle starts with a brief visit when the stay that begins where the cycle starts is one. The line is there for every sprint, also one with a team smaller than `team`, where it reads `suppressed`.
 - **A paragraph at the end of the method note** says what a brief visit is, that brief visits are counted and no figure was excluded or corrected, what the footer's last line counts, and that the rule was added on 2026-11-12, after the first run on real data.
 - **No other figure changes**, unless `briefVisitTreatment` says so (see [Brief visit treatment](#brief-visit-treatment)). The medians, totals and counts are what they are without the setting, and so is the footer's changelog anomaly count: a brief visit is not a changelog anomaly, and `derive` and `run` print nothing about it.
@@ -335,12 +335,12 @@ What a report then shows:
 
 How the minimum group size applies:
 
-- A count is withheld when its row in the time in status table has its figures withheld, or when fewer than `assigneesBehindAFigure` distinct assignees (three by default) are among the issues counted.
+- A count is withheld when that row has, or with nothing left out would have, its figures withheld, or when fewer than `assigneesBehindAFigure` distinct assignees (three by default) are among the issues counted.
 - A count of zero is withheld too, so a zero and a withheld count both read `suppressed`.
 - A sprint with a team smaller than `team` (five by default) has no brief visit lines.
 - With `assigneesBehindAFigure` at zero no count is withheld, and a count of zero reads `0 issues had a visit shorter than 5 minutes`.
 - The number in the cycle time line is withheld when the sprint's delivered count is withheld, when fewer than `assigneesBehindAFigure` distinct assignees are among the issues it counts, and when it is zero. With `assigneesBehindAFigure` at zero a number of zero reads `0`.
-- A shown count can be subtracted from the row's issue count, which gives the number of issues with no brief visit. That number is not checked against the minimum group size.
+- A shown count can be subtracted from that row's issue count, which gives the number of issues with no brief visit. That number is not checked against the minimum group size. Under `exclude` for time in status the table shows the issue count of what remains and not of that row, so the subtraction there gives another number; see [Brief visit treatment](#brief-visit-treatment).
 - The number in the cycle time line can be combined with shown brief visit counts to say something about a withheld one: the issues it counts are often among those the per-status counts count. The number is not withheld for it.
 - Each derive's counts are checked on their own. Deriving under one threshold and then under another gives two counts whose difference is the number of issues with a stay between the two thresholds, and that difference can rest on one or two people. The tool does not prevent this: whoever edits the configuration file is trusted with it, as whoever opens the database file is.
 
