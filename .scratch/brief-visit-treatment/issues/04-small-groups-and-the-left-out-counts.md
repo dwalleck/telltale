@@ -4,7 +4,7 @@
 
 Tickets 01 to 03 put the rules in the views. This ticket adds the left-out number, tests every rule from every side, and fixes what it finds.
 
-Four things are accepted and recorded, not closed: the delivered count less the sum of the bucket counts bounds the number of delivered issues with no cycle time (D94); a figure under `count` can be set beside the same figure under `exclude` by deriving twice (D95); the cycle count of ticket 01 can be combined with shown brief visit counts to give a withheld one (D97); and a listed status with a footer line and no table row shows that its left-out number is at least one (D98). The probe pins each as shown.
+Four things are accepted and recorded, not closed: the delivered count less the sum of the bucket counts bounds the number of delivered issues with no cycle time (D94); a figure under `count` can be set beside the same figure under `exclude` by deriving twice (D95); the cycle count of ticket 01 can be combined with shown brief visit counts to give a withheld one or a bound on it (D97); and a listed status with a footer line and no table row shows that its left-out number is at least one (D98). The probe pins each as shown.
 
 Each ticket corrects the sentence of the method note that it makes untrue: here, what the note says about when a count reads `suppressed` and about a listed status with no row. The wording under `count` does not change.
 
