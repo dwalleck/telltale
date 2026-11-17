@@ -78,8 +78,8 @@ public class KeyThatIsNotTextTests
     {
         // Two faults in one key: the one that stops every command is reported, and no part of the key.
         await using var pipeline = new PipelineHarness();
-        const string File_ = """{ "statusRoles": { "synthetic-pasted-\uD800": 1, "synthetic-pasted-\uD800": 2 } }""";
-        await File.WriteAllTextAsync(pipeline.ConfigPath, File_);
+        const string WrittenTwice = """{ "statusRoles": { "synthetic-pasted-\uD800": 1, "synthetic-pasted-\uD800": 2 } }""";
+        await File.WriteAllTextAsync(pipeline.ConfigPath, WrittenTwice);
 
         var exit = await pipeline.RunWithFilesAsTheyAreAsync(DiscoverTests.FirstDiscover);
 
@@ -87,6 +87,6 @@ public class KeyThatIsNotTextTests
             $"discover did not write {pipeline.ConfigPath}, because run would refuse it: The configuration file {pipeline.ConfigPath} is not valid: {Refusal}\n");
         await Assert.That(pipeline.Out.ToString()).IsEmpty();
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(File_);
+        await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(WrittenTwice);
     }
 }
