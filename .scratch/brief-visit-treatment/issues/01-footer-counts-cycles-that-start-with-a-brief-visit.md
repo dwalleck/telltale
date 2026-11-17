@@ -8,7 +8,12 @@ The view applies the whole withholding rule from this ticket on, so that an ungu
 
 A new count is defined here, so the record changes in the same commit: the glossary and the owner decisions list.
 
-Spec: `../spec.md` (owner decisions D87 and D90; "Deriving"; "The metric views"; "The report", footer, cycle time; user stories 21, 25, 29, 33, 35, 36, 38 and 39).
+Decided at the start of the run (2026-11-17, spec "Decisions made at the start of the implementation run"):
+
+- D97: the new number can be combined with shown brief visit counts to give a withheld one. Accepted and recorded; the number is not withheld for it. The existing probe that compares stores to the byte will differ in this number: it pins the number as shown, as the earlier probe pins the remainder of D78.
+- D100: the line comes directly after the brief visit lines. Existing assertions on the footer change for it; each is listed in the commit message.
+
+Spec: `../spec.md` (owner decisions D87, D90, D97 and D100; "Deriving"; "The metric views"; "The report", footer, cycle time; user stories 21, 25, 29, 33, 35, 36, 38 and 39).
 
 **Blocked by:** None (can start immediately).
 
@@ -26,10 +31,11 @@ Spec: `../spec.md` (owner decisions D87 and D90; "Deriving"; "The metric views";
 - [ ] The derived data gains a flag per issue and nothing about a person: no duration, no timestamp
 - [ ] `derive` rebuilds the flag with the rest; two derives of the same raw data and settings give the same numbers
 - [ ] With no status listed, the report and every existing view's results are identical to today's, apart from the as-of time
-- [ ] With statuses listed, the report differs from today's only by the new footer line
+- [ ] With statuses listed, the report differs from today's only by the new footer line, which comes directly after the brief visit lines (D100)
+- [ ] The probe over the metric views pins the accepted combination of D97 as shown, and still finds no other way to tell a zero from a withheld count
 - [ ] The anomaly count and the console output of `derive` and `run` are unchanged
-- [ ] The glossary's "Minimum group size" entry has a sentence covering this count, and the owner decisions list has D87 and D90
+- [ ] The glossary's "Minimum group size" entry has a sentence covering this count, and the owner decisions list has D87, D90, D97 and D100
 - [ ] The commit message gives the reason for the new count
-- [ ] Every existing test passes, apart from lists of metric views that gain the new view
+- [ ] Every existing test passes, apart from lists of metric views that gain the new view and assertions on the footer that gain the new line; the commit message lists each changed assertion
 - [ ] Expected multi-line strings are normalized to LF
 - [ ] All fixtures are synthetic

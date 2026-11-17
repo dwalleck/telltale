@@ -112,6 +112,18 @@ Each narrows something the decisions' words do not settle. The owner confirmed t
 6. **D95. Two derives can be compared.** A figure under `count` and the same figure under `exclude` can be set side by side by deriving twice, which says something about the issues left out even when their count is withheld. This is accepted and recorded, as D79 is: whoever edits the configuration file is trusted with it.
 7. **D96. Which treatment the evaluation is judged under** is the owner's to choose and is written in `docs/context/pilot-plan.md`, with its date and reason. This spec does not choose it. The owner chose on 2026-11-17, before the setting was built: `exclude` for both parts. The pilot plan's "Brief visits" section is the record.
 
+### Decisions made at the start of the implementation run (2026-11-17)
+
+The exploration before ticket 01 found places where this spec did not fit the code. The owner decided each one. Where one differs from a sentence elsewhere in this spec, the decision stands.
+
+- **D97.** The number of delivered issues whose cycle starts with a brief visit can be combined with shown brief visit counts to give a withheld one: cycles that start with a brief visit are among the issues the per-status counts count. This is accepted and recorded, as D78 and D94 are. The number is not withheld for it. The probe that proves a zero cannot be told from a withheld count pins this as shown.
+- **D98.** Under `exclude`, a listed status whose every issue was left out has a footer line and no row in the time in status table, which shows that its left-out number is at least one even when the number reads `suppressed`. This is accepted and recorded. The line stays, so that a status does not leave the report unexplained.
+- **D99.** Under `exclude`, the brief visit count of D62 is withheld when the recorded row's median would be withheld, not the adjusted row's: the count is measured against the recorded row (D93). The count's own check of the assignees behind it still applies. A count can therefore be shown beside a row that reads `suppressed`.
+- **D100.** The footer's cycle time line comes directly after the brief visit lines.
+- **D101.** Under `exclude` for cycle time, the note under the cycle time table is printed whatever the table holds, also when it is the single word `suppressed` or says no issue has a cycle time.
+
+Two changes of ticket scope were decided with them and are in the tickets: a refusal is built in the ticket that first accepts the value it refuses, and each ticket corrects the sentence of the method note that it makes untrue.
+
 ### Configuration
 
 - `briefVisitTreatment` sits at the top level of the configuration file beside `briefVisitThresholds`:

@@ -23,7 +23,8 @@ Spec: `../spec.md` ("The report", method note; "Documents changed with the code"
 - [ ] The README notes that two derives under different treatments can be compared, beside its existing note on thresholds (D79, D95)
 - [ ] The README's refusal messages match the ones the tool gives
 - [ ] The glossary's last sentence of "Brief visit" no longer says nothing is done with one
-- [ ] The owner decisions list has every one of D83 to D96, each with its source
+- [ ] The paragraph replaces the sentences tickets 02 to 04 corrected one at a time, and nothing it says is untrue under any of the four combinations of the two parts
+- [ ] The owner decisions list has every one of D83 to D101, each with its source
 - [ ] The project handoff document has one dated line pointing at the spec
 - [ ] Nothing in a commit, a test or a document holds a real sprint ID, status ID, threshold or report value
 - [ ] Expected multi-line strings are normalized to LF
