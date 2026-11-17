@@ -376,7 +376,7 @@ public class BriefVisitsLeftOutOfTimeInStatusTests
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).DoesNotContain("| Fake Development");
         // The number of cycles that start with a brief visit is what it is while brief visits are counted (D87).
-        await Assert.That(report).EndsWith("\n- Fake Development: 4 issues had a visit shorter than 5 minutes\n" + ReportText.CyclesThatStartWithBriefVisit("4"));
+        await Assert.That(report).EndsWith("\n- Fake Development: 4 issues had a visit shorter than 5 minutes" + ReportText.LeftOutOfTheRow("4") + "\n" + ReportText.CyclesThatStartWithBriefVisit("4"));
     }
 
     [Test]
@@ -405,7 +405,7 @@ public class BriefVisitsLeftOutOfTimeInStatusTests
             + "| 41 | Fake Development | 2 | NULL | NULL | 1 |\n"
             + "| 41 | Fake Review | 3 | 2 | 5.999 | 0 |\n");
         await Assert.That(await QueryAsync(pipeline, BriefVisitsSql)).IsEqualTo(BriefVisitsHead + "| 41 | Fake Development | 5 | 3 | 0 |\n");
-        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith("\n- Fake Development: 3 issues had a visit shorter than 5 minutes\n" + ReportText.CyclesThatStartWithBriefVisit("3"));
+        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith("\n- Fake Development: 3 issues had a visit shorter than 5 minutes" + ReportText.LeftOutOfTheRow("3") + "\n" + ReportText.CyclesThatStartWithBriefVisit("3"));
     }
 
     [Test]
@@ -435,9 +435,12 @@ public class BriefVisitsLeftOutOfTimeInStatusTests
         await Assert.That(leftOut).Contains("\n| Fake Development (adjusted: see the footer) | 3 | 2.0 | 6.0 |\n");
 
         // Nothing else differs but the method note's sentences that leaving out makes untrue (bvt-D10): the
-        // report with those five put back as they read under count, and the line and the mark taken away, is
-        // the report under count.
-        var putBack = leftOut.Replace(LineUnderTheHeading, "").Replace(Mark, "");
+        // report with those five put back as they read under count, and the line, the mark and what the
+        // footer line goes on to say taken away, is the report under count. The footer line of the listed
+        // status that has a row goes on to the number left out of it, which is nothing and so reads as a
+        // withheld number does.
+        await Assert.That(leftOut).Contains("\n- Fake Development: issues with a visit shorter than 5 minutes: suppressed" + ReportText.LeftOutOfTheRow("suppressed") + "\n");
+        var putBack = leftOut.Replace(LineUnderTheHeading, "").Replace(Mark, "").Replace(ReportText.LeftOutOfTheRow("suppressed"), "");
         foreach (var (leftOutWording, countedWording) in MethodNoteSentences)
         {
             await Assert.That(counted).Contains(countedWording);

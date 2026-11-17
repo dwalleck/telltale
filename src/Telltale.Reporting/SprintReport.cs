@@ -110,8 +110,12 @@ public static class SprintReport
         // With no status listed the view has no rows, so it is not asked.
         if (briefVisitsChecked)
         {
-            AppendBriefVisits(report, await store.QueryViewsAsync<BriefVisitsRow>(
-                "SELECT status_name, threshold_minutes, brief_visit_issue_count, suppressed FROM brief_visits_per_sprint WHERE sprint_id = @sprintId ORDER BY board_position;",
+            // The number of issues left out of a row is asked for only when brief visits were left out: while
+            // they are counted the view has none, and the lines are what they were.
+            AppendBriefVisits(report, leftOutOfTimeInStatus, await store.QueryViewsAsync<BriefVisitsRow>(
+                leftOutOfTimeInStatus
+                    ? "SELECT status_name, threshold_minutes, brief_visit_issue_count, suppressed, left_out_issue_count, left_out_suppressed FROM brief_visits_per_sprint WHERE sprint_id = @sprintId ORDER BY board_position;"
+                    : "SELECT status_name, threshold_minutes, brief_visit_issue_count, suppressed FROM brief_visits_per_sprint WHERE sprint_id = @sprintId ORDER BY board_position;",
                 new { sprintId },
                 cancellationToken));
             AppendCyclesThatStartWithBriefVisit(report, leftOutOfCycleTime, await store.QueryViewsAsync<CycleStartsRow>(
@@ -543,8 +547,13 @@ public static class SprintReport
     /// board order; when brief visits are left out of time in status, one per listed status that had a row
     /// before anything was left out (owner decision D93). A line names the status and states its threshold. The view withholds a count as it does
     /// every figure, and a count of nothing with it, so the two read alike.
+    /// With <paramref name="leftOutOfTimeInStatus"/> a line goes on to say that those visits are left out of
+    /// the status's row, and how many of the issues had no other time in the status and so are not in the
+    /// row's count (GLOSSARY: Treatment; owner decisions D84, D86). The view withholds that number by the same
+    /// check, and a number of nothing with it. A status whose every issue was left out has a line and no row
+    /// in the table (D98).
     /// </summary>
-    private static void AppendBriefVisits(StringBuilder report, IReadOnlyList<BriefVisitsRow> rows)
+    private static void AppendBriefVisits(StringBuilder report, bool leftOutOfTimeInStatus, IReadOnlyList<BriefVisitsRow> rows)
     {
         foreach (var row in rows)
         {
@@ -552,12 +561,20 @@ public static class SprintReport
             report.Append("- ").Append(Markdown.Text(row.StatusName)).Append(": ");
             if (row.Suppressed == 0 && row.BriefVisitIssueCount is { } issues)
             {
-                report.Append(issues.ToString(CultureInfo.InvariantCulture)).Append(issues == 1 ? " issue" : " issues").Append(" had a visit shorter than ").Append(threshold).Append('\n');
+                report.Append(issues.ToString(CultureInfo.InvariantCulture)).Append(issues == 1 ? " issue" : " issues").Append(" had a visit shorter than ").Append(threshold);
             }
             else
             {
-                report.Append("issues with a visit shorter than ").Append(threshold).Append(": ").Append(Suppressed).Append('\n');
+                report.Append("issues with a visit shorter than ").Append(threshold).Append(": ").Append(Suppressed);
             }
+
+            if (leftOutOfTimeInStatus)
+            {
+                report.Append("; those visits are left out of the status's time in status row, and issues that had no other time in the status and so are not in the row's count: ")
+                    .Append(Figure(row.LeftOutSuppressed, row.LeftOutIssueCount?.ToString(CultureInfo.InvariantCulture)));
+            }
+
+            report.Append('\n');
         }
     }
 
@@ -690,6 +707,8 @@ public static class SprintReport
         public double ThresholdMinutes { get; init; }
         public long? BriefVisitIssueCount { get; init; }
         public long Suppressed { get; init; } = 1;
+        public long? LeftOutIssueCount { get; init; }
+        public long LeftOutSuppressed { get; init; } = 1;
     }
 
     private sealed class CycleStartsRow

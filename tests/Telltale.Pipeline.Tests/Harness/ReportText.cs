@@ -40,6 +40,14 @@ public static class ReportText
     public static string CyclesThatStartWithBriefVisitAndHaveNoCycleTime(string figure) =>
         $"- Delivered issues whose cycle starts with a brief visit, which have no cycle time: {figure}\n";
 
+    /// <summary>
+    /// How a listed status's footer line goes on, before its line break, when brief visits are left out of
+    /// time in status (owner decisions D84 and D86): that those visits are left out of the row, and the number
+    /// of issues that are not in the row's count. <paramref name="figure"/> is the number, or <c>suppressed</c>.
+    /// </summary>
+    public static string LeftOutOfTheRow(string figure) =>
+        $"; those visits are left out of the status's time in status row, and issues that had no other time in the status and so are not in the row's count: {figure}";
+
     /// <summary>What follows the two tables: the method note's heading.</summary>
     public const string MethodHeading = "\n## Method\n";
 }
