@@ -105,8 +105,8 @@ public class BriefVisitsLeftOutSmallGroupTests
 
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
 
-        // The line is there with no row above it, which shows that at least one issue was left out, also when
-        // the number is withheld: the owner accepted that (D98).
+        // The line is there with no row above it, which shows that the number left out and the brief visit
+        // count are each at least one, also when they are withheld: the owner accepted that (D98).
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).DoesNotContain("| Fake Development");
         await Assert.That(report).Contains("\n" + line + ReportText.LeftOutOfTheRow(leftOut) + "\n");
@@ -315,7 +315,8 @@ public class BriefVisitsLeftOutSmallGroupTests
     public async Task The_number_of_cycles_less_the_shown_brief_visit_counts_is_a_withheld_brief_visit_count_which_bounds_the_number_left_out(
         int caughtUpThroughDevelopment, int cycles, int lessTheShownCounts)
     {
-        // What the owner accepted (D97), as it shows with brief visits left out. Three people's issues did two
+        // What the owner accepted (D97, and D98 with it), as it shows with brief visits left out: where the
+        // subtraction gives a withheld brief visit count as nothing, the number left out is nothing too. Three people's issues did two
         // days in Development; three more people's went from New through Review in twenty seconds. Nobody's
         // issue, or two people's, was caught up through Development. The Development line withholds both its
         // counts either way, and the number left out of a status is never more than its brief visit count.
@@ -355,8 +356,7 @@ public class BriefVisitsLeftOutSmallGroupTests
     public async Task A_shown_brief_visit_count_beside_what_remains_of_its_row_gives_a_lower_bound_of_a_withheld_number_left_out(
         int withALongStayToo, int briefVisits, int remain, int atLeastLeftOut, string rowCells)
     {
-        // Not among what the owner accepted when this was written: reported as a decision needed, and pinned
-        // here as the views show it. Two people's issues were caught up through Development and left out, so
+        // What the owner accepted (D98, as widened on 2026-11-17), as shown. Two people's issues were caught up through Development and left out, so
         // the number left out is two and withheld. One or three more people's issues had a brief visit and a
         // stay of two days, and with one, a fourth person's issue did two days there. The brief visit count is
         // of the row before (D93, D99) and is shown; the row's issue count is of what remains and is always

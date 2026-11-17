@@ -27,13 +27,16 @@
 -- left_out_issue_count is how many of the issues that were in the row before anything was left out are not
 -- in the status's row in time_in_status_per_sprint, because their only business time in the status was brief
 -- visits. Each of them is among the issues with a brief visit. It is measured only when the rebuild left brief
--- visits out of time in status (run.brief_visit_treatment): while they are counted nothing is left out, the
+-- visits out of time in status (brief_visit_treatment): while they are counted nothing is left out, the
 -- number is null, and left_out_suppressed is 0, because nothing is withheld. When they are left out, the
 -- number is null and left_out_suppressed is 1 when fewer distinct assignees than a figure needs are among the
 -- issues left out, by the same check and the same numbers as the count: so a number of nothing reads as a
 -- withheld one does, and with the number of assignees at zero it is shown as 0. A row of this view with no
--- row in time_in_status_per_sprint shows that every issue of the status was left out, so that its number is
--- at least one also when it is withheld: the owner accepted that (D98).
+-- row in time_in_status_per_sprint shows that every issue of the status was left out, so that its number and
+-- its count are each at least one also when they are withheld. A shown count larger than the issue count of
+-- the status's row there shows that the number is at least their difference, and a count shown beside a row
+-- that is suppressed there shows that it is at least one. The owner accepted each, and no count is withheld
+-- for it (D98).
 CREATE VIEW brief_visits_per_sprint AS
 WITH threshold AS (
     SELECT CAST(j.key AS TEXT) AS status_id, CAST(j.value AS REAL) AS threshold_minutes
@@ -56,10 +59,10 @@ counted AS (
     GROUP BY v.sprint_id, v.status_id
 ),
 -- Whether the rebuild left brief visits out of time in status: the treatment it recorded, never the
--- configuration's.
+-- configuration's, read from the one view that gives it.
 treatment AS (
-    SELECT json_extract(brief_visit_treatment, '$.timeInStatus') = 'exclude' AS leaves_out
-    FROM run
+    SELECT time_in_status = 'exclude' AS leaves_out
+    FROM brief_visit_treatment
 ),
 -- The issues left out of a row: in it before anything was left out, and not in what remains.
 left_out AS (
