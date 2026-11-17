@@ -297,7 +297,11 @@ public static class SprintReport
             .Append("- Durations are in business days: days that are neither a weekend nor a company holiday, each counted in full (24 hours) in the team's time zone (").Append(quality.TimeZone).Append("). Calendar days are shown alongside: elapsed time divided by 24 hours.\n")
             .Append("- Cycle time runs from an issue's first entry into a work status to its last entry into a done status, for delivered issues only. It belongs to the sprint in which the issue was delivered.\n")
             .Append("- The median is the middle value, or the mean of the two middle values. The P85 is the smallest value with at least 85% of the values at or below it.\n")
-            .Append("- Time in status includes delivered and unfinished issues in statuses before done, clipped to the sprint window and each issue's membership intervals. An issue counts toward a status only if it spent more than zero business days there. Total business days sum that time across all contributing issues, including repeated visits; this is accumulated issue time, not effort or the sprint's elapsed duration. Totals and medians use the same privacy rules.\n");
+            .Append("- Time in status includes delivered and unfinished issues in statuses before done, clipped to the sprint window and each issue's membership intervals. An issue counts toward a status only if it spent more than zero business days there. Total business days sum that time across all contributing issues, including repeated visits")
+
+            // Under exclude a repeated visit that is brief is not in the total, so the sentence says so (bvt-D10).
+            .Append(leftOutOfTimeInStatus ? " and leaving out brief visits to a status listed for them (see the paragraph on brief visits below)" : "")
+            .Append("; this is accumulated issue time, not effort or the sprint's elapsed duration. Totals and medians use the same privacy rules.\n");
         AppendMinimumGroupSize(report, numbers, briefVisitsChecked);
 
         // Said only when there is a baseline: without one the report has no baseline column to explain.
@@ -331,7 +335,8 @@ public static class SprintReport
     /// a count of nothing is printed as 0. The lines come from the time in status table's rows, so a sprint
     /// short of a team has none.
     /// With <paramref name="leftOutOfTimeInStatus"/> (GLOSSARY: Treatment; owner decisions D84, D93, D99) four
-    /// sentences have another wording, because each would be untrue: which row the count is measured against
+    /// sentences have another wording, as the sentence on what the total sums has in the paragraph on time in
+    /// status (<see cref="AppendMethodNote"/>), because each would be untrue: which row the count is measured against
     /// (the one before anything was left out), what is done with a brief visit, which row's check withholds a
     /// count, and that a status whose every issue was left out has a line and no row. Under <c>count</c> every
     /// sentence is what it was before a treatment could be chosen.

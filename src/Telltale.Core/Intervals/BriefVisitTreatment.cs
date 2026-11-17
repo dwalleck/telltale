@@ -72,6 +72,8 @@ public static class BriefVisitTreatments
     /// clipped to a sprint window or to membership. Nothing else is left out: not a stay in a status that is
     /// not listed, not one the issue is still in, and not one bounded by a changelog anomaly, since none of
     /// those is a brief visit. A stay of no length is brief and has no interval, so it has no time to leave out.
+    /// When nothing is left out, <paramref name="intervals"/> itself is returned, the same list: a caller that
+    /// has already measured it can tell that it need not measure again, without reading the treatment's case.
     /// </summary>
     public static IReadOnlyList<StatusInterval> IntervalsToMeasure(
         IReadOnlyList<StatusInterval> intervals,
@@ -89,6 +91,11 @@ public static class BriefVisitTreatments
         var briefVisits = stays
             .Where(stay => thresholds.TryGetValue(stay.StatusId, out var threshold) && BriefVisits.IsBrief(stay, threshold))
             .ToList();
+        if (briefVisits.Count == 0)
+        {
+            return intervals;
+        }
+
         return [.. intervals.Where(interval => !briefVisits.Any(visit => Covers(visit, interval)))];
     }
 

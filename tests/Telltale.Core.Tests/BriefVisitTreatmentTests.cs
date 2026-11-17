@@ -50,6 +50,22 @@ public class BriefVisitTreatmentTests
     }
 
     [Test]
+    public async Task When_nothing_is_left_out_the_intervals_come_back_as_the_same_list_so_the_caller_need_not_measure_twice()
+    {
+        // Counted, and left out with no brief visit to leave out: a threshold of ten seconds, and a stay of twenty.
+        var timeline = CaughtUp();
+        var tenSeconds = new Dictionary<string, TimeSpan> { [Development] = TimeSpan.FromSeconds(10) };
+
+        var counted = Measured(timeline, new CountBriefVisits());
+        var nothingBrief = Measured(timeline, new ExcludeBriefVisits(), tenSeconds);
+        var leftOut = Measured(timeline, new ExcludeBriefVisits());
+
+        await Assert.That(counted).IsSameReferenceAs(timeline.Intervals);
+        await Assert.That(nothingBrief).IsSameReferenceAs(timeline.Intervals);
+        await Assert.That(leftOut).IsNotSameReferenceAs(timeline.Intervals);
+    }
+
+    [Test]
     public async Task Under_exclude_the_span_of_a_brief_visit_to_a_listed_status_is_not_measured()
     {
         var timeline = CaughtUp();

@@ -331,6 +331,34 @@ public class BriefVisitsLeftOutOfTimeInStatusTests
     }
 
     [Test]
+    [Arguments("SELECT sprint_id, status_id, issue_id FROM time_in_status_issue_recorded;")]
+    [Arguments("SELECT sprint_id, status_id, COUNT(*) FROM time_in_status_issue_recorded GROUP BY sprint_id, status_id;")]
+    [Arguments("SELECT b.status_name, (SELECT COUNT(*) FROM time_in_status_issue_recorded t WHERE t.sprint_id = b.sprint_id AND t.status_id = b.status_id) FROM brief_visits_per_sprint b;")]
+    public async Task Query_refuses_to_read_the_internal_view_of_the_issues_that_were_in_a_row_before_anything_was_left_out(string sql)
+    {
+        // The view holds a row per issue. A count of them less the row's shown issue count is the number of
+        // issues left out of the row, which no metric view gives yet.
+        await using var pipeline = new PipelineHarness();
+        AddSprint41WithItsTeam(pipeline.Jira);
+        AddFourCaughtUpIssuesOfFourPeople(pipeline.Jira);
+        AddTwoDaysInDevelopmentForThreePeople(pipeline.Jira);
+        ListDevelopment(pipeline);
+        LeaveBriefVisitsOutOfTimeInStatus(pipeline);
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+        pipeline.Out.GetStringBuilder().Clear();
+
+        var exit = await pipeline.RunAsync("query", sql);
+
+        await Assert.That(exit).IsEqualTo(1);
+        var error = pipeline.Error.ToString();
+        await Assert.That(error).StartsWith("This query reads only the metric views (");
+        await Assert.That(error).Contains("), and it asked for something else: ");
+        await Assert.That(error).DoesNotContain("time_in_status_issue_recorded, ");
+        await Assert.That(error.TrimEnd().Split('\n').Length).IsEqualTo(1);
+        await Assert.That(pipeline.Out.ToString()).IsEmpty();
+    }
+
+    [Test]
     public async Task A_status_whose_every_issue_was_left_out_has_no_row_and_its_brief_visit_count_is_still_of_the_row_before()
     {
         await using var pipeline = new PipelineHarness();
@@ -406,7 +434,7 @@ public class BriefVisitsLeftOutOfTimeInStatusTests
         await Assert.That(leftOut).Contains("\n| Fake Development (adjusted: see the footer) | 3 | 2.0 | 6.0 |\n");
 
         // Nothing else differs but the method note's sentences that leaving out makes untrue (bvt-D10): the
-        // report with those four put back as they read under count, and the line and the mark taken away, is
+        // report with those five put back as they read under count, and the line and the mark taken away, is
         // the report under count.
         var putBack = leftOut.Replace(LineUnderTheHeading, "").Replace(Mark, "");
         foreach (var (leftOutWording, countedWording) in MethodNoteSentences)
@@ -447,12 +475,15 @@ public class BriefVisitsLeftOutOfTimeInStatusTests
     private const string Mark = " (adjusted: see the footer)";
 
     /// <summary>
-    /// The four sentences of the method note's paragraph on brief visits that leaving out makes untrue, each
-    /// with its wording when brief visits are left out of time in status and its wording while they are
-    /// counted, which is what it was before a treatment could be chosen. Under the default numbers.
+    /// The sentences of the method note that leaving out makes untrue: one of its paragraph on time in status,
+    /// on what the total sums, and four of its paragraph on brief visits. Each is given with its wording when
+    /// brief visits are left out of time in status and its wording while they are counted, which is what it
+    /// was before a treatment could be chosen. Under the default numbers.
     /// </summary>
     private static readonly (string LeftOut, string Counted)[] MethodNoteSentences =
     [
+        (" Total business days sum that time across all contributing issues, including repeated visits and leaving out brief visits to a status listed for them (see the paragraph on brief visits below); this is accumulated issue time,",
+            " Total business days sum that time across all contributing issues, including repeated visits; this is accumulated issue time,"),
         (" For each status the configuration file lists (briefVisitThresholds), the footer gives how many of the issues that were in the status's time in status row before anything was left out had a brief visit during the time the row counts.",
             " For each status the configuration file lists (briefVisitThresholds), the footer gives how many of the issues in the status's time in status row had a brief visit during the time the row counts."),
         (" The time of every brief visit to a listed status is left out of the issue's time in that status (briefVisitTreatment in the configuration file), and an issue left with no business time in the status is not in its row: the row's count, median and total, and the baseline median, are of what remains. No other figure was changed because of a brief visit, and no duration was estimated or replaced.",

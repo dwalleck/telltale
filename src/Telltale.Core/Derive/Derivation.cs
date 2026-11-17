@@ -120,14 +120,19 @@ public static class Derivation
                 // The one place a treatment is applied (GLOSSARY: Treatment): to the issue's whole history, before
                 // anything is clipped to the sprint. The recorded time stays beside what is measured, because the
                 // team of a sprint and the count of brief visits are taken from it. With no status listed there
-                // is no brief visit to treat, and what is measured is what is recorded.
-                var measured = checksBriefVisits
-                    ? TimeInStatus.During(
-                        countedTime,
-                        toMeasure ??= BriefVisitTreatments.IntervalsToMeasure(timeline.Intervals, stays ??= BriefVisits.Stays(timeline), settings.BriefVisitThresholds, settings.TimeInStatusTreatment),
-                        calendar,
-                        asOf)
-                    : recorded;
+                // is no brief visit to treat, and what is measured is what is recorded. So it is when the treatment
+                // leaves nothing of this issue out: it then gives back the timeline's own intervals, which were
+                // just measured, and they are not measured a second time.
+                var measured = recorded;
+                if (checksBriefVisits)
+                {
+                    toMeasure ??= BriefVisitTreatments.IntervalsToMeasure(timeline.Intervals, stays ??= BriefVisits.Stays(timeline), settings.BriefVisitThresholds, settings.TimeInStatusTreatment);
+                    if (!ReferenceEquals(toMeasure, timeline.Intervals))
+                    {
+                        measured = TimeInStatus.During(countedTime, toMeasure, calendar, asOf);
+                    }
+                }
+
                 sprintStatusTimes.AddRange(recorded
                     .OrderBy(pair => pair.Key, StringComparer.Ordinal)
                     .Select(pair => new SprintStatusTime(issue.IssueId, window.SprintId, pair.Key, pair.Value.CalendarTime, pair.Value.BusinessTime, pair.Value.BusinessDays)

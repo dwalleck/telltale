@@ -12,11 +12,13 @@
 -- Minimum group size (GLOSSARY, ADR-0003; the numbers are minimum_group_size's, the configured ones, five and
 -- three by default): a sprint short of a team (sprint_team.team_suppressed) has no row here, as it has no
 -- status rows in time_in_status_per_sprint, and a done status has none. brief_visit_issue_count is null and
--- suppressed is 1 when the median of the row the count is measured against would be withheld (fewer distinct
--- assignees than a figure needs are behind the row's issues, the check time_in_status_per_sprint applies to
--- its rows; owner decisions D62, D99), or fewer distinct assignees than a figure needs are among the issues
--- counted. That row is the one before anything was left out, so a count can be shown beside a row of
--- time_in_status_per_sprint that is suppressed for what remains (D99). While that number is one or more, a
+-- suppressed is 1 when fewer distinct assignees than a figure needs are among the issues counted. That one
+-- check is also the owner's other rule (D62, D99: withheld when the median of the row the count is measured
+-- against would be withheld): the issues counted are among that row's issues, so a row with too few assignees
+-- behind it has no more behind the issues counted, and the rule on a row is stated in
+-- time_in_status_per_sprint and not a second time here. The row the count is measured against is the one
+-- before anything was left out, so a count can be shown beside a row of time_in_status_per_sprint that is
+-- suppressed for what remains (D99). While that number is one or more, a
 -- count of nothing has nobody behind it and is null too, so a zero reads as a withheld count does; a number
 -- of zero turns the check off (owner decision D65), and a count of nothing is then shown as 0, as
 -- data_quality's counts are. An unassigned issue counts toward nobody. The check of the delivered count
@@ -27,14 +29,10 @@ WITH threshold AS (
     FROM json_each((SELECT brief_visit_thresholds FROM run)) j
 ),
 -- The rows the counts are measured against: one per sprint and status some issue spent business time in, as
--- recorded. suppressed says whether such a row's median would be withheld.
+-- recorded. It says which sprints and statuses have a row here, and nothing about a row's figures.
 recorded_row AS (
-    SELECT t.sprint_id,
-           t.status_id,
-           CASE WHEN COUNT(DISTINCT i.assignee_hash) >= (SELECT assignees_behind_a_figure FROM minimum_group_size) THEN 0 ELSE 1 END AS suppressed
+    SELECT DISTINCT t.sprint_id, t.status_id
     FROM time_in_status_issue_recorded t
-    LEFT JOIN issue i ON i.issue_id = t.issue_id
-    GROUP BY t.sprint_id, t.status_id
 ),
 counted AS (
     SELECT v.sprint_id,
@@ -47,14 +45,13 @@ counted AS (
     GROUP BY v.sprint_id, v.status_id
 ),
 -- Whether a row's count is withheld is decided once, here, and the count and the flag both follow from it.
--- "r.suppressed = 0" is the rule as the owner stated it (D62: withheld when the row's median is withheld;
--- D99: the row is the recorded one). It is a guard that cannot decide a row on its own while the counted
--- issues are among the row's issues: a row with too few assignees behind it has no more behind the issues
--- counted. It stays so that the rule is written where it is applied, and holds if the two ever stop reading
--- the same issues.
--- The team check, the done statuses left out, the status's name and its position are stated as
--- time_in_status_per_sprint states them for its rows: this view cannot take them from that view, whose rows
--- are of what remains.
+-- The counted issues and the rows are read from the one view (time_in_status_issue_recorded), so the counted
+-- issues are always among the row's issues. Before a treatment could leave issues out, this view read the
+-- row's own flag from time_in_status_per_sprint as a guard; that flag is now of what remains, and a copy of
+-- the row's rule here would be a second statement of it that could never decide a row.
+-- The team check and the done statuses left out are read from where they are stated (sprint_team,
+-- board_status), and the status's name and position are joined as time_in_status_per_sprint joins them: this
+-- view cannot take them from that view, whose rows are of what remains.
 decided AS (
     SELECT r.sprint_id,
            r.status_id,
@@ -62,7 +59,7 @@ decided AS (
            b.position AS board_position,
            h.threshold_minutes,
            COALESCE(c.issues, 0) AS issues,
-           CASE WHEN r.suppressed = 0 AND COALESCE(c.assignees, 0) >= g.assignees_behind_a_figure THEN 0 ELSE 1 END AS suppressed
+           CASE WHEN COALESCE(c.assignees, 0) >= g.assignees_behind_a_figure THEN 0 ELSE 1 END AS suppressed
     FROM recorded_row r
     JOIN threshold h ON h.status_id = r.status_id
     JOIN sprint_team t ON t.sprint_id = r.sprint_id
