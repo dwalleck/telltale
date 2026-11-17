@@ -57,7 +57,8 @@ public static class SprintReport
     /// <see cref="DerivedSource.BriefVisitsLeftOutOfTimeInStatus"/>): when brief visits were left out of time in
     /// status, the report says so under its heading, marks the row of every listed status, and words the method
     /// note's paragraph on brief visits accordingly. While both metrics count them, the report is what it was
-    /// before a treatment could be chosen. When the cycles that start with a brief visit were left out of cycle time
+    /// before a treatment could be chosen, plus the note's sentences on the footer's cycle time line when the
+    /// footer has it. When the cycles that start with a brief visit were left out of cycle time
     /// (<see cref="DerivedSource.BriefVisitsLeftOutOfCycleTime"/>), the report says so under its heading, puts
     /// one note under the cycle time table whatever the table holds, says in the footer's cycle time line that
     /// the issues have no cycle time, and words the method note accordingly.
@@ -490,9 +491,9 @@ public static class SprintReport
     /// metric (GLOSSARY: Treatment), in place of the sentence that they are counted and nothing more: the
     /// treatment in force for each of the two metrics, what was left out (owner decisions D84 and D85), why,
     /// and what leaving out does not do. Nothing here depends on the sprint or on the numbers in force.
-    /// The reason given for a cycle is that it starts when the board was updated. It is not said to be too
-    /// short: a move into a work status and straight back out, with the real start later (D91), starts the
-    /// cycle too early.
+    /// The reason given for a cycle is that it starts when the board was updated and not when the work
+    /// started (owner decision D107). That usually makes it too short; a move into a work status and straight
+    /// back out before the work began (D91) makes it too long, so the report does not say too short alone.
     /// </summary>
     private static void AppendTreatmentExplained(StringBuilder report, bool leftOutOfTimeInStatus, bool leftOutOfCycleTime)
     {
@@ -524,7 +525,9 @@ public static class SprintReport
     /// <summary>
     /// The paragraph's sentences on the footer's cycle time line (owner decisions D87 and D100), written only
     /// when the footer has the line: what the line counts, whether the issues it counts are in the cycle time
-    /// figures, and what the number reads in place of a number. That follows the numbers in force, as the view
+    /// figures, what the number reads in place of a number, and that the line was added on 2026-11-16 (D89),
+    /// so that the date the paragraph gives next, for the rule on brief visits, is not read as the line's.
+    /// What the number reads follows the numbers in force, as the view
     /// does (<c>cycle_starts_with_brief_visit_per_sprint</c>): the number is withheld when the sprint's
     /// delivered count is, which holds the team check, so a sprint short of a team has the line and it reads
     /// "suppressed"; while a figure needs assignees behind it, the number is also withheld when too few are
@@ -537,14 +540,18 @@ public static class SprintReport
         if (!numbers.TeamCheck && !numbers.FigureCheck)
         {
             report.Append(" Its number is not withheld, and a number of nothing reads 0.");
-            return;
+        }
+        else
+        {
+            report.Append(" Its number reads \"suppressed\" when the sprint's delivered count does")
+                .Append(numbers.TeamCheck ? $", as for a sprint whose team is smaller than {numbers.TeamInWords}" : "")
+                .Append(numbers.FigureCheck
+                    ? $", when fewer than {numbers.AssigneesBehindAFigure(distinct: true)} {numbers.BehindAFigureAre} among the issues it counts, and when it is nothing."
+                    : ", and a number of nothing reads 0.");
         }
 
-        report.Append(" Its number reads \"suppressed\" when the sprint's delivered count does")
-            .Append(numbers.TeamCheck ? $", as for a sprint whose team is smaller than {numbers.TeamInWords}" : "")
-            .Append(numbers.FigureCheck
-                ? $", when fewer than {numbers.AssigneesBehindAFigure(distinct: true)} {numbers.BehindAFigureAre} among the issues it counts, and when it is nothing."
-                : ", and a number of nothing reads 0.");
+        // The sentence that follows these in the paragraph dates the rule on brief visits, which is older.
+        report.Append(" This line was added on 2026-11-16, after results had been seen.");
     }
 
     /// <summary>

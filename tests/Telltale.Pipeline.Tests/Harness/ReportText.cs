@@ -111,6 +111,9 @@ public static class ReportText
         public const string TheCycleNumberReadsSuppressed =
             " Its number reads \"suppressed\" when the sprint's delivered count does, as for a sprint whose team is smaller than five, when fewer than three distinct assignees are among the issues it counts, and when it is nothing.";
 
+        /// <summary>Ends the sentences on the cycle time line: the line dates from the treatment (owner decisions D87, D89), not from the rule of 2026-11-12 that the next sentence dates.</summary>
+        public const string TheCycleTimeLineWasAdded = " This line was added on 2026-11-16, after results had been seen.";
+
         /// <summary>The paragraph's last sentence when a metric leaves brief visits out (owner decision D89). <paramref name="metrics"/> is "time in status is", "cycle time is" or "time in status and cycle time are".</summary>
         public static string WhenLeavingOutWasAdded(string metrics) =>
             $" Leaving brief visits out was added on 2026-11-16, after results had been seen, and it changes how {metrics} measured.";

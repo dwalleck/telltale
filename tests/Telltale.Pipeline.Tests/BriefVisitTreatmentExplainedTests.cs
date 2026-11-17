@@ -9,7 +9,7 @@ namespace Telltale.Pipeline.Tests;
 /// What the method note says about the treatment of brief visits (GLOSSARY: Treatment; owner decisions D83 to
 /// D89): its last paragraph, whole, under each of the four combinations of the two parts of
 /// <c>briefVisitTreatment</c>. While both metrics count brief visits the paragraph is what it was before a
-/// treatment could be chosen, plus one sentence on the footer's cycle time line. When either leaves them out,
+/// treatment could be chosen, plus the sentences on the footer's cycle time line. When either leaves them out,
 /// it states the treatment of each metric, what was left out, why, what leaving out does not do, and that
 /// it was added on 2026-11-16, after results had been seen. Sprint 41 runs from Monday 5 January 2026, 09:00,
 /// to Monday the 19th, 10:00. Its team is five people, each with an issue that stays in New.
@@ -56,7 +56,7 @@ public class BriefVisitTreatmentExplainedTests
         + "- Issues delivered between sprints, in the whole store: suppressed\n";
 
     [Test]
-    public async Task While_both_metrics_count_brief_visits_the_paragraph_is_what_it_was_plus_one_sentence_on_the_footers_cycle_time_line()
+    public async Task While_both_metrics_count_brief_visits_the_paragraph_is_what_it_was_plus_the_sentences_on_the_footers_cycle_time_line()
     {
         await using var pipeline = new PipelineHarness();
         AddSprint41WithFourCaughtUpIssuesInADevelopmentRowOfFive(pipeline.Jira);
@@ -70,7 +70,7 @@ public class BriefVisitTreatmentExplainedTests
             + WhatABriefVisitIs + TheCountIsOfTheRow + T.NothingIsDone + AShortMedian
             + ACountReadsSuppressed + AZeroAndAWithheldCountReadAlike
             + AStatusWithNoRowHasNoLine
-            + T.TheCycleTimeLine + T.TheyAreInTheFigures + T.TheCycleNumberReadsSuppressed
+            + T.TheCycleTimeLine + T.TheyAreInTheFigures + T.TheCycleNumberReadsSuppressed + T.TheCycleTimeLineWasAdded
             + WhenTheRuleWasAdded + "\n"
             + Footer
             + "- Fake Development: 4 issues had a visit shorter than 5 minutes\n"
@@ -78,7 +78,71 @@ public class BriefVisitTreatmentExplainedTests
     }
 
     [Test]
-    public async Task With_no_work_status_listed_the_footer_has_no_cycle_time_line_and_the_paragraph_no_sentence_on_it()
+    public async Task With_a_status_listed_and_both_metrics_counting_the_whole_report_is_what_it_was_plus_the_sentences_on_the_cycle_time_line()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddSprint41WithFourCaughtUpIssuesInADevelopmentRowOfFive(pipeline.Jira);
+        ListDevelopment(pipeline);
+
+        await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
+
+        // The sentences are in the report once, and the report without them is the report as it was before
+        // they were written, to the byte.
+        var report = await pipeline.ReadReportAsync(41);
+        var sentences = T.TheCycleTimeLine + T.TheyAreInTheFigures + T.TheCycleNumberReadsSuppressed + T.TheCycleTimeLineWasAdded;
+        await Assert.That(report.Replace(sentences, "")).IsEqualTo(TheReportBeforeTheSentences.ReplaceLineEndings("\n"));
+        await Assert.That(report.Split(sentences).Length).IsEqualTo(2);
+    }
+
+    /// <summary>
+    /// The whole report for sprint 41 of <see cref="AddSprint41WithFourCaughtUpIssuesInADevelopmentRowOfFive"/> with
+    /// Development listed and no treatment chosen, as it was before the method note had sentences on the
+    /// footer's cycle time line.
+    /// </summary>
+    private const string TheReportBeforeTheSentences =
+        """
+        # Fake Sprint 41 (2026-01-05 to 2026-01-19)
+
+        Delivered issues: 5
+
+        ## Cycle time by point bucket
+
+        | Point bucket | Issues with a cycle time | Median (business days) | P85 (business days) | Median (calendar days) | P85 (calendar days) |
+        | --- | ---: | ---: | ---: | ---: | ---: |
+        | unestimated | 5 | 2.0 | 2.0 | 2.0 | 2.0 |
+
+        ## Time in status
+
+        | Status | Issues | Median (business days) | Total (business days) |
+        | --- | ---: | ---: | ---: |
+        | Fake New | 10 | 6.0 | 59.4 |
+        | Fake Development | 5 | 0.0 | 2.0 |
+        | Fake Review | 4 | 2.0 | 8.0 |
+
+        ## Method
+
+        - Durations are in business days: days that are neither a weekend nor a company holiday, each counted in full (24 hours) in the team's time zone (America/Chicago). Calendar days are shown alongside: elapsed time divided by 24 hours.
+        - Cycle time runs from an issue's first entry into a work status to its last entry into a done status, for delivered issues only. It belongs to the sprint in which the issue was delivered.
+        - The median is the middle value, or the mean of the two middle values. The P85 is the smallest value with at least 85% of the values at or below it.
+        - Time in status includes delivered and unfinished issues in statuses before done, clipped to the sprint window and each issue's membership intervals. An issue counts toward a status only if it spent more than zero business days there. Total business days sum that time across all contributing issues, including repeated visits; this is accumulated issue time, not effort or the sprint's elapsed duration. Totals and medians use the same privacy rules.
+        - A figure is shown only where it cannot show one person's work. The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in it. When the team is smaller than five, the delivered count and both tables read "suppressed", with no rows. With a team of five or more, a row with fewer than three distinct assignees behind it keeps its issue count and reads "suppressed" for its figures, and the delivered count reads "suppressed" when fewer than three distinct assignees are among the delivered issues, and the cycle time table then reads "suppressed" as well, with no rows, because the number of its rows and their counts (the delivered issues that have a cycle time) would each give a lower bound of the withheld count. The time in status table of such a sprint keeps its counts: they count every issue that spent time in a status, delivered or not, so the count of a late status can be close to the withheld delivered count. The footer's two counts of the whole store read "suppressed" when the issues in the whole store have fewer than five distinct assignees, or fewer than three are among the issues counted.
+        - An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. An unassigned issue counts toward nobody.
+        - An interval that is still open (an issue still in a status, a sprint not yet completed) ends at the as-of time below.
+        - Work that has since been removed from Jira stays in the figures until the next backfill.
+        - A brief visit is one unbroken stay in a status that ended and was shorter than the status's threshold. It is measured in clock time over the issue's whole history: weekends and holidays count, and the stay is not clipped to the sprint. For each status the configuration file lists (briefVisitThresholds), the footer gives how many of the issues in the status's time in status row had a brief visit during the time the row counts. Brief visits are counted and nothing more: no duration was excluded or corrected because of one, and every other figure is what it would be without the count. A short median in the time in status table does not show how many issues had a brief visit. A count reads "suppressed" when its row in the time in status table reads "suppressed" for its figures, or when fewer than three distinct assignees are among the issues counted. A count of nothing has nobody behind it, so a zero and a withheld count both read "suppressed". A listed status with no row in the time in status table has no line, and a sprint whose team is smaller than five has no line for any listed status. This rule was added on 2026-11-12, after the first run on real data: the thresholds were chosen with knowledge of results, and the counts describe data quality and are not a success criterion.
+
+        ---
+
+        - As-of time: 2026-02-03 12:00 -06:00 (America/Chicago)
+        - Issues with changelog anomalies, in the whole store: suppressed
+        - Issues delivered between sprints, in the whole store: suppressed
+        - Fake Development: 4 issues had a visit shorter than 5 minutes
+        - Delivered issues whose cycle starts with a brief visit, which are in the cycle time figures: 4
+
+        """;
+
+    [Test]
+    public async Task With_no_work_status_listed_the_footer_has_no_cycle_time_line_and_the_paragraph_no_sentences_on_it()
     {
         // New is a not started status: no cycle starts in it. The team's five issues stay in New.
         await using var pipeline = new PipelineHarness();
@@ -117,7 +181,7 @@ public class BriefVisitTreatmentExplainedTests
             + ACountReadsSuppressedByTheRowBefore + AZeroAndAWithheldCountReadAlike
             + T.TheSecondNumber + T.TheSecondNumberReadsSuppressed
             + AStatusWithNoRowBeforeHasNoLine
-            + T.TheCycleTimeLine + T.TheyAreInTheFigures + T.TheCycleNumberReadsSuppressed
+            + T.TheCycleTimeLine + T.TheyAreInTheFigures + T.TheCycleNumberReadsSuppressed + T.TheCycleTimeLineWasAdded
             + WhenTheRuleWasAdded
             + " Leaving brief visits out was added on 2026-11-16, after results had been seen, and it changes how time in status is measured.\n"
             + Footer
@@ -146,7 +210,7 @@ public class BriefVisitTreatmentExplainedTests
             + T.WhatLeavingOutDoesNotDo + AShortMedian
             + ACountReadsSuppressed + AZeroAndAWithheldCountReadAlike
             + AStatusWithNoRowHasNoLine
-            + T.TheCycleTimeLine + T.TheyHaveNoCycleTime + T.TheCycleNumberReadsSuppressed
+            + T.TheCycleTimeLine + T.TheyHaveNoCycleTime + T.TheCycleNumberReadsSuppressed + T.TheCycleTimeLineWasAdded
             + WhenTheRuleWasAdded
             + " Leaving brief visits out was added on 2026-11-16, after results had been seen, and it changes how cycle time is measured.\n"
             + Footer
@@ -174,7 +238,7 @@ public class BriefVisitTreatmentExplainedTests
             + ACountReadsSuppressedByTheRowBefore + AZeroAndAWithheldCountReadAlike
             + T.TheSecondNumber + T.TheSecondNumberReadsSuppressed
             + AStatusWithNoRowBeforeHasNoLine
-            + T.TheCycleTimeLine + T.TheyHaveNoCycleTime + T.TheCycleNumberReadsSuppressed
+            + T.TheCycleTimeLine + T.TheyHaveNoCycleTime + T.TheCycleNumberReadsSuppressed + T.TheCycleTimeLineWasAdded
             + WhenTheRuleWasAdded
             + " Leaving brief visits out was added on 2026-11-16, after results had been seen, and it changes how time in status and cycle time are measured.\n"
             + Footer
@@ -219,7 +283,7 @@ public class BriefVisitTreatmentExplainedTests
 
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).Contains(T.TheSecondNumber + theSecondNumberReads + " A listed status that had no row");
-        await Assert.That(report).Contains(T.TheCycleTimeLine + T.TheyHaveNoCycleTime + theCycleNumberReads + WhenTheRuleWasAdded);
+        await Assert.That(report).Contains(T.TheCycleTimeLine + T.TheyHaveNoCycleTime + theCycleNumberReads + T.TheCycleTimeLineWasAdded + WhenTheRuleWasAdded);
         await Assert.That(report).EndsWith(ReportText.LeftOutOfTheRow(nothingReads) + "\n" + ReportText.CyclesThatStartWithBriefVisitAndHaveNoCycleTime(nothingReads));
     }
 
