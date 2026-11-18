@@ -14,6 +14,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Telltale.Pipeline.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Every script under Sql/ is embedded as "<folder>/<file>.sql". Adding a table or a view is adding a file. -->
     <EmbeddedResource Include="Sql\**\*.sql" LogicalName="$([System.String]::Copy('%(RecursiveDir)%(Filename)%(Extension)').Replace('\', '/'))" />
   </ItemGroup>

@@ -100,6 +100,27 @@ public class StoreTests
     }
 
     [Test]
+    public async Task The_version_of_the_derived_data_changes_with_the_code_that_derives_it_as_well_as_with_the_scripts()
+    {
+        // Derived rows are computed in C# as well as in SQL: a version that changed only the C# rules must also
+        // be told apart, or a report after the upgrade would show figures built by the old rules.
+        (string Name, string Sql)[] scripts = [("Views/synthetic_view.sql", "SELECT 1;")];
+        Guid[] code = [Guid.Parse("00000000-0000-0000-0000-000000000001")];
+        var version = SqliteStore.DerivedObjectsVersionOf(scripts, code);
+
+        await Assert.That(SqliteStore.DerivedObjectsVersionOf(scripts, code)).IsEqualTo(version);
+        await Assert.That(SqliteStore.DerivedObjectsVersionOf(scripts, [Guid.Parse("00000000-0000-0000-0000-000000000002")])).IsNotEqualTo(version);
+        await Assert.That(SqliteStore.DerivedObjectsVersionOf([("Views/synthetic_view.sql", "SELECT 2;")], code)).IsNotEqualTo(version);
+    }
+
+    [Test]
+    public async Task The_code_that_derives_is_the_core_rules_and_the_store()
+    {
+        await Assert.That(SqliteStore.DerivingCode).IsEquivalentTo(
+            new[] { typeof(Derivation).Module.ModuleVersionId, typeof(SqliteStore).Module.ModuleVersionId });
+    }
+
+    [Test]
     [Arguments("UPDATE run SET objects_version = 'synthetic-older-version';")]
     [Arguments("ALTER TABLE run DROP COLUMN objects_version;")]
     [Arguments("DROP TABLE run; CREATE TABLE run (as_of TEXT NOT NULL, raw_digest TEXT NOT NULL, time_zone TEXT NOT NULL, holidays TEXT NOT NULL, objects_version TEXT NOT NULL); INSERT INTO run VALUES ('2026-02-03T18:00:00.000Z', 'synthetic-digest', 'America/Chicago', '', 'synthetic-older-version');")]
