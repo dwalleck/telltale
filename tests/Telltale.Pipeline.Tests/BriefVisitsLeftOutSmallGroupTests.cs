@@ -77,7 +77,7 @@ public class BriefVisitsLeftOutSmallGroupTests
         await Assert.That(counted).IsEqualTo(LeftOutHead + "| 41 | Fake Development | 4 | 0 | NULL | 0 |\n");
         await Assert.That(countedReport).Contains("\n- Fake Development: 4 issues had a visit shorter than 5 minutes\n");
 
-        // Left out: four issues had a brief visit, and three of them had no other time in Development. The
+        // Left out: four issues had a brief visit, and three of them had no other business time in Development. The
         // row is the four that remain.
         await Assert.That(await QueryAsync(pipeline, LeftOutSql)).IsEqualTo(LeftOutHead + "| 41 | Fake Development | 4 | 0 | 3 | 0 |\n");
         var report = await pipeline.ReadReportAsync(41);

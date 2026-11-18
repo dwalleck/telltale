@@ -296,7 +296,7 @@ public class WhichVisitsCountTests
         // the confirmed reading gives as "inside the sprint window, while a member". A Saturday inside the
         // sprint is inside that time, so the visit overlaps it and the issue is counted. Business time decides
         // only whether the issue is in the row at all: here two days in Development earlier in the week put it
-        // there. (With no other time in Development it is not in the row and not counted:
+        // there. (With no other business time in Development it is not in the row and not counted:
         // BriefVisitCountTests.An_issue_that_is_not_in_the_status_row_is_not_counted_...)
         await using var pipeline = SprintFortyOne();
         var saturday = Local(2026, 1, 10, 10);

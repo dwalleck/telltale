@@ -20,7 +20,7 @@ There are three things to do with a brief visit: count it and leave the figures 
 
 One new optional setting, `briefVisitTreatment`, says what is done with brief visits. It has two parts, one for **time in status** and one for cycle time. Each is `count` (what the tool does today) or `exclude`.
 
-- With `exclude` for time in status, the time of every brief visit is left out. An issue with no other time in the status leaves that status's row.
+- With `exclude` for time in status, the time of every brief visit is left out. An issue with no other business time in the status leaves that status's row.
 - With `exclude` for cycle time, a delivered issue whose cycle starts with a brief visit has no cycle time. It is still delivered.
 
 The report shows the adjusted figure only. It says that figures were adjusted in a line under its heading, marks the tables affected, and says in the footer how many issues were left out and why.
@@ -173,7 +173,7 @@ Exact wording is the implementer's, within the report's existing style, and is f
 
 - **Under the heading.** A report written with either part as `exclude` says so in one line, as a report with a lowered minimum group size does (D67). It names which of the two metrics were adjusted.
 - **Marks.** With `exclude` for time in status, the row of every listed status carries a mark that points to the footer. With `exclude` for cycle time, the cycle time table carries one note under it. Both are there whether or not anything was left out in this sprint.
-- **Footer, per listed status.** The existing line stays. Under `exclude` it goes on to say that those visits are left out of the row, and how many of the issues had no other time in the status and so are not in the row's count. A withheld number reads `suppressed`.
+- **Footer, per listed status.** The existing line stays. Under `exclude` it goes on to say that those visits are left out of the row, and how many of the issues had no other business time in the status and so are not in the row's count. A withheld number reads `suppressed`.
 - **Footer, cycle time.** One line: how many delivered issues had a cycle starting with a brief visit, and whether they are in the cycle time figures (`count`) or have no cycle time (`exclude`).
 - **Method note.** One paragraph, printed when at least one status is listed, in place of today's sentence that nothing is excluded. It states:
   - the treatment in force for each of the two metrics;

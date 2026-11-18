@@ -48,7 +48,7 @@ public static class ReportText
     /// of issues that are not in the row's count. <paramref name="figure"/> is the number, or <c>suppressed</c>.
     /// </summary>
     public static string LeftOutOfTheRow(string figure) =>
-        $"; those visits are left out of the status's time in status row, and issues that had no other time in the status and so are not in the row's count: {figure}";
+        $"; those visits are left out of the status's time in status row, and issues that had no other business time in the status and so are not in the row's count: {figure}";
 
     /// <summary>What follows the two tables: the method note's heading.</summary>
     public const string MethodHeading = "\n## Method\n";
@@ -150,7 +150,7 @@ public static class ReportText
 
         /// <summary>The second number of a listed status's footer line, there when time in status leaves brief visits out. What it reads when withheld follows it, by the numbers in force.</summary>
         public const string TheSecondNumber =
-            " A listed status's line goes on to a second number: how many of the issues with a brief visit had no other time in the status and so are not in the row's count.";
+            " A listed status's line goes on to a second number: how many of the issues with a brief visit had no other business time in the status and so are not in the row's count.";
 
         /// <summary>Under the default numbers.</summary>
         public const string TheSecondNumberReadsSuppressed =

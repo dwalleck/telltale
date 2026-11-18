@@ -314,7 +314,7 @@ public class BriefVisitTreatmentExplainedTests
     /// <summary>
     /// Sprint 41 with its team of five idle in New, four issues <see cref="Scenarios.CaughtUp"/> of four people, and a
     /// fifth person's issue that did two days in Development: a Development row of five issues, four of them
-    /// with a brief visit and no other time there, and five delivered issues, four of them with a cycle that
+    /// with a brief visit and no other business time there, and five delivered issues, four of them with a cycle that
     /// starts with a brief visit.
     /// </summary>
     private static void AddSprint41WithFourCaughtUpIssuesInADevelopmentRowOfFive(FakeJira jira)

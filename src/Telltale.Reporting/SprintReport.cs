@@ -384,7 +384,7 @@ public static class SprintReport
             // Under exclude a repeated visit that is brief is not in the total, so the sentence says so (owner decision D84).
             .Append(leftOutOfTimeInStatus ? " and leaving out brief visits to a status listed for them (see the paragraph on brief visits below)" : "")
             .Append("; this is accumulated issue time, not effort or the sprint's elapsed duration. Totals and medians use the same privacy rules.\n");
-        AppendMinimumGroupSize(report, numbers, briefVisitsChecked);
+        AppendMinimumGroupSize(report, numbers, briefVisitsChecked, leftOutOfTimeInStatus);
 
         // Said only when there is a baseline: without one the report has no baseline column to explain.
         if (baselineSprintIds.Count > 0)
@@ -476,7 +476,7 @@ public static class SprintReport
         // status. The view withholds it by the same check and the same number as the count.
         if (leftOutOfTimeInStatus)
         {
-            report.Append(" A listed status's line goes on to a second number: how many of the issues with a brief visit had no other time in the status and so are not in the row's count.")
+            report.Append(" A listed status's line goes on to a second number: how many of the issues with a brief visit had no other business time in the status and so are not in the row's count.")
                 .Append(numbers.FigureCheck
                     ? $" It reads \"suppressed\" when fewer than {numbers.AssigneesBehindAFigure(distinct: true)} {numbers.BehindAFigureAre} among the issues left out, and so also when nobody was left out."
                     : " It is not withheld either, and reads 0 when nobody was left out.");
@@ -580,7 +580,7 @@ public static class SprintReport
     /// after its two counts of the whole store, withheld by their own rule (<see cref="AppendBriefVisitsExplained"/>),
     /// so the sentence on those two says which they are, whether or not this sprint has such a line.
     /// </summary>
-    private static void AppendMinimumGroupSize(StringBuilder report, NumbersInForce numbers, bool briefVisitsChecked)
+    private static void AppendMinimumGroupSize(StringBuilder report, NumbersInForce numbers, bool briefVisitsChecked, bool leftOutOfTimeInStatus)
     {
         if (!numbers.TeamCheck && !numbers.FigureCheck)
         {
@@ -606,7 +606,11 @@ public static class SprintReport
         {
             report.Append(numbers.TeamCheck ? $" With a team of {team} or more, a row" : " A row")
                 .Append(" with fewer than ").Append(behindAFigure).Append(" behind it keeps its issue count and reads \"suppressed\" for its figures, and the delivered count reads \"suppressed\" when fewer than ")
-                .Append(behindAFigure).Append(' ').Append(are).Append(" among the delivered issues, and the cycle time table then reads \"suppressed\" as well, with no rows, because the number of its rows and their counts (the delivered issues that have a cycle time) would each give a lower bound of the withheld count. The time in status table of such a sprint keeps its counts: they count every issue that spent time in a status, delivered or not, so the count of a late status can be close to the withheld delivered count.");
+                .Append(behindAFigure).Append(' ').Append(are).Append(" among the delivered issues, and the cycle time table then reads \"suppressed\" as well, with no rows, because the number of its rows and their counts (the delivered issues that have a cycle time) would each give a lower bound of the withheld count. The time in status table of such a sprint keeps its counts: they count every issue that spent time in a status, delivered or not, ")
+
+                // Under exclude an issue whose only time in a listed status was brief visits is not in its count (owner decision D84).
+                .Append(leftOutOfTimeInStatus ? "apart from an issue whose only time in a status listed for brief visits was brief visits, which is not in that status's count, " : "")
+                .Append("so the count of a late status can be close to the withheld delivered count.");
         }
         else
         {
@@ -675,7 +679,7 @@ public static class SprintReport
     /// before anything was left out (owner decision D93). A line names the status and states its threshold. The view withholds a count as it does
     /// every figure, and a count of nothing with it, so the two read alike.
     /// With <paramref name="leftOutOfTimeInStatus"/> a line goes on to say that those visits are left out of
-    /// the status's row, and how many of the issues had no other time in the status and so are not in the
+    /// the status's row, and how many of the issues had no other business time in the status and so are not in the
     /// row's count (GLOSSARY: Treatment; owner decisions D84, D86). The view withholds that number by the same
     /// check, and a number of nothing with it. A status whose every issue was left out has a line and no row
     /// in the table (D98).
@@ -697,7 +701,7 @@ public static class SprintReport
 
             if (leftOutOfTimeInStatus)
             {
-                report.Append("; those visits are left out of the status's time in status row, and issues that had no other time in the status and so are not in the row's count: ")
+                report.Append("; those visits are left out of the status's time in status row, and issues that had no other business time in the status and so are not in the row's count: ")
                     .Append(Figure(row.LeftOutSuppressed, row.LeftOutIssueCount?.ToString(CultureInfo.InvariantCulture)));
             }
 

@@ -496,6 +496,9 @@ public class BriefVisitsLeftOutOfTimeInStatusTests
         (ReportText.Treatment.TheSecondNumber + ReportText.Treatment.TheSecondNumberReadsSuppressed, ""),
         (ReportText.BriefVisitsParagraph.AStatusWithNoRowBeforeHasNoLine, ReportText.BriefVisitsParagraph.AStatusWithNoRowHasNoLine),
         (ReportText.Treatment.WhenLeavingOutWasAdded("time in status is"), ""),
+
+        // Why a sprint's time in status counts stay when its delivered count is withheld (owner decisions D55, D112).
+        ("apart from an issue whose only time in a status listed for brief visits was brief visits, which is not in that status's count, ", ""),
     ];
 
     /// <summary>The store's content (<see cref="PipelineHarness.ReadStoreContentAsync"/>) as one block per table or view, by its name; a block starts with the name.</summary>
