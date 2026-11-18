@@ -98,7 +98,7 @@ Both APIs take a repository and PR number, not a live branch. The references do 
 
 ### 5. Several pull requests
 
-**Frequency and sensibility are unmeasured.** Count issues with multiple distinct PRs, deduplicating by host, repository and PR ID, including a PR found by both lookup routes. Compare the minimum across all matched PRs with the minimum for eligible delivery PRs. Check whether the winner comes from initial work or a release backport, revert, follow-up, or stacked branch carrying another issue's commits. An earliest date is only as meaningful as the match and the PRs admitted; do not pick a winner without noting inaccessible or truncated candidates. *(proposed; no real-system result)*
+**Frequency and sensibility are unmeasured.** Several PRs do not disqualify an issue: by the owner's direction (2026-11-18), the first PR (opened earliest) gives the start, as its earliest author date. Count issues with multiple distinct PRs, deduplicating by host, repository and PR ID, including a PR found by both lookup routes. Count how often another matched PR holds an earlier author date than the first PR. Check whether the winner comes from initial work or a release backport, revert, follow-up, or stacked branch carrying another issue's commits. An earliest date is only as meaningful as the match and the PRs admitted; do not pick a winner without noting inaccessible or truncated candidates. *(proposed; no real-system result)*
 
 ### 6. What else the records give for nothing
 
@@ -117,7 +117,7 @@ Both APIs take a repository and PR number, not a live branch. The references do 
 
 **Direction from the owner:** Jira is the starting source, not the final authority on when work happened. Enrich cycle time with commit evidence when Jira's brief first work visit misses work that demonstrably preceded it. This is a reason to pursue the second reading, not to rewrite Jira's recorded time in Development or change the pilot's primary measure.
 
-- Use the earliest eligible **author** date, not the committer or merge date. Define which PRs count (including open, abandoned, release, stacked and post-delivery PRs), deduplication, and what happens on truncated or inaccessible history or suspect dates.
+- Use the earliest **author** date of the issue's first PR (opened earliest), not the committer or merge date; several PRs do not disqualify an issue (owner direction, 2026-11-18). Define which PRs count (including open, abandoned, release, stacked and post-delivery PRs), deduplication, and what happens on truncated or inaccessible history or suspect dates.
 - Decide how the second reading handles no match, ambiguous matches and non-code work. The owner identified a dedicated Jira issue type used for catch-all support and miscellaneous work. Jira returns a structured type and the store already keeps `issue_type_id`. The filtered comparison excluded that type by ID from both the numerator and denominator and kept the unfiltered baseline. Whether to carry the exclusion into the commit-based reading is a spec decision; board-based metrics were not changed. Report coverage and missing reasons; don't silently mix board starts into a commit-based series. If using Jira, tolerate an internal endpoint's disappearance and discover the instance type from the summary, not a hard-coded label.
 - Define how the Jira key is imported and used (D113), what can be displayed, and what limited historical evidence may be retained on company systems. Drop person fields at ingestion; apply the existing reporting suppression.
 - Label the measure e.g. **first PR commit to delivery (lower bound on elapsed work-to-delivery time)**, with the attribution and date caveats. Keep it a **second reading**, not a replacement for leaving out brief starts, unless a dated change to the [pilot plan](../../../docs/context/pilot-plan.md) says otherwise (D88). Decide the population and whether Jira and commit-based results should also be compared on the same covered issues.
@@ -150,3 +150,33 @@ The team's policy on both hosts puts the Jira key in the source branch. Matching
 - **GitHub:** Expand to confirmed GitHub-only sprint windows. Verify a deleted-source-branch example, quantify multiple-PR effects, and spot-check that the earliest commit belongs to the issue's work. The approved repository list is already on the work laptop.
 - **Azure DevOps:** Get approved local read access and a repository allowlist, test the direct branch-key route, and ask admins about retention and any cutoff. Confirm the sprint-to-period mapping for both hosts.
 - Keep detailed outcomes on the work laptop. See `notes/github-timing-session-index.md` for the current results and which earlier files were superseded. Publish only general findings here.
+
+### Coverage funnel (proposed 2026-11-18)
+
+The exploratory runs applied several rules at once, so it is not known which of them removed the most issues. Jira's own links are thin before any rule: the Jira-only count on 2026-11-17 found fewer delivered issues with a linked pull request than with a linked branch or repository, and none in the Azure DevOps period. The funnel separates the two: what the sources hold, and what each of the spike's rules removes.
+
+**Population.** Every delivered issue in the store, of every type, Spike included, grouped by delivery sprint and by period (Azure DevOps only, both hosts, GitHub only). Deliveries between sprints are counted in their own row, not dropped.
+
+**Stages, in this order.** Each stage counts the issues still in after it. The rule's effect is the difference from the stage before.
+
+1. **Any link or match, anywhere readable.** Counted per route and as their union:
+   - Jira Development: a pull request record; a branch or repository but no pull request record (counted apart, as a linkage gap);
+   - the key in a pull request's source branch;
+   - the key in a pull request's title.
+
+   Use every repository the identity can read on each host, not only the approved list. Use the corrected matcher (`-` and `_` after the key). Keys of issues outside the store's projects are counted apart, not as misses.
+2. **In an approved repository.** Count Jira links that point outside the list apart: they are a scope choice, not missing data.
+3. **Not Spike.** Excluded by issue type ID. Report the numbers before and after this stage side by side.
+4. **Merged by delivery.** Count apart: merged after delivery, open, and closed without merge.
+5. **A usable author date.** Count apart: a commit list that came back truncated, a read that failed, and a date after delivery.
+
+**Several pull requests are not a stage.** By the owner's direction (2026-11-18), an issue with more than one pull request stays in, and its **first pull request**, the one opened earliest, gives the start: that pull request's earliest author date. Deduplicate by host, repository and number, so a pull request found by more than one route counts once. The run counts, without removing them, the issues with several pull requests, and among those, how often another pull request holds an earlier author date than the first one (a stacked branch or a branch cut from older work can). The one-pull-request rule belonged to the paired comparison with Jira's Code Review time, which is the [PR timing research](../../github-pr-timing/issues/01-can-github-measure-pull-request-time.md), not this funnel.
+
+**Also report:**
+- the same funnel for the delivered issues whose cycle starts with a brief visit;
+- the funnel with each rule switched off on its own, to show how much of the gap comes from each rule and how much from missing data;
+- for issues with no match at stage 1, whatever can be told without guessing: a branch or repository link in Jira, or nothing at all.
+
+**What it answers.** Whether low coverage comes from the sources (no link, no key in a branch or title, Azure DevOps not linked) or from the spike's own rules. It also gives the coverage a spec would start from under each choice of rule.
+
+**How.** Read only, on the work laptop, and aggregates only: counts per stage, sprint and period, kept in the work folder. No keys, branch names, pull request numbers or person fields in the notes. The Azure DevOps rows wait for access; until then they are reported as not read, not as zero.
