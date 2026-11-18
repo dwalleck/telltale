@@ -202,16 +202,6 @@ public sealed record DerivedSource(
         return System.Text.Json.JsonSerializer.Serialize(minutes);
     }
 
-    /// <summary>The IDs of the statuses listed in <see cref="BriefVisitThresholds"/>: the statuses the rebuild checked for brief visits, and so the ones a treatment acts on.</summary>
-    public IReadOnlySet<string> BriefVisitStatusIds
-    {
-        get
-        {
-            using var recorded = System.Text.Json.JsonDocument.Parse(BriefVisitThresholds);
-            return recorded.RootElement.EnumerateObject().Select(listed => listed.Name).ToHashSet(StringComparer.Ordinal);
-        }
-    }
-
     /// <summary><see cref="BriefVisitTreatment"/> when every part is <c>count</c>, which is also what an absent setting means (owner decision D83).</summary>
     public const string BriefVisitsCounted =
         "{\"" + BriefVisitTreatmentSetting.CycleTimeName + "\":\"" + BriefVisitTreatments.Count + "\",\"" + BriefVisitTreatmentSetting.TimeInStatusName + "\":\"" + BriefVisitTreatments.Count + "\"}";

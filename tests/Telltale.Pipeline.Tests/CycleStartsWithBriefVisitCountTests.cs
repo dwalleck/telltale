@@ -20,8 +20,6 @@ public class CycleStartsWithBriefVisitCountTests
 
     private const string ViewHead = "| sprint_id | issue_count | suppressed |\n| --- | --- | --- |\n";
 
-    private const string Line = "- Delivered issues whose cycle starts with a brief visit, which are in the cycle time figures: ";
-
     [Test]
     public async Task The_footer_and_the_view_give_the_number_of_delivered_issues_whose_cycle_starts_with_a_brief_visit()
     {
@@ -109,7 +107,7 @@ public class CycleStartsWithBriefVisitCountTests
         // Seven were delivered in the sprint, and three of those count: three people's.
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).Contains("\nDelivered issues: 7\n");
-        await Assert.That(report).EndsWith("\n" + Line + "3\n");
+        await Assert.That(report).EndsWith("\n" + ReportText.CyclesThatStartWithBriefVisit("3"));
         await Assert.That(await QueryAsync(pipeline, ViewSql)).IsEqualTo(ViewHead + "| 41 | 3 | 0 |\n");
         var flagged = await pipeline.QueryAsync<string>("SELECT issue_id FROM issue_cycle WHERE starts_with_brief_visit = 1;");
         await Assert.That(flagged).IsEquivalentTo(new[] { "FAKE-1", "FAKE-4", "FAKE-5", "FAKE-8" }.Select(jira.IdOf));
@@ -154,7 +152,7 @@ public class CycleStartsWithBriefVisitCountTests
 
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).Contains($"\nDelivered issues: {3 + people.Count}\n");
-        await Assert.That(report).EndsWith("\n" + Line + figure + "\n");
+        await Assert.That(report).EndsWith("\n" + ReportText.CyclesThatStartWithBriefVisit(figure));
         await Assert.That(await QueryAsync(pipeline, ViewSql)).IsEqualTo(ViewHead + $"| 41 | {countAndFlag} |\n");
     }
 
@@ -172,7 +170,7 @@ public class CycleStartsWithBriefVisitCountTests
 
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).Contains("\nDelivered issues: suppressed\n");
-        await Assert.That(report).EndsWith("\n- Issues delivered between sprints, in the whole store: suppressed\n" + Line + "suppressed\n");
+        await Assert.That(report).EndsWith("\n- Issues delivered between sprints, in the whole store: suppressed\n" + ReportText.CyclesThatStartWithBriefVisit("suppressed"));
         await Assert.That(await QueryAsync(pipeline, ViewSql)).IsEqualTo(ViewHead + "| 41 | NULL | 1 |\n");
     }
 
@@ -208,8 +206,8 @@ public class CycleStartsWithBriefVisitCountTests
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"], ["report", "--sprint", "42"]);
 
         await Assert.That(await QueryAsync(pipeline, ViewSql)).IsEqualTo(ViewHead + "| 41 | NULL | 1 |\n| 42 | NULL | 1 |\n");
-        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith("\n" + Line + "suppressed\n");
-        await Assert.That(await pipeline.ReadReportAsync(42)).EndsWith("\n" + Line + "suppressed\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith("\n" + ReportText.CyclesThatStartWithBriefVisit("suppressed"));
+        await Assert.That(await pipeline.ReadReportAsync(42)).EndsWith("\n" + ReportText.CyclesThatStartWithBriefVisit("suppressed"));
     }
 
     [Test]
@@ -283,7 +281,7 @@ public class CycleStartsWithBriefVisitCountTests
         await pipeline.RunAllAsync(["report", "--sprint", "41"]);
 
         await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith(
-            "\n- Fake Development: 4 issues had a visit shorter than 5 minutes\n" + Line + "suppressed\n");
+            "\n- Fake Development: 4 issues had a visit shorter than 5 minutes\n" + ReportText.CyclesThatStartWithBriefVisit("suppressed"));
     }
 
     /// <summary>Sprint 41 as the harness has it, and a team of five whose issues stay in New through it.</summary>

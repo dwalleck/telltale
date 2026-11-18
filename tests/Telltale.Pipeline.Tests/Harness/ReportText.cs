@@ -2,8 +2,10 @@ namespace Telltale.Pipeline.Tests.Harness;
 
 /// <summary>
 /// The fixed parts of a report that many tests expect around the rows they are about: the heading and head
-/// of each table, without and with the baseline columns, and the heading that follows the tables. One copy,
-/// so a test class states only the rows it is about.
+/// of each table, without and with the baseline columns, the heading that follows the tables, and the text
+/// a report carries about brief visits and their treatment. One copy, so a test class states only the rows
+/// it is about and a change of wording is one edit. A whole report written out as one literal is not built
+/// from these on purpose: it is there to disagree with them.
 /// </summary>
 public static class ReportText
 {
@@ -50,6 +52,61 @@ public static class ReportText
 
     /// <summary>What follows the two tables: the method note's heading.</summary>
     public const string MethodHeading = "\n## Method\n";
+
+    /// <summary>
+    /// What a report carries outside its method note and footer when brief visits are left out of a metric
+    /// (owner decisions D86 and D101), stated once for the test classes that expect it: the line under the
+    /// heading in its three forms, the mark on a time in status row, and the note under the cycle time table.
+    /// </summary>
+    public static class LeftOut
+    {
+        /// <summary>The line under the heading when time in status alone leaves brief visits out, with the empty line after it.</summary>
+        public const string LineForTimeInStatus =
+            "Brief visits are left out of time in status in this report. A row of that table marked \"adjusted\" is of a status listed for brief visits: its figures are of what remains, and the footer gives the number of its issues that had a brief visit and the number left out of the row.\n\n";
+
+        /// <summary>The line under the heading when cycle time alone leaves brief visits out, with the empty line after it.</summary>
+        public const string LineForCycleTime =
+            "Brief visits are left out of cycle time in this report. A delivered issue whose cycle starts with a brief visit has no cycle time: the cycle time table's figures are of the cycles that remain, and the footer gives the number of such issues.\n\n";
+
+        /// <summary>The line under the heading when both metrics leave brief visits out, with the empty line after it.</summary>
+        public const string LineForBoth =
+            "Brief visits are left out of time in status and of cycle time in this report. A row of the time in status table marked \"adjusted\" is of a status listed for brief visits: its figures are of what remains, and the footer gives the number of its issues that had a brief visit and the number left out of the row. A delivered issue whose cycle starts with a brief visit has no cycle time: the cycle time table's figures are of the cycles that remain, and the footer gives the number of such issues.\n\n";
+
+        /// <summary>The mark after the name of a listed status in the time in status table, when time in status leaves brief visits out.</summary>
+        public const string Mark = " (adjusted: see the footer)";
+
+        /// <summary>The note under the cycle time table when cycles that start with a brief visit are left out (D101), with the empty line that parts it from the table.</summary>
+        public const string NoteUnderTheCycleTimeTable =
+            "\nA delivered issue whose cycle starts with a brief visit has no cycle time and is not in this table (adjusted: see the footer).\n";
+    }
+
+    /// <summary>
+    /// The sentences of the method note's paragraph on brief visits that have another wording when brief
+    /// visits are left out of time in status (owner decisions D93, D98 and D99), each in both wordings, under
+    /// the default numbers of the minimum group size: which row the count is measured against, when a count
+    /// reads "suppressed", and which listed status has no line. The sentences on what is done with brief
+    /// visits are in <see cref="Treatment"/>.
+    /// </summary>
+    public static class BriefVisitsParagraph
+    {
+        public const string TheCountIsOfTheRow =
+            " For each status the configuration file lists (briefVisitThresholds), the footer gives how many of the issues in the status's time in status row had a brief visit during the time the row counts.";
+
+        public const string TheCountIsOfTheRowBeforeAnythingWasLeftOut =
+            " For each status the configuration file lists (briefVisitThresholds), the footer gives how many of the issues that were in the status's time in status row before anything was left out had a brief visit during the time the row counts.";
+
+        public const string ACountReadsSuppressed =
+            " A count reads \"suppressed\" when its row in the time in status table reads \"suppressed\" for its figures, or when fewer than three distinct assignees are among the issues counted.";
+
+        public const string ACountReadsSuppressedByTheRowBefore =
+            " A count reads \"suppressed\" when its row in the time in status table would read \"suppressed\" for its figures with nothing left out, or when fewer than three distinct assignees are among the issues counted.";
+
+        public const string AStatusWithNoRowHasNoLine =
+            " A listed status with no row in the time in status table has no line, and a sprint whose team is smaller than five has no line for any listed status.";
+
+        public const string AStatusWithNoRowBeforeHasNoLine =
+            " A listed status that had no row in the time in status table before anything was left out has no line; one whose every issue was left out has a line and no row, and a sprint whose team is smaller than five has no line for any listed status.";
+    }
 
     /// <summary>
     /// The sentences of the method note's paragraph on brief visits that say what is done with them
@@ -111,7 +168,7 @@ public static class ReportText
         public const string TheCycleNumberReadsSuppressed =
             " Its number reads \"suppressed\" when the sprint's delivered count does, as for a sprint whose team is smaller than five, when fewer than three distinct assignees are among the issues it counts, and when it is nothing.";
 
-        /// <summary>Ends the sentences on the cycle time line: the line dates from the treatment (owner decisions D87, D89), not from the rule of 2026-11-12 that the next sentence dates.</summary>
+        /// <summary>Ends the sentences on the cycle time line, under either treatment (owner decision D109): the date is the day the line was decided (D87), not that of the rule of 2026-11-12 that the next sentence dates.</summary>
         public const string TheCycleTimeLineWasAdded = " This line was added on 2026-11-16, after results had been seen.";
 
         /// <summary>The paragraph's last sentence when a metric leaves brief visits out (owner decision D89). <paramref name="metrics"/> is "time in status is", "cycle time is" or "time in status and cycle time are".</summary>

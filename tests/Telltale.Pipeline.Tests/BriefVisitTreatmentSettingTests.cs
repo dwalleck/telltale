@@ -199,7 +199,7 @@ public class BriefVisitTreatmentSettingTests
         // Derive alone repairs it: the treatment decides nothing about what is fetched.
         await pipeline.RunAllAsync(["derive"], ["report", "--sprint", "41"]);
         await Assert.That(await QueryAsync(pipeline, RowsSql)).IsEqualTo(ThreeRemain);
-        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\n| Fake Development (adjusted: see the footer) | 3 | 2.0 | 6.0 |\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).Contains("\n| Fake Development" + ReportText.LeftOut.Mark + " | 3 | 2.0 | 6.0 |\n");
         await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(requests);
     }
 

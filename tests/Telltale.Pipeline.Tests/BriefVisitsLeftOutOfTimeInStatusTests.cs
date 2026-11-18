@@ -126,7 +126,7 @@ public class BriefVisitsLeftOutOfTimeInStatusTests
             + "| 42 | Fake Development | 3 | 3 | 9 | 0 |\n"
             + BaselineHead
             + "| Fake Development | 3 | 0 |\n");
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\n| Fake Development (adjusted: see the footer) | 3 | 3.0 | 9.0 | 3.0 |\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\n| Fake Development" + Mark + " | 3 | 3.0 | 9.0 | 3.0 |\n");
     }
 
     [Test]
@@ -337,7 +337,8 @@ public class BriefVisitsLeftOutOfTimeInStatusTests
     public async Task Query_refuses_to_read_the_internal_view_of_the_issues_that_were_in_a_row_before_anything_was_left_out(string sql)
     {
         // The view holds a row per issue. A count of them less the row's shown issue count is the number of
-        // issues left out of the row, which no metric view gives yet.
+        // issues left out of the row, which brief_visits_per_sprint gives only when enough assignees are
+        // behind it: a count over this view would get round that check.
         await using var pipeline = new PipelineHarness();
         AddSprint41WithItsTeam(pipeline.Jira);
         AddFourCaughtUpIssuesOfFourPeople(pipeline.Jira);
@@ -432,7 +433,7 @@ public class BriefVisitsLeftOutOfTimeInStatusTests
         // not listed and has no mark.
         await Assert.That(leftOut).StartsWith(Heading + LineUnderTheHeading + "Delivered issues: ");
         await Assert.That(leftOut).Contains("\n| Fake New | 8 | ");
-        await Assert.That(leftOut).Contains("\n| Fake Development (adjusted: see the footer) | 3 | 2.0 | 6.0 |\n");
+        await Assert.That(leftOut).Contains("\n| Fake Development" + Mark + " | 3 | 2.0 | 6.0 |\n");
 
         // Nothing else differs but the method note's sentences that leaving out changes or adds: the
         // report with those put back as they read under count, and the line, the mark and what the
@@ -473,10 +474,9 @@ public class BriefVisitsLeftOutOfTimeInStatusTests
 
     private const string Heading = "# Fake Sprint 41 (2026-01-05 to 2026-01-19)\n\n";
 
-    private const string LineUnderTheHeading =
-        "Brief visits are left out of time in status in this report. A row of that table marked \"adjusted\" is of a status listed for brief visits: its figures are of what remains, and the footer gives the number of its issues that had a brief visit and the number left out of the row.\n\n";
+    private const string LineUnderTheHeading = ReportText.LeftOut.LineForTimeInStatus;
 
-    private const string Mark = " (adjusted: see the footer)";
+    private const string Mark = ReportText.LeftOut.Mark;
 
     /// <summary>
     /// The sentences of the method note that differ when brief visits are left out of time in status: one of
@@ -489,15 +489,12 @@ public class BriefVisitsLeftOutOfTimeInStatusTests
     [
         (" Total business days sum that time across all contributing issues, including repeated visits and leaving out brief visits to a status listed for them (see the paragraph on brief visits below); this is accumulated issue time,",
             " Total business days sum that time across all contributing issues, including repeated visits; this is accumulated issue time,"),
-        (" For each status the configuration file lists (briefVisitThresholds), the footer gives how many of the issues that were in the status's time in status row before anything was left out had a brief visit during the time the row counts.",
-            " For each status the configuration file lists (briefVisitThresholds), the footer gives how many of the issues in the status's time in status row had a brief visit during the time the row counts."),
+        (ReportText.BriefVisitsParagraph.TheCountIsOfTheRowBeforeAnythingWasLeftOut, ReportText.BriefVisitsParagraph.TheCountIsOfTheRow),
         (ReportText.Treatment.IsASetting + ReportText.Treatment.LeftOutOfTimeInStatusAlone + ReportText.Treatment.TimeInStatusIsLeftOut + ReportText.Treatment.Why + ReportText.Treatment.WhatLeavingOutDoesNotDo,
             ReportText.Treatment.NothingIsDone),
-        (" A count reads \"suppressed\" when its row in the time in status table would read \"suppressed\" for its figures with nothing left out, or when fewer than three distinct assignees are among the issues counted.",
-            " A count reads \"suppressed\" when its row in the time in status table reads \"suppressed\" for its figures, or when fewer than three distinct assignees are among the issues counted."),
+        (ReportText.BriefVisitsParagraph.ACountReadsSuppressedByTheRowBefore, ReportText.BriefVisitsParagraph.ACountReadsSuppressed),
         (ReportText.Treatment.TheSecondNumber + ReportText.Treatment.TheSecondNumberReadsSuppressed, ""),
-        (" A listed status that had no row in the time in status table before anything was left out has no line; one whose every issue was left out has a line and no row, and a sprint whose team is smaller than five has no line for any listed status.",
-            " A listed status with no row in the time in status table has no line, and a sprint whose team is smaller than five has no line for any listed status."),
+        (ReportText.BriefVisitsParagraph.AStatusWithNoRowBeforeHasNoLine, ReportText.BriefVisitsParagraph.AStatusWithNoRowHasNoLine),
         (ReportText.Treatment.WhenLeavingOutWasAdded("time in status is"), ""),
     ];
 

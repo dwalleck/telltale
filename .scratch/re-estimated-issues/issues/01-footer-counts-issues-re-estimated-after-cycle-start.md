@@ -17,7 +17,7 @@ Waiting on the owner to confirm the readings below. They are the author's and bi
 ## Readings not yet confirmed
 
 1. **Compared with the estimate as of the last sync,** not the estimate at delivery. The purpose is to explain a difference from what the board shows, and the board shows the estimate now. A change made after delivery therefore counts.
-2. **One number for the whole store,** beside the footer's two existing whole-store counts, not one per sprint. A per-sprint number would nearly always be one or two issues, which the minimum group size withholds under its default numbers, so the line would nearly always read `suppressed`.
+2. **One number for the whole store,** beside the footer's two existing whole-store counts, not one per sprint. A number for one sprint can be small enough for the minimum group size to withhold it under its default numbers, and the line would then read `suppressed`.
 3. **Any difference counts once:** raised, lowered, estimated only after the start, or the estimate removed. The number is not split by direction, so that a direction cannot rest on one or two people.
 4. **A delivered issue that never entered a work status** is bucketed by its estimate at delivery (D35) and is compared with its estimate now in the same way.
 5. **Withheld as the other whole-store counts are:** when fewer distinct assignees than a figure needs are behind the issues it counts, and when it is zero, so that a zero reads as a withheld count does. With the configured number at zero it is shown, a count of nothing as `0`.

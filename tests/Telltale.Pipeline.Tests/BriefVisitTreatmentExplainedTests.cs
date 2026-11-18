@@ -23,28 +23,22 @@ public class BriefVisitTreatmentExplainedTests
         + " It is measured in clock time over the issue's whole history: weekends and holidays count, and the stay is not clipped to the sprint.";
 
     // Which row the count is measured against: the row as it is, and the row before anything was left out.
-    private const string TheCountIsOfTheRow =
-        " For each status the configuration file lists (briefVisitThresholds), the footer gives how many of the issues in the status's time in status row had a brief visit during the time the row counts.";
+    private const string TheCountIsOfTheRow = ReportText.BriefVisitsParagraph.TheCountIsOfTheRow;
 
-    private const string TheCountIsOfTheRowBeforeAnythingWasLeftOut =
-        " For each status the configuration file lists (briefVisitThresholds), the footer gives how many of the issues that were in the status's time in status row before anything was left out had a brief visit during the time the row counts.";
+    private const string TheCountIsOfTheRowBeforeAnythingWasLeftOut = ReportText.BriefVisitsParagraph.TheCountIsOfTheRowBeforeAnythingWasLeftOut;
 
     private const string AShortMedian = " A short median in the time in status table does not show how many issues had a brief visit.";
 
-    private const string ACountReadsSuppressed =
-        " A count reads \"suppressed\" when its row in the time in status table reads \"suppressed\" for its figures, or when fewer than three distinct assignees are among the issues counted.";
+    private const string ACountReadsSuppressed = ReportText.BriefVisitsParagraph.ACountReadsSuppressed;
 
-    private const string ACountReadsSuppressedByTheRowBefore =
-        " A count reads \"suppressed\" when its row in the time in status table would read \"suppressed\" for its figures with nothing left out, or when fewer than three distinct assignees are among the issues counted.";
+    private const string ACountReadsSuppressedByTheRowBefore = ReportText.BriefVisitsParagraph.ACountReadsSuppressedByTheRowBefore;
 
     private const string AZeroAndAWithheldCountReadAlike =
         " A count of nothing has nobody behind it, so a zero and a withheld count both read \"suppressed\".";
 
-    private const string AStatusWithNoRowHasNoLine =
-        " A listed status with no row in the time in status table has no line, and a sprint whose team is smaller than five has no line for any listed status.";
+    private const string AStatusWithNoRowHasNoLine = ReportText.BriefVisitsParagraph.AStatusWithNoRowHasNoLine;
 
-    private const string AStatusWithNoRowBeforeHasNoLine =
-        " A listed status that had no row in the time in status table before anything was left out has no line; one whose every issue was left out has a line and no row, and a sprint whose team is smaller than five has no line for any listed status.";
+    private const string AStatusWithNoRowBeforeHasNoLine = ReportText.BriefVisitsParagraph.AStatusWithNoRowBeforeHasNoLine;
 
     private const string WhenTheRuleWasAdded =
         " This rule was added on 2026-11-12, after the first run on real data: the thresholds were chosen with knowledge of results, and the counts describe data quality and are not a success criterion.";
@@ -183,7 +177,7 @@ public class BriefVisitTreatmentExplainedTests
             + AStatusWithNoRowBeforeHasNoLine
             + T.TheCycleTimeLine + T.TheyAreInTheFigures + T.TheCycleNumberReadsSuppressed + T.TheCycleTimeLineWasAdded
             + WhenTheRuleWasAdded
-            + " Leaving brief visits out was added on 2026-11-16, after results had been seen, and it changes how time in status is measured.\n"
+            + T.WhenLeavingOutWasAdded("time in status is") + "\n"
             + Footer
             + "- Fake Development: 4 issues had a visit shorter than 5 minutes" + ReportText.LeftOutOfTheRow("4") + "\n"
             + ReportText.CyclesThatStartWithBriefVisit("4"));
@@ -212,7 +206,7 @@ public class BriefVisitTreatmentExplainedTests
             + AStatusWithNoRowHasNoLine
             + T.TheCycleTimeLine + T.TheyHaveNoCycleTime + T.TheCycleNumberReadsSuppressed + T.TheCycleTimeLineWasAdded
             + WhenTheRuleWasAdded
-            + " Leaving brief visits out was added on 2026-11-16, after results had been seen, and it changes how cycle time is measured.\n"
+            + T.WhenLeavingOutWasAdded("cycle time is") + "\n"
             + Footer
             + "- Fake Development: 4 issues had a visit shorter than 5 minutes\n"
             + ReportText.CyclesThatStartWithBriefVisitAndHaveNoCycleTime("4"));
@@ -240,7 +234,7 @@ public class BriefVisitTreatmentExplainedTests
             + AStatusWithNoRowBeforeHasNoLine
             + T.TheCycleTimeLine + T.TheyHaveNoCycleTime + T.TheCycleNumberReadsSuppressed + T.TheCycleTimeLineWasAdded
             + WhenTheRuleWasAdded
-            + " Leaving brief visits out was added on 2026-11-16, after results had been seen, and it changes how time in status and cycle time are measured.\n"
+            + T.WhenLeavingOutWasAdded("time in status and cycle time are") + "\n"
             + Footer
             + "- Fake Development: 4 issues had a visit shorter than 5 minutes" + ReportText.LeftOutOfTheRow("4") + "\n"
             + ReportText.CyclesThatStartWithBriefVisitAndHaveNoCycleTime("4"));

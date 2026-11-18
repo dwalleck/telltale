@@ -164,8 +164,8 @@ public class DiscoverBriefVisitTreatmentTests
     [Arguments("synthetic-pasted-token", UnknownPart)]
     public async Task A_rerun_on_a_file_with_a_key_written_twice_under_the_setting_says_what_run_says_and_prints_no_part_of_the_key(string key, string refusal)
     {
-        // Owner decision D105. discover's own reader stops at a key written twice and quotes it (D74); a key
-        // typed under this setting could be a secret, so here the setting's reader speaks instead.
+        // Owner decision D105. discover's own reader stops at a key written twice, and its message would
+        // quote the key; a key typed under this setting could be a secret, so here the setting's reader speaks.
         await using var pipeline = new PipelineHarness();
         await DiscoverAsSetupAsync(pipeline, DiscoverTests.FirstDiscover);
         await EditWrittenConfigAsync(pipeline, config =>
@@ -197,7 +197,9 @@ public class DiscoverBriefVisitTreatmentTests
     [Test]
     public async Task A_key_written_twice_under_another_setting_is_still_refused_by_discovers_own_reader()
     {
-        // D105 narrows D74 for briefVisitTreatment only: elsewhere discover's reader says what it said.
+        // Elsewhere than under briefVisitTreatment it is discover's own reader that refuses a key written
+        // twice. What discover then says, and that it quotes no part of the key (owner decision D108), is
+        // pinned whole in DiscoverKeyWrittenTwiceTests.
         await using var pipeline = new PipelineHarness();
         await DiscoverAsSetupAsync(pipeline, DiscoverTests.FirstDiscover);
         await EditWrittenConfigAsync(pipeline, config =>

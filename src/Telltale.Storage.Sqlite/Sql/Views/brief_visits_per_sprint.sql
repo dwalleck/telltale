@@ -87,14 +87,15 @@ left_out AS (
 -- issues are always among the row's issues. Before a treatment could leave issues out, this view read the
 -- row's own flag from time_in_status_per_sprint as a guard; that flag is now of what remains, and a copy of
 -- the row's rule here would be a second statement of it that could never decide a row.
--- The team check and the done statuses left out are read from where they are stated (sprint_team,
--- board_status), and the status's name and position are joined as time_in_status_per_sprint joins them: this
--- view cannot take them from that view, whose rows are of what remains.
+-- Which sprint and status may have a row (a sprint not short of a team, a status that is not done), and
+-- the status's name and position, are read from the one view that states them (sprint_status_row), as
+-- time_in_status_per_sprint reads them: this view cannot take them from that view, whose rows are of what
+-- remains.
 decided AS (
     SELECT r.sprint_id,
            r.status_id,
-           COALESCE(s.name, r.status_id) AS status_name,
-           b.position AS board_position,
+           p.status_name,
+           p.board_position,
            h.threshold_minutes,
            -- The number of issues left out is decided here in the same way, once. While brief visits are
            -- counted there is no number and nothing is withheld.
@@ -104,15 +105,11 @@ decided AS (
            CASE WHEN COALESCE(c.assignees, 0) >= g.assignees_behind_a_figure THEN 0 ELSE 1 END AS suppressed
     FROM recorded_row r
     JOIN threshold h ON h.status_id = r.status_id
-    JOIN sprint_team t ON t.sprint_id = r.sprint_id
-    JOIN board_status b ON b.status_id = r.status_id
-    LEFT JOIN status s ON s.status_id = r.status_id
+    JOIN sprint_status_row p ON p.sprint_id = r.sprint_id AND p.status_id = r.status_id
     LEFT JOIN counted c ON c.sprint_id = r.sprint_id AND c.status_id = r.status_id
     LEFT JOIN left_out l ON l.sprint_id = r.sprint_id AND l.status_id = r.status_id
     CROSS JOIN treatment
     CROSS JOIN minimum_group_size g
-    WHERE b.is_done = 0
-      AND t.team_suppressed = 0
 )
 SELECT d.sprint_id,
        d.status_id,

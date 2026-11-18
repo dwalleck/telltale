@@ -501,26 +501,51 @@ internal static class DiscoverCommand
         return false;
     }
 
+    /// <summary>
+    /// The file as it is, read as leniently as the run reads it. A key written twice is refused, and no part
+    /// of it is printed, in whatever setting and at whatever depth it is: what was typed as a key could be a
+    /// secret pasted into the wrong place. Discover says that a key is written twice, and under which setting
+    /// when that setting's name is one the tool knows (owner decision D108). The runtime's own message for
+    /// such a file quotes the key, so it is never passed on. A file that is not JSON is refused with the line
+    /// and the position of the fault and no text from the file: the runtime's message for it can quote the
+    /// file from the fault to its end (owner decision D110). A key that is no text at all is refused as
+    /// every command refuses it.
+    /// </summary>
     private static JsonObject ReadExisting(string text, string path)
     {
+        var keys = ConfigFile.FindKeyFaults(Encoding.UTF8.GetBytes(text));
+        if (keys.NotJsonAt is { } at)
+        {
+            throw Unreadable(path, ConfigFile.NotJson(at));
+        }
+
+        if (ConfigFile.RefusalOf(keys, path) is { } refusal)
+        {
+            throw RunWouldRefuse(path, refusal);
+        }
+
         try
         {
             return JsonNode.Parse(text, documentOptions: Lenient) as JsonObject ?? throw Unreadable(path, "it is not a JSON object");
         }
-        catch (JsonException exception)
+        catch (JsonException) when (keys.KeyIsWrittenTwice)
         {
             RequireReadableBriefVisitTreatment(text, path);
-            throw Unreadable(path, exception.Message, exception);
+            throw Unreadable(path, keys.SettingOfKeyWrittenTwice is { } setting ? $"a key is written twice under {setting}" : "a key is written twice");
+        }
+        catch (JsonException)
+        {
+            // The walk read the whole file and found nothing, so this is not expected. Whatever the reader
+            // refused, its message is not passed on: it can quote the file.
+            throw Unreadable(path, "it is not JSON the tool can read");
         }
     }
 
     /// <summary>
-    /// For a file discover's own reader refused. That reader's message quotes a key that is written twice
-    /// (owner decision D74), and a key typed under <c>briefVisitTreatment</c> could be a secret pasted into
-    /// the wrong place. So the setting is first read by its own reader, which refuses a part written twice
-    /// and a part it does not know by the setting's name and repeats nothing: discover then says what run
-    /// would say, and prints no part of such a key (owner decision D105). A file whose fault is elsewhere
-    /// comes back from here and gets the reader's message, as before.
+    /// For a file in which a key is written twice. A part of <c>briefVisitTreatment</c> written twice, and a
+    /// part the tool does not know, are refused by <c>run</c> with a message that names the setting and
+    /// repeats nothing. So the setting is first read by its own reader: for those discover says what run
+    /// would say (owner decision D105). A file whose key written twice is elsewhere comes back from here.
     /// </summary>
     private static void RequireReadableBriefVisitTreatment(string text, string path)
     {
@@ -531,7 +556,7 @@ internal static class DiscoverCommand
         }
         catch (JsonException)
         {
-            // Not JSON as far as the setting, or inside it: the fault is not a key written twice.
+            // The walk that found the key written twice read the whole file, so this one does too.
             return;
         }
 

@@ -24,8 +24,8 @@ public class BriefVisitsExplainedTests
     private const string WhatABriefVisitIs =
         "- A brief visit is one unbroken stay in a status that ended and was shorter than the status's threshold."
         + " It is measured in clock time over the issue's whole history: weekends and holidays count, and the stay is not clipped to the sprint."
-        + " For each status the configuration file lists (briefVisitThresholds), the footer gives how many of the issues in the status's time in status row had a brief visit during the time the row counts."
-        + " Brief visits are counted and nothing more: no duration was excluded or corrected because of one, and every other figure is what it would be without the count."
+        + ReportText.BriefVisitsParagraph.TheCountIsOfTheRow
+        + ReportText.Treatment.NothingIsDone
         + " A short median in the time in status table does not show how many issues had a brief visit.";
 
     private const string AZeroAndAWithheldCountReadAlike =
@@ -71,9 +71,9 @@ public class BriefVisitsExplainedTests
         await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith(
             LastParagraphBefore
             + WhatABriefVisitIs
-            + " A count reads \"suppressed\" when its row in the time in status table reads \"suppressed\" for its figures, or when fewer than three distinct assignees are among the issues counted."
+            + ReportText.BriefVisitsParagraph.ACountReadsSuppressed
             + AZeroAndAWithheldCountReadAlike
-            + AStatusWithNoRowHasNoLine + ", and a sprint whose team is smaller than five has no line for any listed status."
+            + ReportText.BriefVisitsParagraph.AStatusWithNoRowHasNoLine
             + TheCycleTimeLine + TheCycleNumberReadsSuppressed
             + WhenTheRuleWasAdded
             + Footer.ReplaceLineEndings("\n")
