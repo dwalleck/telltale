@@ -18,6 +18,16 @@ public static class JiraNotices
     /// <summary>The lines before the failure that ends the run, when <paramref name="call"/> kept getting no answer in time.</summary>
     public static string EveryRetryAfterNoAnswer(string call) => Lines(WaitsAfterNoAnswer, "Jira did not answer in time", call);
 
+    /// <summary>
+    /// The line that ends the run when a request still failed after its last retry. <paramref name="failure"/> is
+    /// the sentence that says how it failed and names the request, as the line without retries would end.
+    /// </summary>
+    public static string AfterEveryRetry(string failure, int retries) => $"{failure} again after {retries} retries. Run the command again later.\n";
+
+    /// <summary>The line that ends the run when another retry would take the command past its fifteen minutes on failures.</summary>
+    public static string OutOfTime(string failure) =>
+        $"{failure}, and waiting again would bring the time this command has spent on failed requests and on waits to more than 15 minutes. Run the command again later.\n";
+
     private static string Lines(IReadOnlyList<TimeSpan> waits, string failure, string call) =>
         string.Concat(waits.Select(wait => $"{failure}. Waiting {wait.TotalSeconds:0} seconds before asking again ({call}).\n"));
 }

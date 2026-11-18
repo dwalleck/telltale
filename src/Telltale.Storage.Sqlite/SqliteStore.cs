@@ -624,12 +624,26 @@ public sealed class SqliteStore : ITelltaleStore
         new($"This query reads only the metric views ({string.Join(", ", views.Order(StringComparer.Ordinal))}), and it asked for something else: {exception.Message}", exception);
 
     /// <summary>
-    /// Identifies the scripts that create the derived tables and the metric views: a digest of their names and
-    /// text. A rebuild stores it, so a store whose views another version of the tool created is told apart
-    /// without anyone keeping a version number up to date.
+    /// The compiled code that computes derived rows: the rules in Telltale.Core and this store, which writes them.
+    /// The SDK builds deterministically, so a module's ID is a digest of what was compiled: it changes with any
+    /// change to the code, and can change with a comment or a moved line, which shift the debug information.
     /// </summary>
-    private static readonly string DerivedObjectsVersion = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-        string.Concat(Scripts.InFolder("Derived").Concat(Scripts.InFolder("Views")).Select(script => $"{script.Name}\n{script.Sql}\n")))));
+    internal static readonly IReadOnlyList<Guid> DerivingCode =
+        [typeof(Telltale.Core.Derive.Derivation).Module.ModuleVersionId, typeof(SqliteStore).Module.ModuleVersionId];
+
+    /// <summary>
+    /// Identifies what built the derived tables and the metric views: the scripts that create them, and the code
+    /// that computes their rows. A rebuild stores it, so a store that another version of the tool derived is
+    /// told apart without anyone keeping a version number up to date.
+    /// </summary>
+    private static readonly string DerivedObjectsVersion =
+        DerivedObjectsVersionOf(Scripts.InFolder("Derived").Concat(Scripts.InFolder("Views")), DerivingCode);
+
+    /// <summary>A digest of the scripts' names and text and of the code's module IDs.</summary>
+    internal static string DerivedObjectsVersionOf(IEnumerable<(string Name, string Sql)> scripts, IEnumerable<Guid> derivingCode) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+            string.Concat(scripts.Select(script => $"{script.Name}\n{script.Sql}\n"))
+            + string.Concat(derivingCode.Select(module => $"module\n{module:D}\n")))));
 
     /// <summary>
     /// Checks that the metric views are the ones this version of the tool creates and that all of them are

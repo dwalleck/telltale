@@ -161,7 +161,7 @@ public class BackfillRebuildTests
     }
 
     [Test]
-    [Arguments("the fetch", "Jira answered 500 (InternalServerError) to POST rest/api/3/changelog/bulkfetch.")]
+    [Arguments("the fetch", "Jira answered 500 (InternalServerError) to POST rest/api/3/changelog/bulkfetch again after 5 retries. Run the command again later.")]
     [Arguments("the write", "synthetic write failure")]
     public async Task A_backfill_that_fails_part_way_leaves_the_store_and_the_report_as_they_were_and_run_again_ends_as_an_uninterrupted_one(string whatFails, string failure)
     {

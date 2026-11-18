@@ -61,7 +61,7 @@ To run from source without publishing, use `dotnet run --project src/Telltale.Cl
 
 ### Upgrading
 
-A store needs one `telltale derive` after upgrading to any version whose derived tables or metric views differ from the ones that built it. The tool tells the two apart by the text of its SQL scripts, so this includes a version that changed only a comment in one. Until then `report` and `query` stop with:
+A store needs one `telltale derive` after upgrading to any version whose derived tables, metric views or rules that fill them differ from the ones that built it. The tool tells the two apart by the text of its SQL scripts and by the compiled code of the rules (the `Telltale.Core` and store assemblies), so this includes a version that changed only a comment in one of them, or a part of that code `derive` does not use. Until then `report` and `query` stop with:
 
 ```
 The derived data in the store was built by another version of this tool. Run derive first.
@@ -159,7 +159,7 @@ It refuses to replace a non-empty store with an empty fetch, because that usuall
 
 Fetches what changed in Jira since the last `sync` or `backfill` and adds it to the store. It removes one thing: a stored issue that has since become an epic or a sub-task, which is out of scope. Work deleted or moved in Jira stays until the next `backfill`.
 
-A request that fails in a way that can pass by itself (Jira answers 408, 500, 502, 503 or 504, the connection drops, or no answer comes in time) is sent again up to five times, after waits that start at 5 seconds and double (three times when no answer comes in time, since each try first waits out the timeout); this applies to `backfill` and `discover` too. A rate-limited request (429) is sent again up to five times, after the wait Jira asks for. One command waits at most 15 minutes in all. A fetch is stored whole or not at all, so a run that still fails has changed nothing.
+A request that fails in a way that can pass by itself is sent again up to five times: Jira answers 408, 500, 502, 503 or 504, or, once Jira has answered some request of the same command, the connection drops, is reset or cannot be made (three times when no answer comes in time, since each try first waits out the timeout). The wait is what the answer's `Retry-After` asks for, or else starts at 5 seconds and doubles. A failure on the way to Jira before it has answered anything is most likely the proxy or the certificate, so it ends the command at once. A rate-limited request (429) is sent again up to five times, after the wait Jira asks for, counted apart from the others. This applies to `backfill` and `discover` too. One command spends at most 15 minutes on failures in all, the failed requests included, and a run that stops at a limit ends with "Run the command again later." A fetch is stored whole or not at all, so a run that still fails has changed nothing.
 
 ### `derive`
 

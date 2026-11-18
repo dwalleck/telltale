@@ -49,7 +49,7 @@ public class JiraFailureTests
 
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            JiraNotices.EveryRetryAfterNoAnswer("GET rest/api/3/status") + "Jira did not answer GET rest/api/3/status in time.\n");
+            "Jira did not answer GET rest/api/3/status in time.\n");
     }
 
     [Test]
