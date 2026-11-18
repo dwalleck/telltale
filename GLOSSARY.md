@@ -54,6 +54,9 @@ _Avoid_: Completed, closed, resolved
 A group of issues with the same story point estimate at the moment their cycle started, used to compare like with like. Later re-estimates are ignored; issues with no estimate at that moment are unestimated. A delivered issue that has no cycle time because its cycle starts with a brief visit keeps the bucket of its cycle's start (owner decision D102; see cycle time).
 _Avoid_: Size class, issue type
 
+**Time to first code review**:
+The full wait from a pull request opening to its first submitted human code review. Count it once, in the sprint window containing that review, even if the pull request opened earlier or has not closed. A comment-only review, request for changes or approval qualifies, even if later dismissed. Ordinary conversation comments, the author's own activity, automation and Ops reviews do not qualify. A pull request still waiting at sprint close has no observed duration, not a duration of zero.
+
 ### AI use
 
 **Structured AI use**:

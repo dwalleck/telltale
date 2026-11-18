@@ -4,7 +4,7 @@ Type: research
 
 **What to find out:** Two things, from every pull request in the team's repositories on **both hosts**, Azure DevOps and GitHub, whether or not it can be tied to a Jira issue:
 
-1. **What the pull requests say about elapsed time:** how long a pull request is open before it merges, and how long it waits for its first review. Measured per pull request and per sprint, by merge time.
+1. **What the pull requests say about elapsed time:** how long a pull request is open before it merges, and how long it waits for its first review. Group time to merge by merge sprint. Group time to first code review by first qualifying review sprint, regardless of when or whether the PR closes.
 2. **Why a pull request does or does not lead to a Jira issue.** For each one, record what is there to link it and what is missing. The owner then knows what would have to change, in the data, the tool or the team's habits, for the two to be joined.
 
 A third thing follows from the move from Azure DevOps to GitHub:
@@ -34,8 +34,8 @@ It runs on the work laptop. The GitHub half can run now, with the signed-in GitH
    - pull requests completed with no review;
    - pull requests whose only reviews are from automation (bot or service accounts, Copilot, build validation);
    - pull requests whose first review is a comment rather than an approval or a request for changes.
-3. **Per sprint.** Median and 85th percentile of each measure per sprint, by merge time, in business time and in elapsed time, as the tool reports other measures. Give them per host and combined for the sprints that used both. How many pull requests each figure rests on, and how many distinct authors.
-4. **What links a pull request to an issue.** Sort each pull request, on either host, into the first of these that holds:
+3. **Per sprint.** Median and 85th percentile per sprint (first code review by review time, time to merge by merge time), in business time and in elapsed time, as the tool reports other measures. Give them per host and combined for the sprints that used both. How many pull requests each figure rests on, and how many distinct authors.
+4. **What links a pull request to an issue.** On GitHub, check both source branch and title before assigning an issue. Count agreement, branch only, title only, differing keys, and neither separately. One unambiguous key in either field suffices when it resolves to an imported issue. If branch and title name different keys, count the PR once under conflicting keys and once in its merge sprint’s PR timing, even if only one key resolves. Attribute neither the PR nor its commit evidence to either issue. Description and commit-message keys are mentions, not fallback assignments. Every merged PR still counts for PR timing. For Azure DevOps, investigate the following classes in order:
    - the key of an issue in the store, in its source branch (`head.ref` on GitHub, `sourceRefName` on Azure DevOps);
    - such a key in its title only;
    - such a key in its description only, as a key or as a link to a Jira issue;

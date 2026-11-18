@@ -27,7 +27,7 @@ All durations in business days. Median and P85, not averages (averages only for 
 | --- | --- | --- | --- |
 | Review rounds per PR (stand-in for senior review effort) | 1 | Headline | GitHub |
 | Not-fixed threads per PR | 1 | Supporting | GitHub review threads |
-| Time to first review, time to re-review, share of PR life in reviewer wait | 1 | Supporting | GitHub timeline |
+| Time to first code review (full wait from opening, counted in the sprint of the first qualifying review, without requiring merge), time to re-review, share of PR life in reviewer wait | 1 | Supporting | GitHub timeline |
 | P85 cycle time by point bucket, and the median–P85 gap | 2 | Headline | Jira |
 | Time in each status per sprint | 2 | Supporting | Jira |
 | Delivery forecast range (SLE, Monte Carlo on daily throughput) | 2 | Supporting | Jira |
