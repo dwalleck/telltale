@@ -105,7 +105,7 @@ The owner suggested GitHub/Azure DevOps as a more accurate source for review tim
 - Ready for review to required approvals satisfied: review turnaround.
 - Required approvals satisfied to merge: post-approval delay.
 
-These are elapsed-time measures, not hands-on effort. Draft intervals, automation, requested changes, new commits, renewed approvals, missing history, and provider-specific event availability must be resolved before implementation. The discussion did not verify provider API capabilities or choose an integration.
+These are elapsed-time measures, not hands-on effort. Draft intervals, automation, requested changes, new commits, renewed approvals, missing history, and provider-specific event availability must be resolved before implementation. The original discussion did not verify provider APIs. Later read-only [GitHub PR timing research](../../.scratch/github-pr-timing/issues/01-can-github-measure-pull-request-time.md) verified open and merge timestamps, submitted reviews, and an explicit readiness event, but not historical required-approval timing or full reviewer wait. It recommends starting with GitHub-native open-to-merge and using Jira linkage only for the separate paired comparison. The [first-commit research](../../.scratch/first-commit-start/issues/01-can-jira-links-lead-to-a-first-commit.md) tested a second cycle-time reading; neither feature is implemented.
 
 Report per PR initially rather than silently summing overlapping PR durations into an issue-level number. Decide issue linkage and aggregation explicitly. Git activity can also provide development proxies, but a first commit is not necessarily the start of development. Do not automatically relabel Committed time as Development.
 
@@ -137,6 +137,6 @@ For a combined Development + Review + QE row, first sum those durations per item
 2. Use synthetic examples for rapid catch-up transitions, legitimate brief visits, repeated visits, clipping, weekends/holidays, and contributor counts falling below privacy thresholds after filtering.
 3. Preserve recorded data, implement the approved reporting behavior end to end, and verify baseline suppression as well as per-sprint figures.
 4. Record and commit any metric-definition change with its reason. Update the report's method note and distinguish diagnostic hypotheses from measured facts.
-5. Investigate the selected PR provider's available history before defining or implementing fallbacks.
+5. Use the linked GitHub research to scope a first PR timing spec. Define team attribution in shared repositories and verify restricted credentials; validate Azure DevOps history separately.
 
 This handoff is an investigation summary, not an approved anomaly/fallback specification. Do not infer authorization to exclude durations, reinterpret Committed time, or revise the evaluation's success criteria.

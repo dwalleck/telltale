@@ -18,7 +18,7 @@ What the tool has today: it collects issues, their status, sprint and point hist
 
 **Status:** ready-for-human
 
-A person has to give access to the two code hosts and name the repositories to look at. With those in place an agent can run the rest on the work laptop. Access can be a sign-in to each host's command-line tool rather than a stored token (see "Second route" below).
+The document review is done. The remaining checks need approved read access and repository allowlists on the work laptop, plus an administrator's retention answer. Access can be an approved CLI sign-in (see "Second route" below).
 
 ## Questions
 
@@ -36,24 +36,24 @@ A person has to give access to the two code hosts and name the repositories to l
 - **Company data stays on company systems.** The work runs on the work laptop. Notes, responses and counts are kept there, outside this repository.
 - **This repository is public.** No issue ID or key, pull request number, repository or project name, person, date of a real event or count from real data goes into this ticket, a commit or a test. The answer below is written in general terms: yes or no, the names of fields, and what a spec would have to handle.
 - **Nothing about a person is recorded.** Pull request and commit records carry authors' and reviewers' names and addresses. The spike reads dates and identifiers only, and writes no name, address or account anywhere (ADR-0003).
-- **Tokens** go in Windows Credential Manager, never in a file or on a command line, and have the narrowest read-only scope that works. A token a signed-in command-line tool hands out on demand (`gh auth token`, `az account get-access-token`) is kept by that tool in the same place, and is never written anywhere by the spike. Such a token is usually broader than read-only, so the spike sends GET requests only.
-- Use the commit's author date, not its commit date: a rebase or an amend rewrites the commit date. Read commits from the pull request's own record, not from the main branch, where a squash merge leaves one commit dated at the merge.
-- A first commit is a lower bound on when work started. The spike does not judge whether that is good enough; it reports how the dates fall.
+- **Tokens** go in Windows Credential Manager and have the narrowest read-only scope that works. If using a CLI sign-in, check that the CLI uses approved protected storage and let it apply the credential itself. Never print or log tokens, pass them as command-line arguments, or put them in plaintext files. A signed-in identity may have broader access, so the spike sends GET requests only.
+- Use the commit's author date, not its committer date: a rebase or amend can rewrite the committer date. Read commits from the pull request's own record, not from the main branch, where a squash merge leaves only the combined commit.
+- If the commit belongs to the same work and its timestamp is right, work started no later than that commit. The elapsed time **from commit to delivery**, not the start timestamp, is the lower bound. The spike reports how the dates fall, not whether the measure is good enough.
 
 ## Done when
 
 - [ ] Each of the seven questions has an answer under `## Answer`, in general terms, with how it was found
 - [ ] Each answer says whether it was observed on the real systems, read in a vendor's documents, or told by an administrator
 - [ ] The answer says plainly whether the route works for the Azure DevOps period, for the GitHub period, or for neither, and what would stop it
-- [ ] The answer lists what a spec for a first-commit start would have to decide: which commit date, several pull requests, issues with no linked pull request, how the figure is labelled as a lower bound, and whether it is a second reading or replaces leaving out (the pilot plan says a second reading unless a dated commit there says otherwise)
+- [x] The answer lists what a spec for a first-commit start would have to decide: which commit date, several pull requests, issues with no linked pull request, how the figure is labelled as a lower bound, and whether it is a second reading or replaces leaving out (the pilot plan says a second reading unless a dated commit there says otherwise)
 - [ ] The answer says by when the older sprints' links and dates must be collected, if question 7 finds a deadline
 - [ ] Nothing real is in the repository; the detailed notes are named by where they are kept on the work laptop
 
 ## Answer
 
-**Partial, 2026-11-17.** Questions 1 and 2 and the Jira side of 6 are answered; 3, 4 and 5 need access to the code hosts, and "Second route" below is the plan for them; 7 is open with the administrators. How each point was found is in brackets: *observed* means read-only calls to the real Jira site with the tool's own API token, over the delivered issues in the store, printing only HTTP statuses, field names and value types, and counts that stayed on the work laptop; *documents* means a vendor's public pages.
+**Partial; work-laptop validation still open.** *Observed* below refers to the read-only Jira and GitHub work-laptop spikes. *Documents* refers to public vendor references; *repo* refers to the tool's source. No administrator has confirmed retention or a cutoff.
 
-**The route, in short.** It can work for the GitHub period, but only for the issues that carry a link. It does not work for the Azure DevOps period: Jira holds no link to an Azure DevOps pull request for any of the team's delivered issues, through any route the spike found.
+**Verdict.** GitHub: Jira returned usable pull request references for some delivered issues, and GitHub documents a read-only commits API. GitHub commit author dates are readable on the work laptop. Both Jira Development links and direct GitHub branch/title matching yielded paired observations, including earlier commit dates for linked brief-start cases. The sample is too small to characterize a cohort-wide timing distribution. Coverage for a confirmed GitHub-only cohort is still unverified. Azure DevOps: the Jira-led route did not work for the delivered issues checked; Jira returned no Azure DevOps pull request links. Both hosts document PR listing with the source branch, so matching the Jira key there is a candidate that does not need Jira's development links. In the mixed period, the Jira-led route has the same gap on the Azure DevOps side. The GitHub routes have been compared in the exploratory sample; validate wider coverage before generalizing. Prioritize Azure DevOps access and retention while historical data may still be readable.
 
 ### 1. Jira
 
@@ -70,82 +70,83 @@ A person has to give access to the two code hosts and name the repositories to l
   That is enough to name the pull request to its host. It has **no created or opened time**. *(observed)*
 - **Branch records** carry a `lastCommit` with `authorTimestamp`: the last commit only, not the first. *(observed)*
 - **Persons.** The records carry author and reviewer names. A collector would have to read only IDs, branch names and dates, and drop the rest at the boundary (ADR-0003). *(observed)*
-- **Status of the endpoint.** It is internal: "intended for internal use only", "not supported and they can change without any notice". Atlassian closed the request for a public API for Azure DevOps development information as "Timed out" in March 2025. *(documents: [JRACLOUD-86769](https://jira.atlassian.com/browse/JRACLOUD-86769))*
-- **Not settled.** Whether it can be asked for many issues at once, and its rate limits. The spike asked one issue at a time with a short pause and met no limit.
+- **Status of the endpoint.** It is internal: "intended for internal use only", "not supported and they can change without any notice". Atlassian closed the request for a public API for Azure DevOps development information as "Timed out" in March 2025. The [public Development Information API](https://developer.atlassian.com/cloud/jira/software/rest/api-group-development-information/#api-rest-devinfo-0-10-repository-repositoryid-get) serves integrations and looks up recent data by repository ID, not pull requests by issue ID with the tool's token. *(documents: [JRACLOUD-86769](https://jira.atlassian.com/browse/JRACLOUD-86769))*
+- **Batching and limits.** No supported bulk form or endpoint-specific quota was found. The spike asked one issue at a time with a short pause and met no limit; that does not establish one. If used, budget one summary per issue and detail per reported instance with PRs, and respect `429`/`Retry-After`. *(observed; documents: [Jira Cloud rate limiting](https://developer.atlassian.com/cloud/jira/platform/rate-limiting/))*
 
 ### 2. Coverage
 
 - **Azure DevOps.** No delivered issue has development information from Azure DevOps. Their remote links (`rest/api/3/issue/<ID>/remotelink`) are Confluence pages only. Why the integration left no links is a question for the administrators: it may never have been connected to these repositories, or the keys were not in branch names, or it was connected after the work. *(observed)*
-- **GitHub.** Every branch, repository and pull request link comes from the GitHub app. Some delivered issues have a linked pull request and many do not. The counts by sprint are in the working folder on the work laptop, `notes/first-commit-spike-2026-11-17.md`. A link exists only where someone put the issue key in a branch name, a commit message or a pull request title. *(observed; the app's linking rule: documents)*
-- **Not settled.** Coverage among issues whose cycle starts with a brief visit.
+- **GitHub.** Every development link found came from the GitHub app. Some delivered issues have a linked pull request and many do not. The earlier Jira-only counts were recorded in `notes/first-commit-spike-2026-11-17.md`; that file was not found in the current work folder. The follow-up coverage and brief-start counts are in `notes/first-commit-github-linkage-comparison-expanded.md` on the work laptop. Atlassian documents using the key in the branch name for branches, commit message for commits, and PR title for pull requests; do not assume each of these yields a PR record. *(observed; documents: [Integrate with GitHub](https://support.atlassian.com/jira-cloud-administration/docs/integrate-with-github/))*
+- **Not settled.** The exploratory sample includes brief-start coverage, but a confirmed migration-period roll-up and broader brief-start coverage are still open. Compare unique delivered issues with at least one Jira PR, at least one branch-key match, and at least one usable timestamp, against all delivered issues of any type in each period. In the mixed period report per host and deduplicate the combined result. Repeat for delivered issues flagged `starts_with_brief_visit`; keep deliveries between sprints separate rather than silently dropping them. *(proposed; repo: `issue_cycle.sql`)*
 
-### 6. What else the records give for nothing (Jira side)
+### 3. The hosts
+
+| Host | Documented pull request commits read | Minimum read access |
+| --- | --- | --- |
+| GitHub | `GET /repos/{owner}/{repo}/pulls/{number}/commits`; `sha` and `commit.author.date` (not `commit.committer.date`). Page through the result; the endpoint caps the whole list at 250. The suggested [repository commits endpoint](https://docs.github.com/en/rest/commits/commits#list-commits) is not itself PR-scoped and needs **Contents: read**. Do not substitute branch history or claim a minimum from a truncated list. | Repository **Pull requests: read** on a fine-grained PAT or GitHub App token for the selected repositories. *(documents: [List commits on a pull request](https://docs.github.com/en/rest/pulls/pulls#list-commits-on-a-pull-request))* |
+| Azure DevOps | `GET /{organization}/{project}/_apis/git/repositories/{repositoryId}/pullRequests/{pullRequestId}/commits?api-version=7.1` on `dev.azure.com`; `value[].commitId` and `value[].author.date` (not `committer.date`). The API documents `$top` and `continuationToken`. | PAT **Code (Read)** (`vso.code`) and repository read access; or a short-lived [Azure DevOps Entra token](https://learn.microsoft.com/en-us/azure/devops/cli/entra-tokens?view=azure-devops) under an identity with read access. *(documents: [Get Pull Request Commits](https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-request-commits/get-pull-request-commits?view=azure-devops-rest-7.1))* |
+
+Both APIs take a repository and PR number, not a live branch. The references do not guarantee that the full original commit set remains available after a squash or source-branch deletion. GitHub PR and commit GETs succeeded on the work laptop in the approved repositories. Sampled multi-commit PRs with squash-consistent merge topology still returned the original commits and their author dates; no deleted-source-branch example was confirmed in the bounded sample. The deletion case and Azure DevOps access still need validation. *(observed on GitHub; documents for the API contract)*
+
+### 4. Is the date believable?
+
+- **The first exploratory run skipped quartiles because the script required five paired dates.** That was a separate exploratory rule, not Telltale's group-size suppression; both configured group limits were zero. Individual offsets were later inspected on the work laptop. The follow-up rebuilt the derived tables offline from stored history with configured thresholds and cycle time set to `count`, preserving the untreated Jira start alongside the brief-start flag. It matched source-branch keys and considered PRs merged by delivery in the latest completed sprint windows in the snapshot; migration phase was not verified. That early run does not establish a cohort-wide direction. A rerun of the same sample excluded the catch-all Spike type by Jira type ID from both the matched count and the denominator. The original matcher wrongly rejected an underscore immediately after the issue number. A Jira-linked PR had the key in both its title and source branch. A corrected branch-only scan of the non-Spike brief-start cohort recovered the match; the cohort's paired timing sample remained too small to report. For the case that exposed the bug, GitHub returned the complete PR author dates, and the earliest preceded the untreated Jira start. This is a case check, not a cohort result. The follow-up below repeats the broader scan with the correction. The work-laptop note `notes/first-commit-github-non-spike-branch-boundary.md` supersedes the early brief-start branch results. Individual elapsed offsets are in `notes/first-commit-github-observed-offsets.md`, outside the checkout. *(observed)*
+- **Lookup comparison on the same non-Spike cohort.** Within the approved repositories, Jira Development and the union of corrected GitHub branch and PR-title matching covered the same issues. PR titles added coverage beyond branch names for the full cohort, but not for brief starts. Jira named some PRs outside the approved repositories; those were not fetched. Equal issue coverage does not establish that the routes found the same PRs or that every matched PR belongs to the work. *(observed)*
+- **Timing observations.** Deduplicating by repository and PR number and using complete author-date histories from eligible PRs merged by delivery yielded both earlier and later timestamps across all non-Spike deliveries. The usable brief-start pairs were earlier than Jira, but not every brief-start issue yielded a pair. Keep missing cases visible and do not infer a timing distribution from this sample. Coverage, overlap and observed elapsed offsets are in `notes/first-commit-github-linkage-comparison.md` on the work laptop. An owner-approved expansion of the repository list added no matching PRs for the same cohort and changed neither coverage nor paired offsets. Some Jira links remained outside the expanded scope and were not followed. The expanded comparison and local allowlist are in `notes/first-commit-github-linkage-comparison-expanded.md` and `notes/first-commit-github-repositories.txt` on the work laptop. *(observed)*
+- For the full comparison, compute `earliest PR author date − first entry into a work-role status` on the same delivered issue (negative means earlier than Jira). Use the untreated board start: `cycle_start` can be null under `exclude` even when `starts_with_brief_visit` is set. Reconstruct via the existing timeline and cycle rules in memory or use a separate untreated derivation; do not compare against a missing start or change the live treatment. Keep issues with no work entry or no usable commit separate. *(repo: `Cycles.cs`, `issue_cycle.sql`; proposed measurement)*
+- For brief-start cases, compare also to the end of the brief visit, the next sustained work stay if there is one, and delivery. Report the direction and spread of offsets and flag dates after delivery, implausibly early dates, and cases with no clear second work stay. Compare candidate dates against the work sequence; Jira and a commit both record events, not the true start. Git permits [overriding the author date](https://git-scm.com/docs/git-commit), and force-pushes can change which commits a PR contains. *(documents; proposed; no real-system result)*
+
+### 5. Several pull requests
+
+**Frequency and sensibility are unmeasured.** Count issues with multiple distinct PRs, deduplicating by host, repository and PR ID, including a PR found by both lookup routes. Compare the minimum across all matched PRs with the minimum for eligible delivery PRs. Check whether the winner comes from initial work or a release backport, revert, follow-up, or stacked branch carrying another issue's commits. An earliest date is only as meaningful as the match and the PRs admitted; do not pick a winner without noting inaccessible or truncated candidates. *(proposed; no real-system result)*
+
+### 6. What else the records give for nothing
 
 - From Jira, a pull request has `status`, `lastUpdate`, `commentCount` and, per reviewer, `approved`. It has no opened, first-review or approval time. *(observed)*
-- Elapsed review time would have to come from the host itself. Jira gives which pull request to ask about, and that is all.
+- **GitHub:** the PR has `created_at`, `closed_at`, and `merged_at`. The separate reviews list returns chronological entries with `state` and `submitted_at`: first submitted review (skip pending) and first visible `APPROVED` are candidates, not a guarantee of first-ever approval if reviews were dismissed. Opening a draft is not the same as being ready for review. *(documents: [Pull requests](https://docs.github.com/en/rest/pulls/pulls#list-pull-requests), [List reviews](https://docs.github.com/en/rest/pulls/reviews#list-reviews-for-a-pull-request))*
+- **Azure DevOps:** `creationDate` and `closedDate` are on the PR; close includes abandonment. The reviewer record has `vote`, not the time of the vote. The threads API documents comment `publishedDate` and shows a system `VoteUpdate` thread with `CodeReviewVoteResult`. That is a candidate for historical approval timing, not a guarantee of complete history or a submitted-review event. The first comment is not necessarily the first review. *(documents: [PR list](https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-requests/get-pull-requests?view=azure-devops-rest-7.1), [Reviewers](https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-request-reviewers/list?view=azure-devops-rest-7.1), [Threads](https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-request-threads/list?view=azure-devops-rest-7.1))*
+- This first-commit spike did not collect review timing. The separate [GitHub PR timing spike](../../github-pr-timing/issues/01-can-github-measure-pull-request-time.md) observed submitted reviews and approvals, and confirmed an explicit ready-for-review event in a spot check.
 
-### 7. After the migration (documents only so far)
+### 7. After the migration
 
-- No Atlassian page found says what happens to the development information on issues when the GitHub or Azure DevOps app, or an organization, is removed.
-- For deployment data, a bug report says removing the app that sent it deletes it from Jira, with "no workaround": "The deployment information is lost forever". *(documents: [JRACLOUD-91672](https://jira.atlassian.com/browse/JRACLOUD-91672), deployments only)* Treat the GitHub links as liable to go the same way if that app is ever removed.
-- For Azure DevOps there is nothing in Jira to keep. Whether its pull requests stay readable after the migration is still for the administrators.
+- **Jira:** no vendor guarantee found for PR links after app uninstall or organization disconnect. [JRACLOUD-91672](https://jira.atlassian.com/browse/JRACLOUD-91672) documents app removal deleting deployment data only; it is not evidence about PRs. No Azure DevOps links were observed in Jira for the delivered cohort, so there is nothing there to rely on for the older sprints. Ask the Jira admin which integration and repositories were connected and whether display/API data survives disconnection. *(documents and earlier Jira observation; admin answer pending)*
+- **Azure DevOps:** Microsoft says retiring a repo in place by renaming and locking its default branch preserves PR records and history, while deletion removes the repo from normal access; the 30-day restore window is not API read availability. GitHub Enterprise Importer can migrate PRs and Git history; a Git-only import is not a PR archive. Ask the migration admin which method is being used, whether the old repos and read permissions will be kept, and whether migrated PR commits and source refs can be read if the archive is the intended fallback. *(documents: [Azure repo deletion](https://learn.microsoft.com/en-us/azure/devops/repos/git/delete-existing-repo?view=azure-devops), [GitHub Enterprise Importer](https://docs.github.com/en/migrations/using-github-enterprise-importer/migrating-from-azure-devops-to-github-enterprise-cloud/about-migrations-from-azure-devops-to-github-enterprise-cloud), [Microsoft migration options](https://learn.microsoft.com/en-us/azure/devops/organizations/projects/migrate-public-project?view=azure-devops#migrate-repositories); admin answer pending)*
+- **Deadline:** no date confirmed. Unless the admins confirm and the read-only check verifies a usable archive or migrated equivalent, collect the older sprints' issue-to-PR matches and author dates in a separately approved company-local archive **before the earliest deletion, decommissioning, or read-access cutoff**. The aggregate spike notes are not that archive. If cutover is the only known milestone, plan to finish before it rather than count on recovery.
 
-### What a spec would also have to decide (in addition to the list under "Done when")
+### What a spec would have to decide
 
-- **Issues with no linked pull request.** These are common enough that a first-commit start would not cover every issue. The team's policy already asks for the key in the branch name, so the gap is in Jira's links, in work with no pull request, or in branches that do not follow the policy. The second route below finds out which. Whatever is left is either shown, or closed by a change in how the team works, which would itself be a dated decision.
-- **The issue key.** Matching from the host's side (a key in a branch name) needs the key. The tool stores only the internal issue ID today; the owner has agreed it may store the key (D113), and the spec says how it is collected and what, if anything, a report shows of it.
-- **An internal endpoint.** It can change without notice, and the instance type must be read from the summary, not written into the code.
+**Direction from the owner:** Jira is the starting source, not the final authority on when work happened. Enrich cycle time with commit evidence when Jira's brief first work visit misses work that demonstrably preceded it. This is a reason to pursue the second reading, not to rewrite Jira's recorded time in Development or change the pilot's primary measure.
+
+- Use the earliest eligible **author** date, not the committer or merge date. Define which PRs count (including open, abandoned, release, stacked and post-delivery PRs), deduplication, and what happens on truncated or inaccessible history or suspect dates.
+- Decide how the second reading handles no match, ambiguous matches and non-code work. The owner identified a dedicated Jira issue type used for catch-all support and miscellaneous work. Jira returns a structured type and the store already keeps `issue_type_id`. The filtered comparison excluded that type by ID from both the numerator and denominator and kept the unfiltered baseline. Whether to carry the exclusion into the commit-based reading is a spec decision; board-based metrics were not changed. Report coverage and missing reasons; don't silently mix board starts into a commit-based series. If using Jira, tolerate an internal endpoint's disappearance and discover the instance type from the summary, not a hard-coded label.
+- Define how the Jira key is imported and used (D113), what can be displayed, and what limited historical evidence may be retained on company systems. Drop person fields at ingestion; apply the existing reporting suppression.
+- Label the measure e.g. **first PR commit to delivery (lower bound on elapsed work-to-delivery time)**, with the attribution and date caveats. Keep it a **second reading**, not a replacement for leaving out brief starts, unless a dated change to the [pilot plan](../../../docs/context/pilot-plan.md) says otherwise (D88). Decide the population and whether Jira and commit-based results should also be compared on the same covered issues.
 
 ## Second route: the key in the branch name (proposed 2026-11-17)
 
-The team's policy, on both hosts, is that a branch name holds the Jira key of its issue (the project key, a hyphen, a number). So the hosts can be asked directly, without Jira's links. This is the only route for the Azure DevOps period, where Jira holds none.
+The team's policy on both hosts puts the Jira key in the source branch. Matching on that key does not depend on Jira's development links. This is the viable Azure DevOps route to test, not yet an observed result.
 
 ### How
 
-1. **List every pull request of each repository**, open and closed, rather than searching per issue. That is one paged call per hundred pull requests:
-   - GitHub: `GET /repos/{owner}/{repo}/pulls?state=all&per_page=100`, branch in `head.ref`.
-   - Azure DevOps: `GET {org}/{project}/_apis/git/repositories/{repo}/pullrequests?searchCriteria.status=all`, branch in `sourceRefName`.
-2. **Take the key from the branch name** with a pattern that ignores case and needs a boundary after the number, so `feature/<key>-thing` matches and a key does not match a longer one that starts with it.
-3. **Read each matched pull request's own commits**:
-   - GitHub: `GET /repos/{owner}/{repo}/pulls/{number}/commits` (at most 250).
-   - Azure DevOps: `.../pullRequests/{id}/commits`.
-
-   These are the pull request's commits, not the base branch's, and are kept after a squash merge and after the branch is deleted. Take the earliest **author** date.
-4. **Note, without collecting, what the same records give for the elapsed time of a review** (question 6): when the pull request was created and closed on both hosts, and GitHub's review submission times (`/pulls/{number}/reviews`).
+1. **List PRs in the owner-approved repositories** rather than searching per issue. GitHub: `GET /repos/{owner}/{repo}/pulls?state=all&per_page=100`, follow pagination links, source in `head.ref`. Azure DevOps: `GET /{org}/{project}/_apis/git/repositories/{repo}/pullrequests?searchCriteria.status=all&api-version=7.1`, page with `$top` and `$skip`, source in `sourceRefName`. *(documents: PR list links in question 6)*
+2. **Match whole keys** against the delivered-issue set, ignoring case. Accept separators after the numeric part, including `-` and `_` as in `feature/<key>-thing` and `feature/<key>_thing`. Reject alphanumeric continuations so prefixes of longer keys do not match. Treat multiple keys as ambiguous for the spike rather than silently choosing one.
+3. **Read the matched PR's own commits** as in question 3. Use the earliest author date in a complete, usable result and record incomplete reads separately. Never substitute the target branch or assume squash/delete survival without the spot checks.
 
 ### Access
 
-- **GitHub.** If a long-lived token cannot be had, a sign-in to the GitHub CLI is enough. `gh api --paginate` makes the calls itself, so the token never passes through the spike's code, and `gh auth token` gives it to a program that needs it. Four things come with it:
-  - The token is the person's own and usually holds `repo` and `read:org`, which can write.
-  - With SAML single sign-on the organization may need the token authorized first (`gh auth refresh`).
-  - It ends with the sign-in.
-  - That is fine for a spike or a run someone starts, and not for an unattended schedule.
-- **Azure DevOps.** A personal access token with Code (Read), or a short-lived Entra token from a signed-in Azure CLI: `az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798` (Azure DevOps' resource ID).
-- Neither has been tried yet, through the proxy or otherwise.
+- **GitHub.** If using an approved interactive CLI sign-in, `gh api --method GET --paginate` can make the calls without giving the spike the token. The login may grant write-capable scopes; use GET only and confirm organization/SSO authorization and credential-manager storage (the [CLI can fall back to plaintext](https://cli.github.com/manual/gh_auth_login); do not use that fallback). Do not rely on a personal CLI sign-in for unattended collection.
+- **Azure DevOps.** Use Code (Read) in Credential Manager or the Azure CLI's Entra sign-in. For example, `az rest --method get --resource 499b84ac-1321-427f-aa17-267ca6975798 --url <approved-Azure-DevOps-API-URL>` lets the CLI apply the token without printing or passing it as an argument. Check the system proxy and corporate root trust for each client; do not bypass TLS validation.
+- The signed-in GitHub CLI worked on the approved repositories; Azure DevOps has not been checked. Use filtered in-memory results; no raw HTTP dumps, verbose auth logs, or issue-level exports for this spike.
 
 ### What the matching has to handle
 
 - **The key.** The tool keeps the internal issue ID only, and Jira's search returns the key with every issue. The owner has agreed that the store may keep it (owner decision D113), so a collector can store it at import. The spike can still take the keys from Jira when it runs, and needs no change to the store. Keys stay out of this repository, and what a report or view may show of them is for the spec to say.
-- **Several pull requests for one key**: a follow-up, a pull request into a release branch, a cherry-pick, a revert. The earliest commit across them is the natural start. Whether pull requests into release branches count has to be decided.
-- **A branch cut from another feature branch.** Its first commit can be older than the work. Reading the pull request's own commits, not the branch's history, mostly avoids this.
-- **A rebase or a force push** can drop or reorder commits. The author date survives a rebase, and the commit date does not.
-- **Persons.** Pull request and commit records hold names, addresses and accounts. The spike reads IDs, commit SHAs, branch names and dates only (ADR-0003).
-- **Policy and practice.** Jira's links cover fewer delivered issues than the policy suggests. Matching over every repository tells apart three causes:
-  - the GitHub app not having access to every repository;
-  - work with no pull request;
-  - branches that do not follow the policy.
-- **After the migration.** The route works for the Azure DevOps period only while its pull requests stay readable (question 7).
+- **Policy and practice.** A branch-key match without a Jira PR link establishes a linkage gap, not its cause. App repository coverage needs admin confirmation. No match is not proof of no PR: it can also mean a missing key or repository, inaccessible history, or a link made by a title rather than a branch.
+- **Persons.** Branch names are used only in memory to extract keys; do not save them or the authors, emails or account fields returned by the hosts (ADR-0003).
+- **After the migration.** The direct route needs readable PRs and source refs; a Git-only mirror does not establish either (question 7).
 
-### The spike to run
+### Remaining validation
 
-- **Read only, on the work laptop.** It lists the pull requests of the repositories the owner names, on both hosts. It matches their branch names to the keys of the store's delivered issues, fetched from Jira as it runs and not stored.
-- **Aggregates only**, kept in the working folder:
-  - per sprint and host, how many delivered issues have a matching pull request;
-  - how many have more than one;
-  - how many branches hold no key, or a key of no delivered issue;
-  - how the earliest author date falls against the board's cycle start: earlier or later, by how much, and separately for the issues whose cycle starts with a brief visit.
-- **What it answers:** questions 2 to 5 for both hosts, and the hosts' side of 6.
-- **What it needs from the owner:**
-  - access to GitHub (a CLI sign-in is enough) and to Azure DevOps;
-  - the GitHub organization and repositories;
-  - the Azure DevOps organization, projects and repositories.
+- **GitHub:** Expand to confirmed GitHub-only sprint windows. Verify a deleted-source-branch example, quantify multiple-PR effects, and spot-check that the earliest commit belongs to the issue's work. The approved repository list is already on the work laptop.
+- **Azure DevOps:** Get approved local read access and a repository allowlist, test the direct branch-key route, and ask admins about retention and any cutoff. Confirm the sprint-to-period mapping for both hosts.
+- Keep detailed outcomes on the work laptop. See `notes/github-timing-session-index.md` for the current results and which earlier files were superseded. Publish only general findings here.

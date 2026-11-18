@@ -17,6 +17,8 @@ The project owner (a senior .NET engineer) needs to justify AI plan upgrades to 
 
 ## What is open
 
+**GitHub timing research:** Two read-only work-laptop spikes are documented in [First-commit starts](../../.scratch/first-commit-start/issues/01-can-jira-links-lead-to-a-first-commit.md) and [PR timing](../../.scratch/github-pr-timing/issues/01-can-github-measure-pull-request-time.md). A linked PR's first author date can reveal work before a brief Jira start; treat commit-to-delivery as a lower-bound second reading, not time spent in Development. For PR open-to-merge, collect directly from GitHub by merge-time sprint and keep Jira linkage for the separate Code Review comparison. The repository and Jira project scopes differ, so define team scope before reporting. Neither metric is implemented, and the pilot's primary definitions have not changed. Still open: broader first-commit validation, Azure DevOps access and retention, and production linkage and authentication. Work-laptop index: `%LOCALAPPDATA%\Telltale\work\notes\github-timing-session-index.md`.
+
 **Update, Nov 17, 2026:** brief visits can be left out of time in status and of cycle time, and it is built: the optional setting `briefVisitTreatment`. The spec is `.scratch/brief-visit-treatment/spec.md`; the decisions are D83 to D110 in `docs/decisions.md`.
 
 **Update, Nov 13, 2026:** brief status visits are counted, and it is built: the optional setting `briefVisitThresholds` lists statuses and thresholds, and each sprint report's footer says how many issues had a visit to a listed status shorter than its threshold. No existing figure changes. The spec is `.scratch/brief-status-visits/spec.md`; the decisions are D58 to D63 and D71 to D80 in `docs/decisions.md`.
