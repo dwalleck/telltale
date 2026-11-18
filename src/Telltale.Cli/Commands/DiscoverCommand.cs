@@ -60,10 +60,9 @@ internal static class DiscoverCommand
     private static async Task DiscoverAsync(AppServices services, Given given, CancellationToken cancellationToken)
     {
         var path = services.ConfigPath;
-        var previous = File.Exists(path) ? await File.ReadAllTextAsync(path, cancellationToken) : null;
-
         // Everything that can be refused is refused before the first call to Jira and before any file is written.
-        var root = previous is null ? [] : ReadExisting(previous, path);
+        // The file is read as bytes, as run reads it, so that both refuse the same files and say the same of them.
+        var (root, previous) = File.Exists(path) ? ReadExisting(await File.ReadAllBytesAsync(path, cancellationToken), path) : ([], null);
         var before = root.DeepClone();
         var jira = Section(root, "jira", path);
         var statusRoles = Section(root, "statusRoles", path);
@@ -144,11 +143,12 @@ internal static class DiscoverCommand
         // run would load. It is refused here, by the loader's own reading and rule: a rerun on numbers run
         // would refuse stops before Jira is asked anything and before a change is listed that is then not
         // made (owner decision D70). The check of the text about to be written still covers it.
-        if (root.TryGetPropertyValue("minimumGroupSize", out var minimumGroupSize))
+        if (root.ContainsKey("minimumGroupSize"))
         {
             try
             {
-                ConfigFile.RequireMinimumGroupSize(minimumGroupSize, path);
+                // The file was read, so each setting is written once, and here is its text as it was typed.
+                ConfigFile.RequireMinimumGroupSize(AsWritten(previous!, "minimumGroupSize").Single(), path);
             }
             catch (UserFacingException exception)
             {
@@ -163,17 +163,16 @@ internal static class DiscoverCommand
         // The treatment of brief visits is the owner's in the same way and is checked with them: what it is,
         // and whether a status is listed for it to act on, now; whether a listed status has the work role,
         // now when the file has roles, and otherwise by that later check (owner decision D73).
-        var hasThresholds = root.TryGetPropertyValue("briefVisitThresholds", out var briefVisitThresholds);
+        var hasThresholds = root.ContainsKey("briefVisitThresholds");
         var hasTreatment = root.ContainsKey(BriefVisitTreatmentSetting.Name);
         if (hasThresholds || hasTreatment)
         {
             try
             {
                 var roles = fileHadNoRoles ? null : StatusRoles.Parse(statusRoles.Select(role => KeyValuePair.Create(role.Key, RoleText(role.Value))));
-                var thresholds = hasThresholds ? ConfigFile.RequireBriefVisitThresholds(briefVisitThresholds, roles, path) : NoBriefVisitThresholds;
+                var thresholds = hasThresholds ? ConfigFile.RequireBriefVisitThresholds(AsWritten(previous!, "briefVisitThresholds").Single(), roles, path) : NoBriefVisitThresholds;
                 if (hasTreatment)
                 {
-                    // The file was read, so the setting is written once, and here is its text.
                     ConfigFile.RequireBriefVisitTreatment(AsWritten(previous!, BriefVisitTreatmentSetting.Name).Single(), thresholds, roles, path);
                 }
             }
@@ -509,11 +508,14 @@ internal static class DiscoverCommand
     /// such a file quotes the key, so it is never passed on. A file that is not JSON is refused with the line
     /// and the position of the fault and no text from the file: the runtime's message for it can quote the
     /// file from the fault to its end (owner decision D110). A key that is no text at all is refused as
-    /// every command refuses it.
+    /// every command refuses it. The walk over the keys is given the file's bytes, as run's is, and not text
+    /// decoded from them: decoding turns bytes that are not UTF-8 into replacement characters, and a file in
+    /// another encoding (UTF-16, a second byte order mark) into text run never sees. Returns the file as an
+    /// object, and its text.
     /// </summary>
-    private static JsonObject ReadExisting(string text, string path)
+    private static (JsonObject Root, string Text) ReadExisting(byte[] content, string path)
     {
-        var keys = ConfigFile.FindKeyFaults(Encoding.UTF8.GetBytes(text));
+        var keys = ConfigFile.FindKeyFaults(content);
         if (keys.NotJsonAt is { } at)
         {
             throw Unreadable(path, ConfigFile.NotJson(at));
@@ -524,9 +526,22 @@ internal static class DiscoverCommand
             throw RunWouldRefuse(path, refusal);
         }
 
+        string text;
         try
         {
-            return JsonNode.Parse(text, documentOptions: Lenient) as JsonObject ?? throw Unreadable(path, "it is not a JSON object");
+            // The walk read every key as UTF-8, but a value is read only when a setting is: a value in another
+            // encoding would otherwise come back with replacement characters in what discover writes.
+            var body = content.AsSpan().StartsWith(Encoding.UTF8.Preamble) ? content.AsSpan(Encoding.UTF8.Preamble.Length) : content;
+            text = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(body);
+        }
+        catch (DecoderFallbackException)
+        {
+            throw Unreadable(path, "it holds bytes that are not UTF-8; save the file as UTF-8");
+        }
+
+        try
+        {
+            return (JsonNode.Parse(text, documentOptions: Lenient) as JsonObject ?? throw Unreadable(path, "it is not a JSON object"), text);
         }
         catch (JsonException) when (keys.KeyIsWrittenTwice)
         {

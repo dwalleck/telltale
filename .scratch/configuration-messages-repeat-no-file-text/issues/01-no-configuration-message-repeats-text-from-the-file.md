@@ -20,7 +20,7 @@ Not text from the file, but in the same place:
 Two points nobody has checked:
 
 - What `run` says of a value, not a key, that holds bytes that are not UTF-8.
-- `discover` reads the file as text, so it may never see a key with such bytes that `run` refuses.
+- ~~`discover` reads the file as text, so it may never see a key with such bytes that `run` refuses.~~ Settled on 2026-11-17 by the review of PR 2: `discover` now reads the file's bytes as `run` does (`DiscoverReadsTheFileAsRunDoesTests`), and refuses a value that is not UTF-8 before any call to Jira.
 
 Background: `.scratch/brief-visit-treatment/issues/06-report-explains-and-documents-match.md`, its Comments, "Final fix pass". Owner decisions D43, D74, D105, D108 and D110.
 

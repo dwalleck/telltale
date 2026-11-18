@@ -47,17 +47,19 @@ public static class ConfigFile
     internal static JsonNode Written(MinimumGroupSize numbers) => JsonSerializer.SerializeToNode(numbers, Options)!;
 
     /// <summary>
-    /// Reads and checks the <c>minimumGroupSize</c> that the file at <paramref name="path"/> holds as
-    /// <paramref name="written"/> (null for a JSON <c>null</c>), on its own: by the converter and the rule
+    /// Reads and checks the <c>minimumGroupSize</c> that the file at <paramref name="path"/> holds, on its own:
+    /// <paramref name="written"/> is the setting's own text, cut from the file as it was typed (see
+    /// <see cref="RequireBriefVisitTreatment"/>), and it is read by the converter and the rule
     /// <see cref="ReadAsync"/> applies to it, and with the same message. <c>discover</c> asks this of an existing
     /// file before it calls Jira (owner decision D70).
     /// </summary>
-    internal static void RequireMinimumGroupSize(JsonNode? written, string path) =>
-        RequireSetting<MinimumGroupSize, MinimumGroupSize>(TextOf(written), numbers => TelltaleSettings.CheckedMinimumGroupSize(numbers), path);
+    internal static void RequireMinimumGroupSize(string written, string path) =>
+        RequireSetting<MinimumGroupSize, MinimumGroupSize>(written, numbers => TelltaleSettings.CheckedMinimumGroupSize(numbers), path);
 
     /// <summary>
-    /// Reads and checks the <c>briefVisitThresholds</c> that the file at <paramref name="path"/> holds as
-    /// <paramref name="written"/> (null for a JSON <c>null</c>), on its own: by the converter and the rule
+    /// Reads and checks the <c>briefVisitThresholds</c> that the file at <paramref name="path"/> holds, on its
+    /// own: <paramref name="written"/> is the setting's own text, cut from the file as it was typed, and it is
+    /// read by the converter and the rule
     /// <see cref="ReadAsync"/> applies to it, and with the same message for whatever they refuse.
     /// <paramref name="roles"/> are the file's status roles, or null when it has none yet: then only the
     /// thresholds are checked, and the statuses wait for the check of the text about to be written.
@@ -67,15 +69,16 @@ public static class ConfigFile
     /// (owner decision D108). Returns the thresholds, checked, for the check of the setting that is applied
     /// with them (<see cref="RequireBriefVisitTreatment"/>).
     /// </summary>
-    internal static IReadOnlyDictionary<string, TimeSpan> RequireBriefVisitThresholds(JsonNode? written, StatusRoles? roles, string path) =>
-        RequireSetting<BriefVisitThresholdsInMinutes, IReadOnlyDictionary<string, TimeSpan>>(TextOf(written), thresholds => TelltaleSettings.CheckedBriefVisitThresholds(thresholds, roles), path);
+    internal static IReadOnlyDictionary<string, TimeSpan> RequireBriefVisitThresholds(string written, StatusRoles? roles, string path) =>
+        RequireSetting<BriefVisitThresholdsInMinutes, IReadOnlyDictionary<string, TimeSpan>>(written, thresholds => TelltaleSettings.CheckedBriefVisitThresholds(thresholds, roles), path);
 
     /// <summary>
     /// Reads and checks the <c>briefVisitTreatment</c> that the file at <paramref name="path"/> holds, by the
     /// converter and the rule <see cref="ReadAsync"/> applies to it, and with the same message for whatever
     /// they refuse. <paramref name="written"/> is the setting's own text, cut from the file as it was typed
     /// and not written out again from what was parsed: the setting's reader then sees what <c>run</c>'s
-    /// reader sees, a value that is no text at all included.
+    /// reader sees, a value that is no text at all included. Written out again, such a value (<c>"\uD800"</c>)
+    /// ends the command with a stack trace. The three settings discover checks are all passed this way.
     /// <paramref name="thresholds"/> are the file's thresholds, checked, and empty when it lists none: the
     /// setting is refused when it leaves brief visits out and there are none to leave out. <paramref name="roles"/>
     /// are the file's status roles, or null when it has none yet: then whether a listed status has the work
@@ -95,8 +98,6 @@ public static class ConfigFile
     internal static void RequireReadableBriefVisitTreatment(string written, string path) =>
         RequireSetting<BriefVisitTreatmentSetting, BriefVisitTreatmentSetting>(written, treatment => treatment, path);
 
-    /// <summary>What the file holds for a setting, as JSON text. A JSON <c>null</c> is a null node.</summary>
-    private static string TextOf(JsonNode? written) => written?.ToJsonString() ?? "null";
 
     /// <summary>One setting, read from the JSON text the file holds for it and then checked by its rule, which gives the setting as checked. A null in the file reaches the setting's converter as the JSON null it is, and is refused there.</summary>
     private static TChecked RequireSetting<T, TChecked>(string written, Func<T, TChecked> check, string path)
@@ -142,10 +143,13 @@ public static class ConfigFile
     /// <summary>
     /// Walks every key of <paramref name="utf8"/>, the file's content without a byte order mark, as leniently
     /// as the file is read (comments, trailing commas). It gives back facts and no text of the file, so that
-    /// what a command says about a key never repeats it: what was typed as a key could be a secret pasted
-    /// into the wrong place (owner decisions D43, D108). Of content that is not JSON it gives where the
-    /// reader stopped and nothing else: the reader's own message for such content can quote the file from
-    /// the fault to its end, so no command passes it on (owner decision D110).
+    /// what a command says about the faults found here repeats no key: what was typed as a key could be a
+    /// secret pasted into the wrong place (owner decisions D43, D108). Of content that is not JSON it gives
+    /// where the reader stopped and nothing else: the reader's own message for such content can quote the file
+    /// from the fault to its end, so no command passes it on (owner decision D110).
+    /// That covers only these faults. A refusal found later, by the reader of the settings, still passes on
+    /// the reader's own message (<see cref="NotValid"/>), and that message can name an unknown key in full.
+    /// Closing that is the ticket in <c>.scratch/configuration-messages-repeat-no-file-text/</c>.
     /// </summary>
     internal static KeyFaults FindKeyFaults(ReadOnlySpan<byte> utf8)
     {
@@ -249,6 +253,11 @@ public static class ConfigFile
     /// <summary>What refuses a setting: the reader, or the setting's rule.</summary>
     private static bool IsRefusal(Exception exception) => exception is JsonException or SettingRefusedException;
 
+    /// <summary>
+    /// The refusal of a setting, with the reader's or the rule's own message. A rule's message is the tool's. The
+    /// reader's can repeat what the file holds, an unknown key above all, and is passed on as it is until the
+    /// ticket in <c>.scratch/configuration-messages-repeat-no-file-text/</c> is done.
+    /// </summary>
     private static UserFacingException NotValid(string path, Exception refusal) =>
         new($"The configuration file {path} is not valid: {refusal.Message}", refusal);
 
