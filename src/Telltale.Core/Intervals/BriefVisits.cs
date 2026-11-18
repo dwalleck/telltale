@@ -38,6 +38,18 @@ public static class BriefVisits
         stay.End is { } left && left - stay.Start < threshold;
 
     /// <summary>
+    /// Whether <paramref name="stay"/> is a brief visit to a listed status: its status is listed in
+    /// <paramref name="thresholds"/> (status ID to threshold; a status not listed is not checked, owner
+    /// decision D58) and the stay is brief under that status's threshold (<see cref="IsBrief"/>). This is the
+    /// one statement of "a brief visit to a listed status": the count (<see cref="During"/>), what a treatment
+    /// leaves out of time in status (<see cref="BriefVisitTreatments.IntervalsToMeasure"/>) and whether a
+    /// cycle starts with a brief visit (<see cref="Workflow.Cycles.StartsWithBriefVisit"/>) all ask it, so the
+    /// three cannot disagree about a stay.
+    /// </summary>
+    public static bool IsBriefVisit(Stay stay, IReadOnlyDictionary<string, TimeSpan> thresholds) =>
+        thresholds.TryGetValue(stay.StatusId, out var threshold) && IsBrief(stay, threshold);
+
+    /// <summary>
     /// Every stay of an issue's history, in order, read from the timeline's entries alone. A stay begins when
     /// the issue enters a status and ends when it next enters another one: a change from a status to itself
     /// does not end it. A change into the status the issue is in that names another from-status does end it,
@@ -84,7 +96,7 @@ public static class BriefVisits
         IEnumerable<Stay> stays,
         IReadOnlyDictionary<string, TimeSpan> thresholds) =>
         stays
-            .Where(stay => thresholds.TryGetValue(stay.StatusId, out var threshold) && IsBrief(stay, threshold))
+            .Where(stay => IsBriefVisit(stay, thresholds))
             .Where(stay => countedTime.Any(period => Overlaps(stay, period)))
             .Select(stay => stay.StatusId)
             .ToHashSet(StringComparer.Ordinal);

@@ -436,7 +436,7 @@ public class CycleTimeTests
             StatusIntervals: [],
             IssueCycles:
             [
-                .. people.Select(id => IssueCycle.OfDelivered($"{id}", end, deliverySprintId: "41", new Cycle(start, 2, 2), pointBucket: 3, reopenCount: 0)),
+                .. people.Select(id => IssueCycle.OfDelivered($"{id}", end, deliverySprintId: "41", new Cycle(start, 2, 2), pointBucket: 3, reopenCount: 0, startsWithBriefVisit: false)),
                 .. people.Select(id => IssueCycle.OfAbandoned($"{id + 5}", end, reopenCount: 0)),
             ],
             MembershipIntervals: [],

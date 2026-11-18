@@ -400,14 +400,14 @@ public sealed class SqliteStore : ITelltaleStore
             connection,
             transaction,
             """
-            INSERT INTO issue_cycle (issue_id, cycle_start, cycle_end, calendar_days, business_days, point_bucket, delivered, delivery_sprint_id, reopen_count)
-            VALUES (@issueId, @cycleStart, @cycleEnd, @calendarDays, @businessDays, @pointBucket, @delivered, @deliverySprintId, @reopenCount);
+            INSERT INTO issue_cycle (issue_id, cycle_start, cycle_end, calendar_days, business_days, point_bucket, delivered, delivery_sprint_id, reopen_count, starts_with_brief_visit)
+            VALUES (@issueId, @cycleStart, @cycleEnd, @calendarDays, @businessDays, @pointBucket, @delivered, @deliverySprintId, @reopenCount, @startsWithBriefVisit);
             """,
-            ["@issueId", "@cycleStart", "@cycleEnd", "@calendarDays", "@businessDays", "@pointBucket", "@delivered", "@deliverySprintId", "@reopenCount"],
+            ["@issueId", "@cycleStart", "@cycleEnd", "@calendarDays", "@businessDays", "@pointBucket", "@delivered", "@deliverySprintId", "@reopenCount", "@startsWithBriefVisit"],
             derived.IssueCycles.Select(cycle => new object?[]
             {
                 cycle.IssueId, StoredTime.ToStored(cycle.Cycle?.Start), StoredTime.ToStored(cycle.CycleEnd), cycle.Cycle?.CalendarDays, cycle.Cycle?.BusinessDays,
-                cycle.PointBucket, cycle.Delivered ? 1L : 0L, cycle.DeliverySprintId, (long)cycle.ReopenCount,
+                cycle.PointBucket, cycle.Delivered ? 1L : 0L, cycle.DeliverySprintId, (long)cycle.ReopenCount, cycle.StartsWithBriefVisit ? 1L : 0L,
             }),
             cancellationToken);
 
@@ -422,30 +422,33 @@ public sealed class SqliteStore : ITelltaleStore
         await ExecuteForEachRowAsync(
             connection,
             transaction,
-            "INSERT INTO sprint_status_time (issue_id, sprint_id, status_id, calendar_seconds, business_seconds, business_days) VALUES (@issueId, @sprintId, @statusId, @calendarSeconds, @businessSeconds, @businessDays);",
-            ["@issueId", "@sprintId", "@statusId", "@calendarSeconds", "@businessSeconds", "@businessDays"],
-            derived.SprintStatusTimes.Select(time => new object?[] { time.IssueId, time.SprintId, time.StatusId, time.CalendarTime.TotalSeconds, time.BusinessTime.TotalSeconds, time.BusinessDays }),
+            """
+            INSERT INTO sprint_status_time (issue_id, sprint_id, status_id, calendar_seconds, business_seconds, business_days, measured_business_days)
+            VALUES (@issueId, @sprintId, @statusId, @calendarSeconds, @businessSeconds, @businessDays, @measuredBusinessDays);
+            """,
+            ["@issueId", "@sprintId", "@statusId", "@calendarSeconds", "@businessSeconds", "@businessDays", "@measuredBusinessDays"],
+            derived.SprintStatusTimes.Select(time => new object?[] { time.IssueId, time.SprintId, time.StatusId, time.CalendarTime.TotalSeconds, time.BusinessTime.TotalSeconds, time.BusinessDays, time.MeasuredBusinessDays }),
             cancellationToken);
 
         await ExecuteForEachRowAsync(
             connection,
             transaction,
-            "INSERT INTO board_status (status_id, position, is_done) VALUES (@statusId, @position, @isDone);",
-            ["@statusId", "@position", "@isDone"],
-            derived.BoardStatuses.Select(status => new object?[] { status.StatusId, (long)status.Position, status.IsDone ? 1L : 0L }),
+            "INSERT INTO board_status (status_id, position, is_done, is_work) VALUES (@statusId, @position, @isDone, @isWork);",
+            ["@statusId", "@position", "@isDone", "@isWork"],
+            derived.BoardStatuses.Select(status => new object?[] { status.StatusId, (long)status.Position, status.IsDone ? 1L : 0L, status.IsWork ? 1L : 0L }),
             cancellationToken);
 
         await ExecuteForEachRowAsync(
             connection,
             transaction,
             """
-            INSERT INTO run (as_of, raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure, brief_visit_thresholds, objects_version)
-            VALUES (@asOf, @rawDigest, @timeZone, @holidays, @baselineSprintIds, @statusRoles, @abandonedResolutionIds, @minimumTeam, @minimumAssigneesBehindAFigure, @briefVisitThresholds, @objectsVersion);
+            INSERT INTO run (as_of, raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure, brief_visit_thresholds, brief_visit_treatment, objects_version)
+            VALUES (@asOf, @rawDigest, @timeZone, @holidays, @baselineSprintIds, @statusRoles, @abandonedResolutionIds, @minimumTeam, @minimumAssigneesBehindAFigure, @briefVisitThresholds, @briefVisitTreatment, @objectsVersion);
             """,
-            ["@asOf", "@rawDigest", "@timeZone", "@holidays", "@baselineSprintIds", "@statusRoles", "@abandonedResolutionIds", "@minimumTeam", "@minimumAssigneesBehindAFigure", "@briefVisitThresholds", "@objectsVersion"],
+            ["@asOf", "@rawDigest", "@timeZone", "@holidays", "@baselineSprintIds", "@statusRoles", "@abandonedResolutionIds", "@minimumTeam", "@minimumAssigneesBehindAFigure", "@briefVisitThresholds", "@briefVisitTreatment", "@objectsVersion"],
             [[
                 StoredTime.ToStored(derived.AsOf), source.RawDigest, source.TimeZone, source.Holidays, source.BaselineSprintIds, source.StatusRoles, source.AbandonedResolutionIds,
-                source.MinimumTeam, source.MinimumAssigneesBehindAFigure, source.BriefVisitThresholds, DerivedObjectsVersion,
+                source.MinimumTeam, source.MinimumAssigneesBehindAFigure, source.BriefVisitThresholds, source.BriefVisitTreatment, DerivedObjectsVersion,
             ]],
             cancellationToken);
 
@@ -497,7 +500,7 @@ public sealed class SqliteStore : ITelltaleStore
         await RequireDerivedByThisVersionAsync(connection, cancellationToken);
         return await connection.QuerySingleOrDefaultAsync<DerivedSource?>(Command(
             cancellationToken,
-            "SELECT raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure, brief_visit_thresholds FROM run;"));
+            "SELECT raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure, brief_visit_thresholds, brief_visit_treatment FROM run;"));
     }
 
     /// <summary>

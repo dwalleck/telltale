@@ -30,6 +30,9 @@ internal static class DiscoverCommand
         AllowDuplicateProperties = false,
     };
 
+    /// <summary>The thresholds of a file that has no <c>briefVisitThresholds</c>: no status is listed.</summary>
+    private static readonly IReadOnlyDictionary<string, TimeSpan> NoBriefVisitThresholds = new Dictionary<string, TimeSpan>();
+
     public static Command Create(AppServices services)
     {
         var siteUrl = new Option<string?>("--site-url") { Description = "The Jira site, e.g. https://example.atlassian.net/. Needed the first time." };
@@ -57,10 +60,9 @@ internal static class DiscoverCommand
     private static async Task DiscoverAsync(AppServices services, Given given, CancellationToken cancellationToken)
     {
         var path = services.ConfigPath;
-        var previous = File.Exists(path) ? await File.ReadAllTextAsync(path, cancellationToken) : null;
-
         // Everything that can be refused is refused before the first call to Jira and before any file is written.
-        var root = previous is null ? [] : ReadExisting(previous, path);
+        // The file is read as bytes, as run reads it, so that both refuse the same files and say the same of them.
+        var (root, previous) = File.Exists(path) ? ReadExisting(await File.ReadAllBytesAsync(path, cancellationToken), path) : ([], null);
         var before = root.DeepClone();
         var jira = Section(root, "jira", path);
         var statusRoles = Section(root, "statusRoles", path);
@@ -141,11 +143,12 @@ internal static class DiscoverCommand
         // run would load. It is refused here, by the loader's own reading and rule: a rerun on numbers run
         // would refuse stops before Jira is asked anything and before a change is listed that is then not
         // made (owner decision D70). The check of the text about to be written still covers it.
-        if (root.TryGetPropertyValue("minimumGroupSize", out var minimumGroupSize))
+        if (root.ContainsKey("minimumGroupSize"))
         {
             try
             {
-                ConfigFile.RequireMinimumGroupSize(minimumGroupSize, path);
+                // The file was read, so each setting is written once, and here is its text as it was typed.
+                ConfigFile.RequireMinimumGroupSize(AsWritten(previous!, "minimumGroupSize").Single(), path);
             }
             catch (UserFacingException exception)
             {
@@ -157,12 +160,21 @@ internal static class DiscoverCommand
         // They are refused here in the same way. Once the file has roles discover adds none, so the statuses
         // listed are checked against them now. A file with no roles yet gets them from Jira, so there only
         // the thresholds are checked now, and the statuses by the check of the text about to be written.
-        if (root.TryGetPropertyValue("briefVisitThresholds", out var briefVisitThresholds))
+        // The treatment of brief visits is the owner's in the same way and is checked with them: what it is,
+        // and whether a status is listed for it to act on, now; whether a listed status has the work role,
+        // now when the file has roles, and otherwise by that later check (owner decision D73).
+        var hasThresholds = root.ContainsKey("briefVisitThresholds");
+        var hasTreatment = root.ContainsKey(BriefVisitTreatmentSetting.Name);
+        if (hasThresholds || hasTreatment)
         {
             try
             {
                 var roles = fileHadNoRoles ? null : StatusRoles.Parse(statusRoles.Select(role => KeyValuePair.Create(role.Key, RoleText(role.Value))));
-                ConfigFile.RequireBriefVisitThresholds(briefVisitThresholds, roles, path);
+                var thresholds = hasThresholds ? ConfigFile.RequireBriefVisitThresholds(AsWritten(previous!, "briefVisitThresholds").Single(), roles, path) : NoBriefVisitThresholds;
+                if (hasTreatment)
+                {
+                    ConfigFile.RequireBriefVisitTreatment(AsWritten(previous!, BriefVisitTreatmentSetting.Name).Single(), thresholds, roles, path);
+                }
             }
             catch (UserFacingException exception)
             {
@@ -488,16 +500,122 @@ internal static class DiscoverCommand
         return false;
     }
 
-    private static JsonObject ReadExisting(string text, string path)
+    /// <summary>
+    /// The file as it is, read as leniently as the run reads it. A key written twice is refused, and no part
+    /// of it is printed, in whatever setting and at whatever depth it is: what was typed as a key could be a
+    /// secret pasted into the wrong place. Discover says that a key is written twice, and under which setting
+    /// when that setting's name is one the tool knows (owner decision D108). The runtime's own message for
+    /// such a file quotes the key, so it is never passed on. A file that is not JSON is refused with the line
+    /// and the position of the fault and no text from the file: the runtime's message for it can quote the
+    /// file from the fault to its end (owner decision D110). A key that is no text at all is refused as
+    /// every command refuses it. The walk over the keys is given the file's bytes, as run's is, and not text
+    /// decoded from them: decoding turns bytes that are not UTF-8 into replacement characters, and a file in
+    /// another encoding (UTF-16, a second byte order mark) into text run never sees. Returns the file as an
+    /// object, and its text.
+    /// </summary>
+    private static (JsonObject Root, string Text) ReadExisting(byte[] content, string path)
     {
+        var keys = ConfigFile.FindKeyFaults(content);
+        if (keys.NotJsonAt is { } at)
+        {
+            throw Unreadable(path, ConfigFile.NotJson(at));
+        }
+
+        if (ConfigFile.RefusalOf(keys, path) is { } refusal)
+        {
+            throw RunWouldRefuse(path, refusal);
+        }
+
+        string text;
         try
         {
-            return JsonNode.Parse(text, documentOptions: Lenient) as JsonObject ?? throw Unreadable(path, "it is not a JSON object");
+            // The walk read every key as UTF-8, but a value is read only when a setting is: a value in another
+            // encoding would otherwise come back with replacement characters in what discover writes.
+            var body = content.AsSpan().StartsWith(Encoding.UTF8.Preamble) ? content.AsSpan(Encoding.UTF8.Preamble.Length) : content;
+            text = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(body);
         }
-        catch (JsonException exception)
+        catch (DecoderFallbackException)
         {
-            throw Unreadable(path, exception.Message, exception);
+            throw Unreadable(path, "it holds bytes that are not UTF-8; save the file as UTF-8");
         }
+
+        try
+        {
+            return (JsonNode.Parse(text, documentOptions: Lenient) as JsonObject ?? throw Unreadable(path, "it is not a JSON object"), text);
+        }
+        catch (JsonException) when (keys.KeyIsWrittenTwice)
+        {
+            RequireReadableBriefVisitTreatment(text, path);
+            throw Unreadable(path, keys.SettingOfKeyWrittenTwice is { } setting ? $"a key is written twice under {setting}" : "a key is written twice");
+        }
+        catch (JsonException)
+        {
+            // The walk read the whole file and found nothing, so this is not expected. Whatever the reader
+            // refused, its message is not passed on: it can quote the file.
+            throw Unreadable(path, "it is not JSON the tool can read");
+        }
+    }
+
+    /// <summary>
+    /// For a file in which a key is written twice. A part of <c>briefVisitTreatment</c> written twice, and a
+    /// part the tool does not know, are refused by <c>run</c> with a message that names the setting and
+    /// repeats nothing. So the setting is first read by its own reader: for those discover says what run
+    /// would say (owner decision D105). A file whose key written twice is elsewhere comes back from here.
+    /// </summary>
+    private static void RequireReadableBriefVisitTreatment(string text, string path)
+    {
+        IReadOnlyList<string> written;
+        try
+        {
+            written = AsWritten(text, BriefVisitTreatmentSetting.Name);
+        }
+        catch (JsonException)
+        {
+            // The walk that found the key written twice read the whole file, so this one does too.
+            return;
+        }
+
+        foreach (var setting in written)
+        {
+            try
+            {
+                ConfigFile.RequireReadableBriefVisitTreatment(setting, path);
+            }
+            catch (UserFacingException exception)
+            {
+                throw RunWouldRefuse(path, exception);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The text of every value the file's top level holds under <paramref name="name"/>, as it was typed:
+    /// one for a file that can be read, more when the setting is written twice, none when it is absent.
+    /// Throws <see cref="JsonException"/> for text that is not JSON.
+    /// </summary>
+    private static List<string> AsWritten(string text, string name)
+    {
+        var utf8 = Encoding.UTF8.GetBytes(text);
+        var reader = new Utf8JsonReader(utf8, new JsonReaderOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
+        var written = new List<string>();
+        if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
+        {
+            return written;
+        }
+
+        while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+        {
+            var isNamed = reader.ValueTextEquals(name);
+            reader.Read();
+            var start = (int)reader.TokenStartIndex;
+            reader.Skip();
+            if (isNamed)
+            {
+                written.Add(Encoding.UTF8.GetString(utf8, start, (int)reader.BytesConsumed - start));
+            }
+        }
+
+        return written;
     }
 
     /// <summary>A section of the file, added when the file does not have it yet.</summary>

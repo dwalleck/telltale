@@ -1,3 +1,5 @@
+using Telltale.Core.Configuration;
+using Telltale.Core.Intervals;
 using Telltale.Core.Workflow;
 
 namespace Telltale.Core.Storage;
@@ -37,7 +39,11 @@ public sealed record IssueCycle
 
     public int ReopenCount { get; }
 
-    /// <summary>The issue's cycle time. Null when it has none: it is not delivered, or it never entered a work-role status.</summary>
+    /// <summary>
+    /// The issue's cycle time. Null when it has none: it is not delivered, or it never entered a work-role status,
+    /// or its cycle starts with a brief visit and the treatment for cycle time leaves such cycles out (GLOSSARY:
+    /// Treatment; owner decision D85).
+    /// </summary>
     public Cycle? Cycle { get; private init; }
 
     /// <summary>
@@ -47,12 +53,20 @@ public sealed record IssueCycle
     public double? PointBucket { get; private init; }
 
     /// <summary>
-    /// A delivered issue. <paramref name="deliverySprintId"/> is null when the delivery fell between sprints,
-    /// <paramref name="cycle"/> when the issue never entered a work-role status, and
-    /// <paramref name="pointBucket"/> when it is unestimated.
+    /// Whether the issue's cycle starts with a brief visit (GLOSSARY: Brief visit; owner decisions D87 and D90;
+    /// <see cref="Cycles.StartsWithBriefVisit"/>). True for delivered issues only, and for none when no status
+    /// is listed. It is a flag and nothing else: no duration, no time.
     /// </summary>
-    public static IssueCycle OfDelivered(string issueId, DateTimeOffset deliveredAt, string? deliverySprintId, Cycle? cycle, double? pointBucket, int reopenCount) =>
-        new(issueId, reopenCount) { CycleEnd = deliveredAt, Delivered = true, DeliverySprintId = deliverySprintId, Cycle = cycle, PointBucket = pointBucket };
+    public bool StartsWithBriefVisit { get; private init; }
+
+    /// <summary>
+    /// A delivered issue. <paramref name="deliverySprintId"/> is null when the delivery fell between sprints,
+    /// <paramref name="cycle"/> when the issue never entered a work-role status or its cycle was left out, and
+    /// <paramref name="pointBucket"/> when it is unestimated. <paramref name="startsWithBriefVisit"/> says
+    /// whether its cycle starts with a brief visit, which is recorded also when the cycle was left out for it.
+    /// </summary>
+    public static IssueCycle OfDelivered(string issueId, DateTimeOffset deliveredAt, string? deliverySprintId, Cycle? cycle, double? pointBucket, int reopenCount, bool startsWithBriefVisit) =>
+        new(issueId, reopenCount) { CycleEnd = deliveredAt, Delivered = true, DeliverySprintId = deliverySprintId, Cycle = cycle, PointBucket = pointBucket, StartsWithBriefVisit = startsWithBriefVisit };
 
     /// <summary>An abandoned issue: it reached done at <paramref name="closedAt"/>, which is its cycle end, and that is not a delivery.</summary>
     public static IssueCycle OfAbandoned(string issueId, DateTimeOffset closedAt, int reopenCount) =>
@@ -74,9 +88,21 @@ public sealed record IssueMembershipInterval(string IssueId, string SprintId, Da
 
 /// <summary>
 /// One issue's time in one status during one sprint (GLOSSARY: Time in status), measured three ways:
-/// calendar time, business time and business days.
+/// calendar time, business time and business days. The three are the time as recorded: no brief visit is left
+/// out of them, whatever the treatment (GLOSSARY: Treatment), because the team of a sprint and the count of
+/// brief visits are taken from the recorded rows (owner decision D93).
 /// </summary>
-public sealed record SprintStatusTime(string IssueId, string SprintId, string StatusId, TimeSpan CalendarTime, TimeSpan BusinessTime, double BusinessDays);
+public sealed record SprintStatusTime(string IssueId, string SprintId, string StatusId, TimeSpan CalendarTime, TimeSpan BusinessTime, double BusinessDays)
+{
+    /// <summary>
+    /// The business days the time in status figures are taken from: <see cref="BusinessDays"/>, less the
+    /// brief visits the treatment for time in status leaves out (owner decision D84). The same as
+    /// <see cref="BusinessDays"/> when nothing is left out, and zero when nothing remains: the issue is then
+    /// not in the status's row. Required, with no default, so that code that builds a row without measuring it
+    /// does not compile, rather than derive quietly as if the treatment were <c>count</c>.
+    /// </summary>
+    public required double MeasuredBusinessDays { get; init; }
+}
 
 /// <summary>
 /// One issue has at least one brief visit to one status that counts toward one sprint (GLOSSARY: Brief visit;
@@ -87,9 +113,9 @@ public sealed record SprintBriefVisit(string IssueId, string SprintId, string St
 
 /// <summary>
 /// A status the configuration gives a role, with its place in board order (the order the configuration
-/// lists the statuses in, from 1) and whether its role is done.
+/// lists the statuses in, from 1), whether its role is done and whether its role is work.
 /// </summary>
-public sealed record BoardStatus(string StatusId, int Position, bool IsDone);
+public sealed record BoardStatus(string StatusId, int Position, bool IsDone, bool IsWork);
 
 /// <summary>The ways an issue's changelog can fail to line up. Each has one fixed message.</summary>
 public enum ChangelogAnomalyKind
@@ -138,6 +164,7 @@ public sealed record IssueAnomaly(string IssueId, ChangelogAnomalyKind Kind)
 /// <param name="MinimumTeam">The minimum group size's team number (GLOSSARY: Minimum group size): the metric views read it from the rebuild's record and never from the configuration.</param>
 /// <param name="MinimumAssigneesBehindAFigure">The minimum group size's number of assignees behind a figure, read by the views in the same way.</param>
 /// <param name="BriefVisitThresholds">The brief visit thresholds (GLOSSARY: Brief visit) as a JSON object of status ID to minutes, the IDs in order, e.g. <c>{"10001":5,"10005":0.5}</c>; <c>{}</c> when no status is checked. The metric view <c>brief_visits_per_sprint</c> reads the listed statuses and their thresholds from the rebuild's record.</param>
+/// <param name="BriefVisitTreatment">The treatment of brief visits (GLOSSARY: Treatment) as a JSON object of each part and its label, the parts in order, e.g. <c>{"cycleTime":"count","timeInStatus":"exclude"}</c>. Left out, it is <see cref="BriefVisitsCounted"/>: a record made without it is of a rebuild that counted brief visits and changed nothing.</param>
 public sealed record DerivedSource(
     string RawDigest,
     string TimeZone,
@@ -147,7 +174,8 @@ public sealed record DerivedSource(
     string AbandonedResolutionIds,
     long MinimumTeam,
     long MinimumAssigneesBehindAFigure,
-    string BriefVisitThresholds)
+    string BriefVisitThresholds,
+    string BriefVisitTreatment = DerivedSource.BriefVisitsCounted)
 {
     /// <summary><see cref="BriefVisitThresholds"/> when no status is checked. The one place that spells it.</summary>
     public const string NoBriefVisitThresholds = "{}";
@@ -173,6 +201,49 @@ public sealed record DerivedSource(
         }
 
         return System.Text.Json.JsonSerializer.Serialize(minutes);
+    }
+
+    /// <summary><see cref="BriefVisitTreatment"/> when every part is <c>count</c>, which is also what an absent setting means (owner decision D83).</summary>
+    public const string BriefVisitsCounted =
+        "{\"" + BriefVisitTreatmentSetting.CycleTimeName + "\":\"" + BriefVisitTreatments.Count + "\",\"" + BriefVisitTreatmentSetting.TimeInStatusName + "\":\"" + BriefVisitTreatments.Count + "\"}";
+
+    /// <summary><see cref="BriefVisitTreatment"/> for the treatment derive applies: the form the store keeps.</summary>
+    public static string BriefVisitTreatmentOf(BriefVisitTreatmentSetting treatment) =>
+        System.Text.Json.JsonSerializer.Serialize(new SortedDictionary<string, string>(StringComparer.Ordinal)
+        {
+            [BriefVisitTreatmentSetting.CycleTimeName] = BriefVisitTreatments.LabelOf(treatment.CycleTime),
+            [BriefVisitTreatmentSetting.TimeInStatusName] = BriefVisitTreatments.LabelOf(treatment.TimeInStatus),
+        });
+
+    /// <summary>
+    /// Whether the rebuild left brief visits out of time in status: read from <see cref="BriefVisitTreatment"/>,
+    /// the record of the treatment derive applied, and never from the configuration.
+    /// </summary>
+    public bool BriefVisitsLeftOutOfTimeInStatus => LeftOutOf(BriefVisitTreatmentSetting.TimeInStatusName);
+
+    /// <summary>
+    /// Whether the rebuild left the cycles that start with a brief visit out of cycle time: read from
+    /// <see cref="BriefVisitTreatment"/>, as <see cref="BriefVisitsLeftOutOfTimeInStatus"/> is.
+    /// </summary>
+    public bool BriefVisitsLeftOutOfCycleTime => LeftOutOf(BriefVisitTreatmentSetting.CycleTimeName);
+
+    /// <summary>
+    /// Whether <see cref="BriefVisitTreatment"/> records, for <paramref name="part"/>, a treatment that leaves brief
+    /// visits out. A record without the part, or with a label this version does not know, is not read as
+    /// <c>count</c>: the derived data is then not this version's to read, and deriving again repairs it.
+    /// </summary>
+    private bool LeftOutOf(string part)
+    {
+        using var recorded = System.Text.Json.JsonDocument.Parse(BriefVisitTreatment);
+        if (recorded.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object
+            || !recorded.RootElement.TryGetProperty(part, out var label)
+            || label.ValueKind != System.Text.Json.JsonValueKind.String
+            || !BriefVisitTreatments.TryParse(label.GetString(), out var treatment))
+        {
+            throw new UserFacingException("The derived data in the store records a treatment of brief visits this version of the tool does not know. Run derive first.");
+        }
+
+        return BriefVisitTreatments.LeavesOut(treatment);
     }
 
     /// <summary><see cref="BaselineSprintIds"/> for a list of sprint IDs: the form the store keeps and the views read.</summary>

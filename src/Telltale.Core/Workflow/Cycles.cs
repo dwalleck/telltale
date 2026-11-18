@@ -39,6 +39,22 @@ public static class Cycles
     }
 
     /// <summary>
+    /// Whether the issue's cycle starts with a brief visit (GLOSSARY: Brief visit; owner decision D90): the stay
+    /// that begins at the cycle's start is a brief visit under its own status's threshold. The cycle's start is
+    /// <see cref="Measure"/>'s, the first entry into a work-role status, and that entry always begins a stay, so
+    /// the stay is the first of <paramref name="stays"/> (<see cref="BriefVisits.Stays"/>) in a work-role status.
+    /// It is found by its place and not by its time: several stays can begin at one instant.
+    /// <paramref name="thresholds"/> is status ID to threshold; a status not listed is not checked, so a first
+    /// stay in one is not a brief visit, whatever follows it. A brief visit later in the cycle does not count,
+    /// and neither does a first stay bounded by a changelog anomaly (<see cref="BriefVisits.IsBrief"/>). A move
+    /// into a work status and straight back out counts, though the real start came later (D91). An issue that
+    /// never entered a work-role status has no cycle, and the answer is no.
+    /// </summary>
+    public static bool StartsWithBriefVisit(IReadOnlyList<Stay> stays, StatusRoles roles, IReadOnlyDictionary<string, TimeSpan> thresholds) =>
+        stays.FirstOrDefault(stay => roles.IsWork(stay.StatusId)) is { } first
+        && BriefVisits.IsBriefVisit(first, thresholds);
+
+    /// <summary>
     /// How many times the issue was reopened: its transitions out of a done-role status into one that is not
     /// done, read from the statuses it entered (<see cref="StatusTimeline.Entries"/>). A move between two
     /// done-role statuses is not a reopen.

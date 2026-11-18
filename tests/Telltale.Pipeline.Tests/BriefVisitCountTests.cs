@@ -41,7 +41,7 @@ public class BriefVisitCountTests
             - Issues delivered between sprints, in the whole store: suppressed
             - Fake Development: 4 issues had a visit shorter than 5 minutes
 
-            """.ReplaceLineEndings("\n"));
+            """.ReplaceLineEndings("\n") + ReportText.CyclesThatStartWithBriefVisit("4"));
         await Assert.That(await QueryAsync(pipeline, ViewSql)).IsEqualTo(
             ViewHead + $"| 41 | {Workflow.Development.Id} | Fake Development | 4 | 5 | 4 | 0 |\n");
     }
@@ -64,7 +64,7 @@ public class BriefVisitCountTests
             - Fake Development: 4 issues had a visit shorter than 5 minutes
             - Fake Review: issues with a visit shorter than 2 minutes: suppressed
 
-            """.ReplaceLineEndings("\n"));
+            """.ReplaceLineEndings("\n") + ReportText.CyclesThatStartWithBriefVisit("4"));
         await Assert.That(await QueryAsync(pipeline, ViewSql)).IsEqualTo(
             ViewHead
             + $"| 41 | {Workflow.Development.Id} | Fake Development | 4 | 5 | 4 | 0 |\n"
@@ -100,7 +100,9 @@ public class BriefVisitCountTests
 
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).Contains("\n| Fake Development | 3 | 2.0 | 6.0 |\n");
-        await Assert.That(report).EndsWith("\n- Fake Development: issues with a visit shorter than 5 minutes: suppressed\n");
+
+        // The four issues were delivered, and each one's cycle starts with its twenty seconds in Development.
+        await Assert.That(report).EndsWith("\n- Fake Development: issues with a visit shorter than 5 minutes: suppressed\n" + ReportText.CyclesThatStartWithBriefVisit("4"));
         await Assert.That(await QueryAsync(pipeline, ViewSql)).IsEqualTo(
             ViewHead + $"| 41 | {Workflow.Development.Id} | Fake Development | 4 | 5 | NULL | 1 |\n");
     }
@@ -118,7 +120,7 @@ public class BriefVisitCountTests
         // The row itself is shown: five assignees are behind its seven issues.
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).Contains("\n| Fake Development | 7 | 0.0 | 6.0 |\n");
-        await Assert.That(report).EndsWith("\n- Fake Development: issues with a visit shorter than 5 minutes: suppressed\n");
+        await Assert.That(report).EndsWith("\n- Fake Development: issues with a visit shorter than 5 minutes: suppressed\n" + ReportText.CyclesThatStartWithBriefVisit("suppressed"));
         await Assert.That(await QueryAsync(pipeline, ViewSql)).IsEqualTo(
             ViewHead + $"| 41 | {Workflow.Development.Id} | Fake Development | 4 | 5 | NULL | 1 |\n");
     }
@@ -135,7 +137,7 @@ public class BriefVisitCountTests
         await pipeline.RunAllAsync(["backfill"], ["derive"], ["report", "--sprint", "41"]);
 
         // The count the default numbers withhold (the test above) is shown when a figure needs two assignees.
-        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith("\n- Fake Development: 4 issues had a visit shorter than 5 minutes\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith("\n- Fake Development: 4 issues had a visit shorter than 5 minutes\n" + ReportText.CyclesThatStartWithBriefVisit("4"));
         await Assert.That(await QueryAsync(pipeline, ViewSql)).IsEqualTo(
             ViewHead + $"| 41 | {Workflow.Development.Id} | Fake Development | 4 | 5 | 4 | 0 |\n");
     }
@@ -153,7 +155,7 @@ public class BriefVisitCountTests
 
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).Contains("\n| Fake Development | 2 | suppressed | suppressed |\n");
-        await Assert.That(report).EndsWith("\n- Fake Development: issues with a visit shorter than 5 minutes: suppressed\n");
+        await Assert.That(report).EndsWith("\n- Fake Development: issues with a visit shorter than 5 minutes: suppressed\n" + ReportText.CyclesThatStartWithBriefVisit("suppressed"));
         await Assert.That(await QueryAsync(pipeline, ViewSql)).IsEqualTo(
             ViewHead + $"| 41 | {Workflow.Development.Id} | Fake Development | 4 | 5 | NULL | 1 |\n");
     }
@@ -171,7 +173,9 @@ public class BriefVisitCountTests
 
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).Contains("\n## Time in status\n\nsuppressed\n");
-        await Assert.That(report).EndsWith("\n- Issues delivered between sprints, in the whole store: suppressed\n");
+
+        // The footer's cycle time line is not a brief visit line: it is there for every sprint, and withheld here.
+        await Assert.That(report).EndsWith("\n- Issues delivered between sprints, in the whole store: suppressed\n" + ReportText.CyclesThatStartWithBriefVisit("suppressed"));
         await Assert.That(report).DoesNotContain("had a visit");
         await Assert.That(report).DoesNotContain("with a visit");
         await Assert.That(await QueryAsync(pipeline, ViewSql)).IsEqualTo(ViewHead);
@@ -237,7 +241,7 @@ public class BriefVisitCountTests
 
         // Derive alone repairs it: the thresholds decide nothing about what is fetched.
         await pipeline.RunAllAsync(["derive"], ["report", "--sprint", "41"]);
-        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith("\n- Fake Development: 4 issues had a visit shorter than 6 minutes\n");
+        await Assert.That(await pipeline.ReadReportAsync(41)).EndsWith("\n- Fake Development: 4 issues had a visit shorter than 6 minutes\n" + ReportText.CyclesThatStartWithBriefVisit("4"));
     }
 
     [Test]
@@ -266,10 +270,14 @@ public class BriefVisitCountTests
         await Assert.That(reportWithout).EndsWith("\n- Issues delivered between sprints, in the whole store: suppressed\n");
         await Assert.That(await QueryAsync(without, ViewSql)).IsEqualTo(ViewHead);
 
-        // With the setting: the same report with one line more, and the console said the same. The method note
+        // With the setting: the same report with two lines more, the brief visit line and directly after it the
+        // footer's cycle time line (owner decision D100), and the console said the same. The method note
         // differs in the two places that are about brief visits (ticket 05): its sentence on the footer's two
         // counts says they are the two of the whole store, and it ends with one paragraph on brief visits.
-        var reportWith = await with.ReadReportAsync(41);
+        var cycleLine = ReportText.CyclesThatStartWithBriefVisit("4");
+        var reportWithItsLastLine = await with.ReadReportAsync(41);
+        await Assert.That(reportWithItsLastLine).EndsWith("\n" + cycleLine);
+        var reportWith = reportWithItsLastLine[..^cycleLine.Length];
         const string TheParagraphStartsWith = "- A brief visit is ";
         const string TheLastParagraphBefore = "- Work that has since been removed from Jira stays in the figures until the next backfill.\n";
         const string TheFootersTwoCounts = " The footer's two counts";
@@ -293,9 +301,10 @@ public class BriefVisitCountTests
         await Assert.That(with.Error.ToString()).IsEqualTo(without.Error.ToString());
         await Assert.That(without.Error.ToString()).Contains("Changelog anomalies: 1 across 1 issue");
 
-        // Every table and view but the three that hold the setting and the brief visits is the same, row for
-        // row: the anomalies, the footer's counts and every figure of every other view.
-        string[] aboutBriefVisits = ["brief_visit", "brief_visits_per_sprint", "run"];
+        // Every table and view but the five that hold the setting and the brief visits is the same, row for
+        // row: the anomalies, the footer's counts and every figure of every other view. One view counts the
+        // cycles that start with a brief visit, and the issues' cycles are compared below, column by column.
+        string[] aboutBriefVisits = ["brief_visit", "brief_visits_per_sprint", "run", "issue_cycle", "cycle_starts_with_brief_visit_per_sprint"];
         var storeWithout = BlocksOf(await without.ReadStoreContentAsync());
         var storeWith = BlocksOf(await with.ReadStoreContentAsync());
         await Assert.That(storeWith.Keys.Order()).IsEquivalentTo(storeWithout.Keys.Order(), TUnit.Assertions.Enums.CollectionOrdering.Matching);
@@ -305,9 +314,24 @@ public class BriefVisitCountTests
             await Assert.That(storeWith[name]).IsEqualTo(storeWithout[name]);
         }
 
+        // Every issue's cycle is the same in every column but the last, the flag that says the cycle starts
+        // with a brief visit: its start, its end, its days, its bucket, its delivery and its reopens. The flag
+        // is 0 for every issue without the setting, and with it 1 for the four caught-up issues and no other.
+        var cyclesWithout = RowsOf(storeWithout["issue_cycle"]);
+        var cyclesWith = RowsOf(storeWith["issue_cycle"]);
+        string[] caughtUp = [.. Enumerable.Range(1, 4).Select(number => with.Jira.IdOf($"FAKE-{number}"))];
+        await Assert.That(cyclesWithout.Count(row => row.EndsWith(" | 0", StringComparison.Ordinal))).IsEqualTo(cyclesWithout.Count);
+        await Assert.That(cyclesWith.Count(row => row.EndsWith(" | 1", StringComparison.Ordinal))).IsEqualTo(4);
+        await Assert.That(cyclesWith).IsEquivalentTo(
+            cyclesWithout.Select(row => caughtUp.Contains(row[..row.IndexOf(" | ", StringComparison.Ordinal)]) ? row[..^1] + "1" : row),
+            TUnit.Assertions.Enums.CollectionOrdering.Matching);
+
         await Assert.That(storeWithout["brief_visit"]).IsEqualTo("brief_visit\n\n");
         await Assert.That(storeWith["anomaly"]).Contains(with.Jira.IdOf("FAKE-9"));
     }
+
+    /// <summary>The rows of one block of <see cref="BlocksOf"/>, without the name that heads it.</summary>
+    private static List<string> RowsOf(string block) => [.. block.Split('\n', StringSplitOptions.RemoveEmptyEntries).Skip(1)];
 
     /// <summary>Sprint 41 as the harness has it, and a team of five whose issues stay in New through it.</summary>
     private static void AddSprint41WithItsTeam(FakeJira jira)

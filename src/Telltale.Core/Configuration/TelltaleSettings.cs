@@ -1,6 +1,7 @@
 using System.Globalization;
 using Telltale.Core.Calendar;
 using Telltale.Core.Derive;
+using Telltale.Core.Intervals;
 using Telltale.Core.Storage;
 using Telltale.Core.Workflow;
 
@@ -38,19 +39,23 @@ public sealed record TelltaleSettings
     /// <summary>The threshold of every status checked for brief visits (GLOSSARY: Brief visit), by status ID. Empty when nothing is checked.</summary>
     public required IReadOnlyDictionary<string, TimeSpan> BriefVisitThresholds { get; init; }
 
+    /// <summary>What is done with brief visits (GLOSSARY: Treatment), part by part. Every part is <c>count</c> when the setting is left out.</summary>
+    public required BriefVisitTreatmentSetting BriefVisitTreatment { get; init; }
+
     /// <summary>
-    /// The settings as a rebuild records them, apart from the raw data's digest and the brief visit thresholds,
-    /// which <see cref="DerivedFrom"/> fills in: the thresholds are recorded from <see cref="BriefVisitThresholds"/>,
-    /// the ones derive applies, and are kept nowhere else.
+    /// The settings as a rebuild records them, apart from the raw data's digest, the brief visit thresholds and
+    /// the treatment of brief visits, which <see cref="DerivedFrom"/> fills in: the thresholds are recorded from
+    /// <see cref="BriefVisitThresholds"/> and the treatment from <see cref="BriefVisitTreatment"/>, the ones
+    /// derive applies, and are kept nowhere else.
     /// </summary>
     private DerivedSource Recorded { get; init; } = new("", "", "", "", "", "", MinimumGroupSize.Default.Team, MinimumGroupSize.Default.AssigneesBehindAFigure, DerivedSource.NoBriefVisitThresholds);
 
     /// <summary>Everything a rebuild is decided with besides the raw data and the as-of time.</summary>
-    public DerivationSettings Derivation => new(new DeliveryRules(StatusRoles, AbandonedResolutionIds), new BusinessCalendar(TimeZone, Holidays)) { BriefVisitThresholds = BriefVisitThresholds };
+    public DerivationSettings Derivation => new(new DeliveryRules(StatusRoles, AbandonedResolutionIds), new BusinessCalendar(TimeZone, Holidays)) { BriefVisitThresholds = BriefVisitThresholds, BriefVisitTreatment = BriefVisitTreatment };
 
     /// <summary>What a rebuild of raw data with the digest <paramref name="rawDigest"/> under these settings is built from.</summary>
     public DerivedSource DerivedFrom(string rawDigest) =>
-        Recorded with { RawDigest = rawDigest, BriefVisitThresholds = DerivedSource.BriefVisitThresholdsOf(BriefVisitThresholds) };
+        Recorded with { RawDigest = rawDigest, BriefVisitThresholds = DerivedSource.BriefVisitThresholdsOf(BriefVisitThresholds), BriefVisitTreatment = DerivedSource.BriefVisitTreatmentOf(BriefVisitTreatment) };
 
     /// <summary>
     /// Checks every setting and throws <see cref="SettingRefusedException"/> for the first that is refused.
@@ -68,6 +73,7 @@ public sealed record TelltaleSettings
         RequireNotNull(config.Holidays, "holidays");
         RequireNotNull(config.TimeZone, "timeZone");
         RequireNotNull(config.BriefVisitThresholds, "briefVisitThresholds");
+        RequireNotNull(config.BriefVisitTreatment, BriefVisitTreatmentSetting.Name);
 
         var jira = CheckedJira(config.Jira);
         var roles = CheckedStatusRoles(config.StatusRoles, requireDone);
@@ -77,6 +83,7 @@ public sealed record TelltaleSettings
             ?? throw new SettingRefusedException($"timeZone: '{config.TimeZone}' is not a known IANA time zone ID.");
         var minimumGroupSize = CheckedMinimumGroupSize(config.MinimumGroupSize ?? MinimumGroupSize.Default);
         var briefVisitThresholds = CheckedBriefVisitThresholds(config.BriefVisitThresholds, roles);
+        var briefVisitTreatment = CheckedBriefVisitTreatment(config.BriefVisitTreatment, briefVisitThresholds, roles);
 
         return new TelltaleSettings
         {
@@ -87,6 +94,7 @@ public sealed record TelltaleSettings
             TimeZone = timeZone,
             Holidays = config.Holidays,
             BriefVisitThresholds = briefVisitThresholds,
+            BriefVisitTreatment = briefVisitTreatment,
             Recorded = new DerivedSource(
                 RawDigest: "",
                 config.TimeZone,
@@ -161,6 +169,41 @@ public sealed record TelltaleSettings
         }
 
         return thresholds.ToDictionary(listed => listed.Key, listed => CheckedBriefVisitThreshold(listed.Value), StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// <c>briefVisitTreatment</c> (GLOSSARY: Treatment; owner decision D83) beside the thresholds it is applied
+    /// with. A treatment acts on the brief visits to the listed statuses and on nothing else, so one that leaves
+    /// brief visits out while no status is listed would leave nothing out, and the owner would be left believing
+    /// figures were adjusted: it is refused, for either part. A cycle starts in a status with the work role
+    /// (<paramref name="roles"/>), so leaving out for cycle time while no listed status has that role would
+    /// leave no cycle out either, and is refused for the same reason. <c>discover</c> asks this of an existing
+    /// file before it calls Jira, and passes no roles when the file has none yet: then the rule on the work
+    /// role is not applied, and waits for the roles. Throws <see cref="SettingRefusedException"/>; no message
+    /// repeats anything written in the file but the tool's own words for a part and a treatment.
+    /// </summary>
+    public static BriefVisitTreatmentSetting CheckedBriefVisitTreatment(BriefVisitTreatmentSetting written, IReadOnlyDictionary<string, TimeSpan> thresholds, StatusRoles? roles)
+    {
+        if (thresholds.Count == 0 && BriefVisitTreatments.LeavesOut(written.TimeInStatus))
+        {
+            throw new SettingRefusedException($"{BriefVisitTreatmentSetting.Name}.{BriefVisitTreatmentSetting.TimeInStatusName} is {BriefVisitTreatments.Exclude}, and no status is listed in briefVisitThresholds, so no visit would be left out. List a status there, or write {BriefVisitTreatments.Count}.");
+        }
+
+        if (BriefVisitTreatments.LeavesOut(written.CycleTime))
+        {
+            const string Remedy = $"List a status with the role work there, or write {BriefVisitTreatments.Count}.";
+            if (thresholds.Count == 0)
+            {
+                throw new SettingRefusedException($"{BriefVisitTreatmentSetting.Name}.{BriefVisitTreatmentSetting.CycleTimeName} is {BriefVisitTreatments.Exclude}, and no status is listed in briefVisitThresholds, so no cycle would be left out. {Remedy}");
+            }
+
+            if (roles is not null && !thresholds.Keys.Any(roles.IsWork))
+            {
+                throw new SettingRefusedException($"{BriefVisitTreatmentSetting.Name}.{BriefVisitTreatmentSetting.CycleTimeName} is {BriefVisitTreatments.Exclude}, and no status listed in briefVisitThresholds has the role work, so no cycle could start with a brief visit and none would be left out. {Remedy}");
+            }
+        }
+
+        return written;
     }
 
     /// <summary>

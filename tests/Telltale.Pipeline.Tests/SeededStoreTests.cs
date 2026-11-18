@@ -31,7 +31,7 @@ public class SeededStoreTests
         // Sprint 41, the baseline, has 2, 3 and 4.
         await Assert.That(report).Contains(ReportText.CycleTimeHeaderWithBaseline + "| 3 | 4 | 2.5 | 5.0 | 2.5 | 7.0 | 3.0 | 4.0 |\n");
         await Assert.That(report).Contains("\n| Fake Blocked | 1 | suppressed | suppressed | none |\n");
-        await Assert.That(report).EndsWith("\n- Fake Development: 4 issues had a visit shorter than 5 minutes\n");
+        await Assert.That(report).EndsWith("\n- Fake Development: 4 issues had a visit shorter than 5 minutes\n" + ReportText.CyclesThatStartWithBriefVisit("4"));
         await Assert.That(seeded.Jira.Requests).IsEmpty();
     }
 
