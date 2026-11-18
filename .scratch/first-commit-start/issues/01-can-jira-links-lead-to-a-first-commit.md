@@ -18,7 +18,7 @@ What the tool has today: it collects issues, their status, sprint and point hist
 
 **Status:** ready-for-human
 
-A person has to make the read-only access tokens for the two code hosts and choose the issues to look at. With those in place an agent can run the rest on the work laptop.
+A person has to give access to the two code hosts and name the repositories to look at. With those in place an agent can run the rest on the work laptop. Access can be a sign-in to each host's command-line tool rather than a stored token (see "Second route" below).
 
 ## Questions
 
@@ -36,7 +36,7 @@ A person has to make the read-only access tokens for the two code hosts and choo
 - **Company data stays on company systems.** The work runs on the work laptop. Notes, responses and counts are kept there, outside this repository.
 - **This repository is public.** No issue ID or key, pull request number, repository or project name, person, date of a real event or count from real data goes into this ticket, a commit or a test. The answer below is written in general terms: yes or no, the names of fields, and what a spec would have to handle.
 - **Nothing about a person is recorded.** Pull request and commit records carry authors' and reviewers' names and addresses. The spike reads dates and identifiers only, and writes no name, address or account anywhere (ADR-0003).
-- **Tokens** go in Windows Credential Manager, never in a file or on a command line, and have the narrowest read-only scope that works.
+- **Tokens** go in Windows Credential Manager, never in a file or on a command line, and have the narrowest read-only scope that works. A token a signed-in command-line tool hands out on demand (`gh auth token`, `az account get-access-token`) is kept by that tool in the same place, and is never written anywhere by the spike. Such a token is usually broader than read-only, so the spike sends GET requests only.
 - Use the commit's author date, not its commit date: a rebase or an amend rewrites the commit date. Read commits from the pull request's own record, not from the main branch, where a squash merge leaves one commit dated at the merge.
 - A first commit is a lower bound on when work started. The spike does not judge whether that is good enough; it reports how the dates fall.
 
@@ -51,7 +51,7 @@ A person has to make the read-only access tokens for the two code hosts and choo
 
 ## Answer
 
-**Partial, 2026-11-17.** Questions 1 and 2 and the Jira side of 6 are answered; 3, 4 and 5 need the code hosts' tokens; 7 is open with the administrators. How each point was found is in brackets: *observed* means read-only calls to the real Jira site with the tool's own API token, over the delivered issues in the store, printing only HTTP statuses, field names and value types, and counts that stayed on the work laptop; *documents* means a vendor's public pages.
+**Partial, 2026-11-17.** Questions 1 and 2 and the Jira side of 6 are answered; 3, 4 and 5 need access to the code hosts, and "Second route" below is the plan for them; 7 is open with the administrators. How each point was found is in brackets: *observed* means read-only calls to the real Jira site with the tool's own API token, over the delivered issues in the store, printing only HTTP statuses, field names and value types, and counts that stayed on the work laptop; *documents* means a vendor's public pages.
 
 **The route, in short.** It can work for the GitHub period, but only for the issues that carry a link. It does not work for the Azure DevOps period: Jira holds no link to an Azure DevOps pull request for any of the team's delivered issues, through any route the spike found.
 
@@ -92,7 +92,60 @@ A person has to make the read-only access tokens for the two code hosts and choo
 
 ### What a spec would also have to decide (in addition to the list under "Done when")
 
-- **Issues with no linked pull request.** These are common enough that a first-commit start would not cover every issue. Either the gap is shown, or the team starts putting keys in branch names, which changes the measure going forward and would itself be a dated decision.
-- **The issue key.** Matching from the host's side (a key in a branch name) needs the key. The tool stores only the internal issue ID.
+- **Issues with no linked pull request.** These are common enough that a first-commit start would not cover every issue. The team's policy already asks for the key in the branch name, so the gap is in Jira's links, in work with no pull request, or in branches that do not follow the policy. The second route below finds out which. Whatever is left is either shown, or closed by a change in how the team works, which would itself be a dated decision.
+- **The issue key.** Matching from the host's side (a key in a branch name) needs the key. The tool stores only the internal issue ID today; the owner has agreed it may store the key (D113), and the spec says how it is collected and what, if anything, a report shows of it.
 - **An internal endpoint.** It can change without notice, and the instance type must be read from the summary, not written into the code.
 
+## Second route: the key in the branch name (proposed 2026-11-17)
+
+The team's policy, on both hosts, is that a branch name holds the Jira key of its issue (the project key, a hyphen, a number). So the hosts can be asked directly, without Jira's links. This is the only route for the Azure DevOps period, where Jira holds none.
+
+### How
+
+1. **List every pull request of each repository**, open and closed, rather than searching per issue. That is one paged call per hundred pull requests:
+   - GitHub: `GET /repos/{owner}/{repo}/pulls?state=all&per_page=100`, branch in `head.ref`.
+   - Azure DevOps: `GET {org}/{project}/_apis/git/repositories/{repo}/pullrequests?searchCriteria.status=all`, branch in `sourceRefName`.
+2. **Take the key from the branch name** with a pattern that ignores case and needs a boundary after the number, so `feature/<key>-thing` matches and a key does not match a longer one that starts with it.
+3. **Read each matched pull request's own commits**:
+   - GitHub: `GET /repos/{owner}/{repo}/pulls/{number}/commits` (at most 250).
+   - Azure DevOps: `.../pullRequests/{id}/commits`.
+
+   These are the pull request's commits, not the base branch's, and are kept after a squash merge and after the branch is deleted. Take the earliest **author** date.
+4. **Note, without collecting, what the same records give for the elapsed time of a review** (question 6): when the pull request was created and closed on both hosts, and GitHub's review submission times (`/pulls/{number}/reviews`).
+
+### Access
+
+- **GitHub.** If a long-lived token cannot be had, a sign-in to the GitHub CLI is enough. `gh api --paginate` makes the calls itself, so the token never passes through the spike's code, and `gh auth token` gives it to a program that needs it. Four things come with it:
+  - The token is the person's own and usually holds `repo` and `read:org`, which can write.
+  - With SAML single sign-on the organization may need the token authorized first (`gh auth refresh`).
+  - It ends with the sign-in.
+  - That is fine for a spike or a run someone starts, and not for an unattended schedule.
+- **Azure DevOps.** A personal access token with Code (Read), or a short-lived Entra token from a signed-in Azure CLI: `az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798` (Azure DevOps' resource ID).
+- Neither has been tried yet, through the proxy or otherwise.
+
+### What the matching has to handle
+
+- **The key.** The tool keeps the internal issue ID only, and Jira's search returns the key with every issue. The owner has agreed that the store may keep it (owner decision D113), so a collector can store it at import. The spike can still take the keys from Jira when it runs, and needs no change to the store. Keys stay out of this repository, and what a report or view may show of them is for the spec to say.
+- **Several pull requests for one key**: a follow-up, a pull request into a release branch, a cherry-pick, a revert. The earliest commit across them is the natural start. Whether pull requests into release branches count has to be decided.
+- **A branch cut from another feature branch.** Its first commit can be older than the work. Reading the pull request's own commits, not the branch's history, mostly avoids this.
+- **A rebase or a force push** can drop or reorder commits. The author date survives a rebase, and the commit date does not.
+- **Persons.** Pull request and commit records hold names, addresses and accounts. The spike reads IDs, commit SHAs, branch names and dates only (ADR-0003).
+- **Policy and practice.** Jira's links cover fewer delivered issues than the policy suggests. Matching over every repository tells apart three causes:
+  - the GitHub app not having access to every repository;
+  - work with no pull request;
+  - branches that do not follow the policy.
+- **After the migration.** The route works for the Azure DevOps period only while its pull requests stay readable (question 7).
+
+### The spike to run
+
+- **Read only, on the work laptop.** It lists the pull requests of the repositories the owner names, on both hosts. It matches their branch names to the keys of the store's delivered issues, fetched from Jira as it runs and not stored.
+- **Aggregates only**, kept in the working folder:
+  - per sprint and host, how many delivered issues have a matching pull request;
+  - how many have more than one;
+  - how many branches hold no key, or a key of no delivered issue;
+  - how the earliest author date falls against the board's cycle start: earlier or later, by how much, and separately for the issues whose cycle starts with a brief visit.
+- **What it answers:** questions 2 to 5 for both hosts, and the hosts' side of 6.
+- **What it needs from the owner:**
+  - access to GitHub (a CLI sign-in is enough) and to Azure DevOps;
+  - the GitHub organization and repositories;
+  - the Azure DevOps organization, projects and repositories.
