@@ -13,3 +13,4 @@ replace: |-
 # fin-m7: the internal view of the rows a table may have is recorded as a metric view
 
 Claim: `query` refuses the internal view `sprint_status_row` (review of the final fix pass, F6). The test passed when it was first run, because every view a Derived script creates is recorded as internal, so it could not run red first. The mutation is that of brief-status-visits 03-m8 and of 02-m18, for this view.
+- Verified 2026-11-17 at 9a93374: red, 3 failed of 3 (Pipeline, filter /*/*/QueryRefusesTheStatusRowViewTests/*); restored.

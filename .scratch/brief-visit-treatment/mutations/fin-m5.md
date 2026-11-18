@@ -13,3 +13,4 @@ replace: |-
 # fin-m5: keys are compared as they were typed
 
 Claim: a key written once plainly and once with an escape for one of its letters is one key written twice, and `discover` says so without quoting it (D108; review of the final fix pass, F2). The test could not run red first: the walk has compared the keys' text, not their typed form, since it was written, and the test first written for this held no escape at all. The mutation compares the keys as typed.
+- Verified 2026-11-17 at 9a93374: red, 1 failed of 13 (Pipeline, filter /*/*/DiscoverKeyWrittenTwiceTests/*); restored.
