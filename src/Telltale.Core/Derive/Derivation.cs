@@ -1,4 +1,5 @@
 using Telltale.Core.Calendar;
+using Telltale.Core.Configuration;
 using Telltale.Core.Intervals;
 using Telltale.Core.Storage;
 using Telltale.Core.Workflow;
@@ -101,7 +102,7 @@ public static class Derivation
             {
                 Delivered delivered => DeliveredCycle(
                     issue, delivered, deliverySprints.For(delivered.At), Cycles.Measure(timeline.Entries, roles, delivered.At, calendar), pointChanges[issue.IssueId], reopens,
-                    startsWithBriefVisit: Cycles.StartsWithBriefVisit(stays, roles, settings.BriefVisitThresholds), settings.CycleTimeTreatment),
+                    startsWithBriefVisit: Cycles.StartsWithBriefVisit(stays, roles, settings.BriefVisitThresholds), settings.BriefVisitTreatment.CycleTime),
 
                 // An abandoned issue reached done, so it has a cycle end, but it is not a delivery: it belongs to
                 // no delivery sprint and has no cycle time.
@@ -135,7 +136,7 @@ public static class Derivation
                 var measured = recorded;
                 if (checksBriefVisits)
                 {
-                    toMeasure ??= BriefVisitTreatments.IntervalsToMeasure(timeline.Intervals, stays, settings.BriefVisitThresholds, settings.TimeInStatusTreatment);
+                    toMeasure ??= BriefVisitTreatments.IntervalsToMeasure(timeline.Intervals, stays, settings.BriefVisitThresholds, settings.BriefVisitTreatment.TimeInStatus);
                     if (!ReferenceEquals(toMeasure, timeline.Intervals))
                     {
                         measured = TimeInStatus.During(countedTime, toMeasure, calendar, asOf);
@@ -206,9 +207,10 @@ public sealed record DerivationSettings(DeliveryRules Delivery, BusinessCalendar
     /// <summary>The threshold of every status checked for brief visits (GLOSSARY: Brief visit), by status ID. Empty when nothing is checked.</summary>
     public IReadOnlyDictionary<string, TimeSpan> BriefVisitThresholds { get; init; } = new Dictionary<string, TimeSpan>();
 
-    /// <summary>What is done with brief visits when time in status is measured (GLOSSARY: Treatment). Brief visits are counted and nothing is left out unless this says otherwise.</summary>
-    public BriefVisitTreatment TimeInStatusTreatment { get; init; } = new CountBriefVisits();
-
-    /// <summary>What is done with a cycle that starts with a brief visit when cycle time is measured (GLOSSARY: Treatment). Every cycle is measured unless this says otherwise.</summary>
-    public BriefVisitTreatment CycleTimeTreatment { get; init; } = new CountBriefVisits();
+    /// <summary>
+    /// What is done with brief visits (GLOSSARY: Treatment), for time in status and for cycle time: the setting as
+    /// the configuration has it, so that a part added to the setting reaches derive without being copied here.
+    /// Brief visits are counted and nothing is left out unless this says otherwise.
+    /// </summary>
+    public BriefVisitTreatmentSetting BriefVisitTreatment { get; init; } = BriefVisitTreatmentSetting.None;
 }

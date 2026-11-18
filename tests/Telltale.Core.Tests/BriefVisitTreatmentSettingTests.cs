@@ -17,7 +17,7 @@ public class BriefVisitTreatmentSettingTests
     {
         var settings = TelltaleSettings.From(Config() with { BriefVisitThresholds = DevelopmentListed });
 
-        await Assert.That(settings.Derivation.TimeInStatusTreatment.Value).IsTypeOf<CountBriefVisits>();
+        await Assert.That(settings.Derivation.BriefVisitTreatment.TimeInStatus.Value).IsTypeOf<CountBriefVisits>();
         await Assert.That(settings.DerivedFrom("synthetic-digest").BriefVisitTreatment).IsEqualTo("""{"cycleTime":"count","timeInStatus":"count"}""");
         await Assert.That(settings.DerivedFrom("synthetic-digest").BriefVisitsLeftOutOfTimeInStatus).IsFalse();
     }
@@ -31,7 +31,7 @@ public class BriefVisitTreatmentSettingTests
             BriefVisitTreatment = new BriefVisitTreatmentSetting { TimeInStatus = new ExcludeBriefVisits() },
         });
 
-        await Assert.That(settings.Derivation.TimeInStatusTreatment.Value).IsTypeOf<ExcludeBriefVisits>();
+        await Assert.That(settings.Derivation.BriefVisitTreatment.TimeInStatus.Value).IsTypeOf<ExcludeBriefVisits>();
         await Assert.That(settings.DerivedFrom("synthetic-digest").BriefVisitTreatment).IsEqualTo("""{"cycleTime":"count","timeInStatus":"exclude"}""");
         await Assert.That(settings.DerivedFrom("synthetic-digest").BriefVisitsLeftOutOfTimeInStatus).IsTrue();
     }
@@ -45,7 +45,7 @@ public class BriefVisitTreatmentSettingTests
 
         var copied = settings with { BriefVisitTreatment = new BriefVisitTreatmentSetting { TimeInStatus = new ExcludeBriefVisits() } };
 
-        await Assert.That(copied.Derivation.TimeInStatusTreatment.Value).IsTypeOf<ExcludeBriefVisits>();
+        await Assert.That(copied.Derivation.BriefVisitTreatment.TimeInStatus.Value).IsTypeOf<ExcludeBriefVisits>();
         await Assert.That(copied.DerivedFrom("synthetic-digest").BriefVisitTreatment).IsEqualTo("""{"cycleTime":"count","timeInStatus":"exclude"}""");
         await Assert.That(settings.DerivedFrom("synthetic-digest").BriefVisitTreatment).IsEqualTo("""{"cycleTime":"count","timeInStatus":"count"}""");
     }

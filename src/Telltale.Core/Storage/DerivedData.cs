@@ -98,9 +98,10 @@ public sealed record SprintStatusTime(string IssueId, string SprintId, string St
     /// The business days the time in status figures are taken from: <see cref="BusinessDays"/>, less the
     /// brief visits the treatment for time in status leaves out (owner decision D84). The same as
     /// <see cref="BusinessDays"/> when nothing is left out, and zero when nothing remains: the issue is then
-    /// not in the status's row.
+    /// not in the status's row. Required, with no default, so that code that builds a row without measuring it
+    /// does not compile, rather than derive quietly as if the treatment were <c>count</c>.
     /// </summary>
-    public double MeasuredBusinessDays { get; init; } = BusinessDays;
+    public required double MeasuredBusinessDays { get; init; }
 }
 
 /// <summary>
@@ -226,13 +227,23 @@ public sealed record DerivedSource(
     /// </summary>
     public bool BriefVisitsLeftOutOfCycleTime => LeftOutOf(BriefVisitTreatmentSetting.CycleTimeName);
 
-    /// <summary>Whether <see cref="BriefVisitTreatment"/> records, for <paramref name="part"/>, a treatment that leaves brief visits out.</summary>
+    /// <summary>
+    /// Whether <see cref="BriefVisitTreatment"/> records, for <paramref name="part"/>, a treatment that leaves brief
+    /// visits out. A record without the part, or with a label this version does not know, is not read as
+    /// <c>count</c>: the derived data is then not this version's to read, and deriving again repairs it.
+    /// </summary>
     private bool LeftOutOf(string part)
     {
         using var recorded = System.Text.Json.JsonDocument.Parse(BriefVisitTreatment);
-        return recorded.RootElement.TryGetProperty(part, out var label)
-            && BriefVisitTreatments.TryParse(label.GetString(), out var treatment)
-            && BriefVisitTreatments.LeavesOut(treatment);
+        if (recorded.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object
+            || !recorded.RootElement.TryGetProperty(part, out var label)
+            || label.ValueKind != System.Text.Json.JsonValueKind.String
+            || !BriefVisitTreatments.TryParse(label.GetString(), out var treatment))
+        {
+            throw new UserFacingException("The derived data in the store records a treatment of brief visits this version of the tool does not know. Run derive first.");
+        }
+
+        return BriefVisitTreatments.LeavesOut(treatment);
     }
 
     /// <summary><see cref="BaselineSprintIds"/> for a list of sprint IDs: the form the store keeps and the views read.</summary>

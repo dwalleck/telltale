@@ -26,7 +26,7 @@ public class CycleTimeTreatmentSettingTests
             BriefVisitTreatment = new BriefVisitTreatmentSetting { TimeInStatus = new ExcludeBriefVisits() },
         });
 
-        await Assert.That(settings.Derivation.CycleTimeTreatment.Value).IsTypeOf<CountBriefVisits>();
+        await Assert.That(settings.Derivation.BriefVisitTreatment.CycleTime.Value).IsTypeOf<CountBriefVisits>();
         await Assert.That(settings.DerivedFrom("synthetic-digest").BriefVisitTreatment).IsEqualTo("""{"cycleTime":"count","timeInStatus":"exclude"}""");
         await Assert.That(settings.DerivedFrom("synthetic-digest").BriefVisitsLeftOutOfCycleTime).IsFalse();
     }
@@ -36,8 +36,8 @@ public class CycleTimeTreatmentSettingTests
     {
         var settings = TelltaleSettings.From(Config() with { BriefVisitThresholds = DevelopmentListed, BriefVisitTreatment = CycleTimeExcluded });
 
-        await Assert.That(settings.Derivation.CycleTimeTreatment.Value).IsTypeOf<ExcludeBriefVisits>();
-        await Assert.That(settings.Derivation.TimeInStatusTreatment.Value).IsTypeOf<CountBriefVisits>();
+        await Assert.That(settings.Derivation.BriefVisitTreatment.CycleTime.Value).IsTypeOf<ExcludeBriefVisits>();
+        await Assert.That(settings.Derivation.BriefVisitTreatment.TimeInStatus.Value).IsTypeOf<CountBriefVisits>();
         await Assert.That(settings.DerivedFrom("synthetic-digest").BriefVisitTreatment).IsEqualTo("""{"cycleTime":"exclude","timeInStatus":"count"}""");
         await Assert.That(settings.DerivedFrom("synthetic-digest").BriefVisitsLeftOutOfCycleTime).IsTrue();
         await Assert.That(settings.DerivedFrom("synthetic-digest").BriefVisitsLeftOutOfTimeInStatus).IsFalse();
@@ -81,7 +81,7 @@ public class CycleTimeTreatmentSettingTests
             BriefVisitTreatment = CycleTimeExcluded,
         });
 
-        await Assert.That(settings.Derivation.CycleTimeTreatment.Value).IsTypeOf<ExcludeBriefVisits>();
+        await Assert.That(settings.Derivation.BriefVisitTreatment.CycleTime.Value).IsTypeOf<ExcludeBriefVisits>();
     }
 
     [Test]
@@ -90,8 +90,8 @@ public class CycleTimeTreatmentSettingTests
         var nothingListed = TelltaleSettings.From(Config() with { BriefVisitTreatment = new BriefVisitTreatmentSetting { CycleTime = new CountBriefVisits() } });
         var newListed = TelltaleSettings.From(Config() with { BriefVisitThresholds = NewListed, BriefVisitTreatment = new BriefVisitTreatmentSetting { CycleTime = new CountBriefVisits() } });
 
-        await Assert.That(nothingListed.Derivation.CycleTimeTreatment.Value).IsTypeOf<CountBriefVisits>();
-        await Assert.That(newListed.Derivation.CycleTimeTreatment.Value).IsTypeOf<CountBriefVisits>();
+        await Assert.That(nothingListed.Derivation.BriefVisitTreatment.CycleTime.Value).IsTypeOf<CountBriefVisits>();
+        await Assert.That(newListed.Derivation.BriefVisitTreatment.CycleTime.Value).IsTypeOf<CountBriefVisits>();
     }
 
     private static TelltaleConfig Config() => new()
