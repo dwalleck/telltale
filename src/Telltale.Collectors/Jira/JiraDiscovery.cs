@@ -58,7 +58,7 @@ public sealed class JiraDiscovery
     private readonly TimeProvider _clock;
     private readonly TextWriter _notices;
 
-    /// <param name="clock">Times the waits Jira asks for when it limits the rate of requests.</param>
+    /// <param name="clock">Times the waits before a failed request is sent again, and how long a failed request took (see <see cref="JiraClient"/>).</param>
     /// <param name="notices">Where each such wait is announced: standard error.</param>
     public JiraDiscovery(HttpMessageHandler handler, Uri siteUrl, long boardId, ISecretStore secrets, TimeProvider clock, TextWriter notices)
     {

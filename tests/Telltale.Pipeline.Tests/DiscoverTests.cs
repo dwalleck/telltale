@@ -959,8 +959,8 @@ public class DiscoverTests
 
         await Assert.That(exit).IsEqualTo(1);
 
-        // A dropped connection is tried again, so the one request was sent more than once.
-        await Assert.That(pipeline.Jira.Handler.Requests.Select(request => request.Path).Distinct()).IsEquivalentTo(["/tenant/rest/api/3/status"]);
+        // The request went to the tenant's path. It was sent once: Jira had not answered yet, so a failed connection is taken for a setting.
+        await Assert.That(pipeline.Jira.Handler.Requests.Select(request => request.Path)).IsEquivalentTo(["/tenant/rest/api/3/status"]);
     }
 
     [Test]
@@ -1196,7 +1196,7 @@ public class DiscoverTests
         var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
 
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo((how == "timeout" ? JiraNotices.EveryRetryAfterNoAnswer("GET rest/api/3/status") : "") + FirstCallFailed + how switch
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(FirstCallFailed + how switch
         {
             "proxy authentication" => "The proxy asked for authentication (407) on GET rest/api/3/status, so the request never reached Jira. "
                 + "Check the system proxy settings and that this account may use the proxy.\n",
@@ -1238,7 +1238,7 @@ public class DiscoverTests
 
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            JiraNotices.EveryRetry("Jira answered 500 (InternalServerError)", "GET rest/api/3/status") + "Jira answered 500 (InternalServerError) to GET rest/api/3/status.\n");
+            JiraNotices.EveryRetry("Jira answered 500 (InternalServerError)", "GET rest/api/3/status") + JiraNotices.AfterEveryRetry("Jira answered 500 (InternalServerError) to GET rest/api/3/status", 5));
     }
 
     [Test]

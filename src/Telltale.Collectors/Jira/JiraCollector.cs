@@ -69,7 +69,7 @@ public sealed class JiraCollector
     private readonly TextWriter _notices;
 
     /// <param name="secrets">The Jira account's email and API token, and the salt assignees are hashed with.</param>
-    /// <param name="clock">Times the waits Jira asks for when it limits the rate of requests.</param>
+    /// <param name="clock">Times the waits before a failed request is sent again, and how long a failed request took (see <see cref="JiraClient"/>).</param>
     /// <param name="notices">Where each such wait is announced: standard error.</param>
     public JiraCollector(HttpMessageHandler handler, JiraConfig config, CollectionSecrets secrets, TimeProvider clock, TextWriter notices)
     {

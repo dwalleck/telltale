@@ -149,7 +149,7 @@ public class IncrementalSyncTests
         await Assert.That(failed).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
             JiraNotices.EveryRetry("Jira answered 500 (InternalServerError)", "POST rest/api/3/changelog/bulkfetch")
-            + "Jira answered 500 (InternalServerError) to POST rest/api/3/changelog/bulkfetch.\n");
+            + JiraNotices.AfterEveryRetry("Jira answered 500 (InternalServerError) to POST rest/api/3/changelog/bulkfetch", 5));
         await Assert.That(pipeline.Jira.SearchAnswers[^1]).IsEquivalentTo(new[] { "FAKE-1", "FAKE-2" });
         await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\nDelivered issues: 5\n");
     }

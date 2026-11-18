@@ -282,8 +282,7 @@ public class RealJiraCollectionTests
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Clock.Waits).IsEquivalentTo(Enumerable.Repeat(TimeSpan.FromSeconds(300), 3));
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).EndsWith(
-            "\nJira is limiting how often it can be asked: it answered 429 (too many requests) to POST rest/api/3/changelog/bulkfetch, "
-            + "and waiting again would bring this command's waits to more than 15 minutes in all. Run the command again later.\n");
+            "\n" + JiraNotices.OutOfTime("Jira is limiting how often it can be asked: it answered 429 (too many requests) to POST rest/api/3/changelog/bulkfetch"));
         await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM issue;")).IsEquivalentTo(new[] { 0L });
     }
 
@@ -367,7 +366,7 @@ public class RealJiraCollectionTests
         await Assert.That(failed).IsEqualTo(1);
         // The request was sent again five times before the run gave up, and each wait was announced.
         await Assert.That(errorOfFailedRun).IsEqualTo(
-            JiraNotices.EveryRetry("Jira answered 500 (InternalServerError)", call) + $"Jira answered 500 (InternalServerError) to {call}.\n");
+            JiraNotices.EveryRetry("Jira answered 500 (InternalServerError)", call) + JiraNotices.AfterEveryRetry($"Jira answered 500 (InternalServerError) to {call}", 5));
         await Assert.That(interrupted.Clock.Waits).IsEquivalentTo(JiraNotices.WaitsOfAPassingFailure, TUnit.Assertions.Enums.CollectionOrdering.Matching);
 
         // The failed run kept nothing of the pages it did get, and no watermark.
@@ -406,17 +405,22 @@ public class RealJiraCollectionTests
     }
 
     [Test]
-    [Arguments("the connection drops", "The connection to Jira failed")]
+    [Arguments("a connection reset", "The connection to Jira failed")]
+    [Arguments("an answer cut off halfway", "The connection to Jira failed")]
+    [Arguments("a refused connection", "The connection to Jira failed")]
+    [Arguments("a proxy that cannot open the tunnel", "The connection to Jira failed")]
+    [Arguments("a reset during the TLS handshake", "The connection to Jira failed")]
     [Arguments("no answer in time", "Jira did not answer in time")]
-    public async Task A_request_that_fails_on_the_way_and_then_succeeds_completes_the_run(string how, string notice)
+    public async Task A_request_that_fails_on_the_way_after_jira_has_answered_once_is_tried_again(string how, string notice)
     {
+        // The status list has been answered, so the proxy and the certificate are known to be right: a failure
+        // on the way to Jira after that is a moment's fault, and a fetch is one batch (owner decision D38).
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.AddSprint41();
         AddDeliveredIssues(pipeline.Jira, count: 3);
         AddTeamAfterTheOthers(pipeline.Jira);
-        pipeline.Jira.Handler.AnswerNext(HttpMethod.Post, "/rest/api/3/search/jql", how == "the connection drops"
-            ? _ => throw new HttpRequestException(HttpRequestError.ConnectionError, "synthetic reset naming a host")
-            : _ => throw new TaskCanceledException("synthetic timeout", new TimeoutException()));
+        var failure = await FailureOnTheWayAsync(how);
+        pipeline.Jira.Handler.AnswerNext(HttpMethod.Post, "/rest/api/3/search/jql", _ => throw failure);
 
         var exit = await pipeline.RunAsync("run", "--sprint", "41");
 
@@ -426,44 +430,194 @@ public class RealJiraCollectionTests
     }
 
     [Test]
-    public async Task A_failure_that_waiting_does_not_change_is_not_tried_again()
+    [Arguments("a connection reset", 5)]
+    [Arguments("an answer cut off halfway", 5)]
+    [Arguments("a refused connection", 5)]
+    [Arguments("no answer in time", 3)]
+    public async Task A_request_that_keeps_failing_on_the_way_is_tried_again_a_set_number_of_times_and_the_run_says_so(string how, int retries)
     {
-        // A refusal is about the request, and a TLS failure is a setting: the run ends at once, as it did before.
-        await using var refused = new PipelineHarness();
-        await using var untrusted = new PipelineHarness();
-        refused.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/status", _ => true, StubHttpHandler.Json("{}", System.Net.HttpStatusCode.Forbidden));
-        untrusted.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/status", _ => true,
-            _ => throw new HttpRequestException(HttpRequestError.SecureConnectionError, "synthetic TLS failure"));
-
-        foreach (var pipeline in new[] { refused, untrusted })
-        {
-            pipeline.Jira.AddSprint41();
-            var exit = await pipeline.RunAsync("run", "--sprint", "41");
-
-            await Assert.That(exit).IsEqualTo(1);
-            await Assert.That(pipeline.Clock.Waits).IsEmpty();
-            await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(1);
-        }
-    }
-
-    [Test]
-    public async Task The_retries_of_one_request_are_counted_together_whatever_their_reasons()
-    {
-        // Five rate-limited answers use up the five retries a request gets, so the 503 after them ends the run
-        // and is not given retries of its own.
         await using var pipeline = new PipelineHarness();
         pipeline.Jira.AddSprint41();
         AddDeliveredIssues(pipeline.Jira, count: 3);
-        pipeline.Jira.Handler.AnswerNext(HttpMethod.Post, "/rest/api/3/search/jql",
-            StubHttpHandler.RateLimited(2), StubHttpHandler.RateLimited(2), StubHttpHandler.RateLimited(2), StubHttpHandler.RateLimited(2), StubHttpHandler.RateLimited(2),
-            StubHttpHandler.Json("{}", System.Net.HttpStatusCode.ServiceUnavailable));
+        var failure = await FailureOnTheWayAsync(how);
+        pipeline.Jira.Handler.Override(HttpMethod.Post, "/rest/api/3/search/jql", _ => true, _ => throw failure);
 
         var exit = await pipeline.RunAsync("backfill");
 
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).EndsWith("\nJira answered 503 (ServiceUnavailable) to POST rest/api/3/search/jql.\n");
-        await Assert.That(pipeline.Clock.Waits).IsEquivalentTo(Enumerable.Repeat(TimeSpan.FromSeconds(2), 5));
+        var waits = JiraNotices.WaitsOfAPassingFailure.Take(retries).ToArray();
+        await Assert.That(pipeline.Clock.Waits).IsEquivalentTo(waits, TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(pipeline.Jira.Handler.Requests.Count(request => request.Path == "/rest/api/3/search/jql")).IsEqualTo(1 + retries);
+        var notice = how == "no answer in time" ? "Jira did not answer in time" : "The connection to Jira failed";
+        var failed = how == "no answer in time" ? "Jira did not answer POST rest/api/3/search/jql in time" : "The connection to Jira failed on POST rest/api/3/search/jql";
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            string.Concat(waits.Select(wait => $"{notice}. Waiting {wait.TotalSeconds:0} seconds before asking again (POST rest/api/3/search/jql).\n"))
+            + JiraNotices.AfterEveryRetry(failed, retries));
     }
+
+    [Test]
+    [Arguments("a forbidden answer")]
+    [Arguments("a TLS failure")]
+    [Arguments("a refused connection")]
+    [Arguments("a proxy that cannot open the tunnel")]
+    [Arguments("a connection reset")]
+    [Arguments("no answer in time")]
+    public async Task A_failure_on_the_first_request_of_a_command_is_not_tried_again(string how)
+    {
+        // A refusal is about the request. A failure on the way before Jira has answered anything is most likely
+        // a setting (a proxy on a closed port, outbound traffic blocked, the certificate), and waiting does not
+        // change a setting: the run ends at once.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.AddSprint41();
+        if (how == "a forbidden answer")
+        {
+            pipeline.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/status", _ => true, StubHttpHandler.Json("{}", System.Net.HttpStatusCode.Forbidden));
+        }
+        else
+        {
+            var failure = how == "a TLS failure"
+                ? new HttpRequestException(HttpRequestError.SecureConnectionError, "synthetic TLS failure")
+                : await FailureOnTheWayAsync(how);
+            pipeline.Jira.Handler.Override(HttpMethod.Get, "/rest/api/3/status", _ => true, _ => throw failure);
+        }
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Clock.Waits).IsEmpty();
+        await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).DoesNotContain("Waiting");
+    }
+
+    [Test]
+    public async Task An_answer_that_jira_could_not_serve_the_request_now_is_retried_after_the_wait_it_names()
+    {
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.AddSprint41();
+        AddDeliveredIssues(pipeline.Jira, count: 3);
+        AddTeamAfterTheOthers(pipeline.Jira);
+        pipeline.Jira.Handler.AnswerNext(HttpMethod.Post, "/rest/api/3/search/jql", Unavailable("60"));
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(pipeline.Clock.Waits).IsEquivalentTo(new[] { TimeSpan.FromSeconds(60) });
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira answered 503 (ServiceUnavailable). Waiting 60 seconds before asking again (POST rest/api/3/search/jql).\n");
+    }
+
+    [Test]
+    [Arguments("301")]
+    [Arguments("synthetic text quoting Fake Person One")]
+    public async Task An_answer_that_jira_could_not_serve_the_request_now_and_names_a_wait_too_long_or_unreadable_ends_the_run(string retryAfter)
+    {
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.AddSprint41();
+        AddDeliveredIssues(pipeline.Jira, count: 1);
+        pipeline.Jira.Handler.AnswerNext(HttpMethod.Post, "/rest/api/3/search/jql", Unavailable(retryAfter));
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Clock.Waits).IsEmpty();
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira answered 503 (ServiceUnavailable) to POST rest/api/3/search/jql and asked for a wait of more than 5 minutes, or one this tool cannot read. Run the command again later.\n");
+    }
+
+    [Test]
+    public async Task Rate_limits_and_passing_failures_of_one_request_are_counted_apart()
+    {
+        // Five 503s use up the retries for passing failures, and a 429 after them is still waited out as a rate
+        // limit. On the other request, four 429s neither shorten the retries of the 502 that follows nor lengthen its wait.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.AddSprint41();
+        AddDeliveredIssues(pipeline.Jira, count: 3);
+        AddTeamAfterTheOthers(pipeline.Jira);
+        var unavailable = StubHttpHandler.Json("{}", System.Net.HttpStatusCode.ServiceUnavailable);
+        pipeline.Jira.Handler
+            .AnswerNext(HttpMethod.Post, "/rest/api/3/search/jql", unavailable, unavailable, unavailable, unavailable, unavailable, StubHttpHandler.RateLimited(2))
+            .AnswerNext(HttpMethod.Post, "/rest/api/3/changelog/bulkfetch",
+                StubHttpHandler.RateLimited(1), StubHttpHandler.RateLimited(1), StubHttpHandler.RateLimited(1), StubHttpHandler.RateLimited(1),
+                StubHttpHandler.Json("{}", System.Net.HttpStatusCode.BadGateway));
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "41");
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(pipeline.Clock.Waits.Select(wait => (int)wait.TotalSeconds)).IsEquivalentTo(
+            new[] { 5, 10, 20, 40, 80, 2, 1, 1, 1, 1, 5 }, TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(pipeline.Error.ToString()).DoesNotContain("again after");
+    }
+
+    [Test]
+    public async Task The_fifteen_minutes_a_command_may_spend_on_failures_count_the_failed_requests_as_well_as_the_waits()
+    {
+        // Each try of the search takes nearly five minutes before a gateway gives up on it. Two tries and their
+        // waits make 595 seconds; a third try brings the command to 885, and its 20-second wait would pass 900.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.AddSprint41();
+        AddDeliveredIssues(pipeline.Jira, count: 1);
+        pipeline.Jira.Handler.Override(HttpMethod.Post, "/rest/api/3/search/jql", _ => true, _ =>
+        {
+            pipeline.Clock.Advance(TimeSpan.FromSeconds(290));
+            return new HttpResponseMessage(System.Net.HttpStatusCode.GatewayTimeout) { Content = new StringContent("{}") };
+        });
+
+        var exit = await pipeline.RunAsync("backfill");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Clock.Waits).IsEquivalentTo(new[] { TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10) }, TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Jira answered 504 (GatewayTimeout). Waiting 5 seconds before asking again (POST rest/api/3/search/jql).\n"
+            + "Jira answered 504 (GatewayTimeout). Waiting 10 seconds before asking again (POST rest/api/3/search/jql).\n"
+            + JiraNotices.OutOfTime("Jira answered 504 (GatewayTimeout) to POST rest/api/3/search/jql"));
+    }
+
+    [Test]
+    public async Task Waits_for_passing_failures_count_towards_the_fifteen_minutes()
+    {
+        // Three requests are answered 503 with a wait of five minutes. Three waits make fifteen minutes; the fourth is not started.
+        await using var pipeline = new PipelineHarness();
+        pipeline.Jira.AddSprint41();
+        AddDeliveredIssues(pipeline.Jira, count: 1);
+        pipeline.Jira.Handler
+            .AnswerNext(HttpMethod.Get, $"/rest/agile/1.0/board/{FakeJira.BoardId}/sprint", Unavailable("300"))
+            .AnswerNext(HttpMethod.Post, "/rest/api/3/search/jql", Unavailable("300"))
+            .AnswerNext(HttpMethod.Post, "/rest/api/3/changelog/bulkfetch", Unavailable("300"), Unavailable("300"));
+
+        var exit = await pipeline.RunAsync("backfill");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Clock.Waits).IsEquivalentTo(Enumerable.Repeat(TimeSpan.FromSeconds(300), 3));
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).EndsWith(
+            "\n" + JiraNotices.OutOfTime("Jira answered 503 (ServiceUnavailable) to POST rest/api/3/changelog/bulkfetch"));
+    }
+
+    /// <summary>A 503 whose Retry-After header holds <paramref name="retryAfter"/>, and a body that must never be quoted.</summary>
+    private static Func<StubRequest, HttpResponseMessage> Unavailable(string retryAfter) => _ =>
+    {
+        var response = new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable)
+        {
+            Content = new StringContent("""{"errorMessages":["synthetic outage quoting Fake Person One"]}"""),
+        };
+        response.Headers.TryAddWithoutValidation("Retry-After", retryAfter);
+        return response;
+    };
+
+    /// <summary>
+    /// The exception for a failure on the way to Jira. A reset and an answer cut off are caught from a real
+    /// socket, because what .NET raises for them is not what one would guess (a reset is <see cref="HttpRequestError.Unknown"/>).
+    /// </summary>
+    private static async Task<Exception> FailureOnTheWayAsync(string how) => how switch
+    {
+        "a connection reset" => await RealTransportFailures.ConnectionResetAsync(),
+        "an answer cut off halfway" => await RealTransportFailures.ClosedHalfwayThroughTheAnswerAsync(),
+        "a refused connection" => new HttpRequestException(HttpRequestError.ConnectionError, "synthetic refusal naming a host",
+            new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.ConnectionRefused)),
+        "a proxy that cannot open the tunnel" => new HttpRequestException(HttpRequestError.ProxyTunnelError, "synthetic: the proxy answered 502 to CONNECT"),
+        "a reset during the TLS handshake" => new HttpRequestException(HttpRequestError.SecureConnectionError, "synthetic reset during the handshake", new IOException("synthetic")),
+        "no answer in time" => new TaskCanceledException("synthetic timeout", new TimeoutException()),
+        _ => throw new ArgumentOutOfRangeException(nameof(how), how, null),
+    };
 
     [Test]
     public async Task Old_history_whose_items_carry_no_field_id_and_null_values_still_counts()

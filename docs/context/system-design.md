@@ -58,11 +58,11 @@ tests/
 
 The configuration file is `config/telltale.json` in the folder the tool is run from (no secrets; the holidays are a setting in it). It is not in the repository.
 
-CLI commands: `discover`, `secrets set`, `backfill`, `sync`, `derive`, `report`, `query`, and `run` (sync → derive → report); `publish` is planned. `discover` is run once on the work laptop and writes `config/telltale.json` from the live systems: Jira site, board, status IDs and categories, resolution IDs, Sprint and story point field IDs.
+CLI commands: `discover`, `secrets set`, `backfill`, `sync`, `derive`, `report`, `query`, and `run` (sync → derive → report); `publish` is planned. `discover` is run on the work laptop and writes `config/telltale.json` from the live systems: Jira site, board, project keys, a proposed role for each status on the board (taken from its Jira category), and the Sprint and story point field IDs. It lists the site's resolutions but cannot tell which mean abandoned, so it writes `abandonedResolutionIds` empty and the owner fills it in. A rerun keeps what the file already says: once the file has roles, a status new to the board is listed for the owner to give a role, and none is written for it.
 
 Libraries: `HttpClient` (no Jira SDK, ADR-0004), `Microsoft.Data.Sqlite` + Dapper behind the repository layer, System.CommandLine for the CLI; plain `git` commands and ScottPlot for PNG charts are planned.
 
-Secrets sit behind one secret-store interface: Windows Credential Manager on the work laptop (a DPAPI file if policy blocks it), environment variables for development.
+Secrets sit behind one secret-store interface: Windows Credential Manager on the work laptop, environment variables for development. A DPAPI-protected file, for a laptop whose policy blocks Credential Manager, is planned.
 
 Development happens off the work laptop against synthetic fixtures only. Real Jira, GitHub and Confluence are reached only from the work laptop.
 
@@ -112,7 +112,7 @@ Behaviors to preserve:
 
 **Built.**
 
-The board's statuses, in order: New, Approved, Committed (not started; development cannot start until Committed), Development, Review, QE, Blocked, Done, Shipped. Statuses are matched by ID; the IDs, the abandoned resolution IDs ("Won't Do" is expected, to be confirmed) and any category overrides are configuration written by `discover`.
+The board's statuses, in order: New, Approved, Committed (not started; development cannot start until Committed), Development, Review, QE, Blocked, Done, Shipped. Statuses are matched by ID, and each has a role (not started, work, blocked, done) in `statusRoles`: `discover` proposes one from the status's Jira category, and the owner corrects it in the file. There is no other override of a Jira category. The abandoned resolution IDs ("Won't Do" is expected, to be confirmed) are the owner's to fill in: `discover` writes the list empty and never changes it, and while it is empty an issue closed as abandoned in a done status counts as delivered.
 
 - Cycle start: first entry into Development, or into Review or QE if Development was skipped. Blocked never starts a cycle, but time in Blocked after the start counts. Jira's history does not say which stage a blocked issue was in, so Blocked time is reported as Blocked.
 - Cycle end: last entry into the done category, which is Done. Done → Shipped is a move inside the category and does not move the end. Time in Shipped is kept in status intervals for later use and is not analysed now.
