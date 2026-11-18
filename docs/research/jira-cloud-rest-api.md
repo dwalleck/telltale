@@ -463,7 +463,7 @@ Nothing here was verified against a real site; every Jira shape below stays `unv
 - The search asks for `maxResults` 100 (the reported cap with named fields), bulkfetch for 10000.
 - An issue met on two search pages is kept once, as last seen.
 - The sprint list is read with `?startAt=N` and no `maxResults`. A page is the last when `isLast` is true; without `isLast`, when `startAt + values.length >= total`; with neither, at the first empty page. A page whose `startAt` differs from the one asked for, an empty page that says more follow, or a page holding only sprints already given stops the run.
-- 429: `Retry-After` as seconds or as an HTTP date is waited out (at least 1 s, at most 5 min; longer ends the run); without a readable header the waits are 5, 10, 20, 40, 80 s. Five retries per request. 503 is not retried. The HTTP-date form is exercised by a test now (note 06 had it `unverified`).
+- 429: `Retry-After` as seconds or as an HTTP date is waited out (at least 1 s, at most 5 min; longer ends the run); without a readable header the waits are 5, 10, 20, 40, 80 s. Five retries per request. 503 is not retried (superseded: see "Changed on 2026-11-17" below). The HTTP-date form is exercised by a test now (note 06 had it `unverified`).
 - Changelog items without `fieldId` (`MEM`: old history on real sites) are read by `field`: `status` with `fieldtype` other than `custom` is the status field; `Sprint` is the Sprint field. A site whose Sprint field was renamed loses the Sprint items of such history. Whether bulkfetch's `fieldIds` filter returns items without a field ID at all is unknown; the fake returns them.
 
 Changed by ticket 10's review round (2026-11-12), all still `unverified` against a real site:
@@ -473,3 +473,12 @@ Changed by ticket 10's review round (2026-11-12), all still `unverified` against
 - Sprint list: `isLast` and `total` must agree when both are given, and with `total` given the distinct sprints read must equal it; otherwise the run stops.
 - Items without `fieldId` are read only as (`field` "status", `fieldtype` "jira") and (`field` "Sprint", `fieldtype` "custom"). A status change's `from` and `to` must be digits or empty.
 - `Retry-After` present but unreadable ends the run. Each wait is announced on standard error; one command waits at most 15 minutes in all.
+
+## Changed on 2026-11-17: what the collector does with failures that can pass by themselves
+
+Replaces the 503 and 15-minute sentences above. Jira's side is still `unverified`; the .NET side was observed on real sockets on the work laptop and is pinned by `RealTransportFailuresTests`.
+
+- A 408, 500, 502, 503 or 504 is sent again up to five times. A `Retry-After` on it is honoured as on a 429 (at least 1 s, at most 5 min, unreadable ends the run; finding above: "some transient 503s may also carry `Retry-After`"); without one the waits are 5, 10, 20, 40, 80 s.
+- A failure on the way to Jira is sent again the same way, but only once Jira has answered some request of the same command: before that it is most likely a setting (a proxy on a closed port, outbound traffic blocked, the certificate) and is reported at once (owner decision D111). The failures retried are: no connection (`ConnectionError`), a name that did not resolve, the proxy refusing the tunnel (`ProxyTunnelError`, which a proxy gives for a 502 to 504 answer to CONNECT), a TLS handshake cut off (`SecureConnectionError`), an answer that ended early (`ResponseEnded`), and a reset. **On .NET 11 a TCP reset is `HttpRequestError.Unknown` with an `IOException` inside, not `ConnectionError`.** No answer in time is retried three times, on the same condition.
+- A request's rate-limit retries and its retries for passing failures are counted apart, each with its own limit and its own doubling.
+- The 15 minutes bound everything a command spends on failures: the waits and the time each failed request took (a timeout takes HttpClient's whole 100 s). A run that reaches a limit says which, and ends "Run the command again later."

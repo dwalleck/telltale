@@ -161,7 +161,7 @@ public class BackfillRebuildTests
     }
 
     [Test]
-    [Arguments("the fetch", "Jira answered 500 (InternalServerError) to POST rest/api/3/changelog/bulkfetch.")]
+    [Arguments("the fetch", "Jira answered 500 (InternalServerError) to POST rest/api/3/changelog/bulkfetch again after 5 retries. Run the command again later.")]
     [Arguments("the write", "synthetic write failure")]
     public async Task A_backfill_that_fails_part_way_leaves_the_store_and_the_report_as_they_were_and_run_again_ends_as_an_uninterrupted_one(string whatFails, string failure)
     {
@@ -207,9 +207,10 @@ public class BackfillRebuildTests
         await Assert.That(await interrupted.ReadReportAsync(42)).Contains("\nDelivered issues: 4\n");
         await Assert.That(storeAfterFailure).IsEqualTo(storeBefore);
         await Assert.That(reportAfterFailure).IsEqualTo(reportBefore);
-        var store = await interrupted.ReadStoreContentAsync();
+        // Without the as-of time: the waits before the failed fetch's retries moved the interrupted run's clock.
+        var store = await interrupted.ReadStoreContentAsync(withoutAsOf: true);
         await Assert.That(store).DoesNotContain(interrupted.Jira.StoredRowOf("FAKE-2"));
-        await Assert.That(store).IsEqualTo(await uninterrupted.ReadStoreContentAsync());
+        await Assert.That(store).IsEqualTo(await uninterrupted.ReadStoreContentAsync(withoutAsOf: true));
 
         static void BuildBoard(FakeJira jira)
         {

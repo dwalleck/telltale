@@ -2,9 +2,11 @@
 
 How the tool collects, stores and reports the data. Decisions with real trade-offs are ADRs in `docs/adr/`; this file holds the working design and the source-system details an implementer needs.
 
+**Built and planned.** Only the Jira path is built: the Jira collector, the SQLite store, derive, the per-sprint markdown report and the `query` command. Each section below is marked **Built** (it describes code in the repository) or **Planned** (design for code that does not exist yet; check the repository before relying on it). Last checked against the code on 2026-11-15.
+
 ## Shape
 
-Four collectors feed one SQLite store; reports read only from its metric views.
+**Built for Jira; the other three collectors and the Confluence page are planned.** The design is four collectors feeding one SQLite store; reports read only from its metric views.
 
 ```
 Jira Cloud  ─┐
@@ -13,9 +15,11 @@ Repo clones ─┼─► sync job ─► SQLite ─┼─ derived tables (rebuil
 Session logs─┘                 └─ metric views ─► Confluence page, ad hoc SQL
 ```
 
-Every collector keeps a watermark, fetches only what changed since it, and upserts by the source system's own IDs, so a rerun or a missed run of `sync` is harmless. A sync never removes a row, so work deleted in the source stays until the next `backfill`. `backfill` is the exception to upserting: it fetches everything from the configured start date and replaces the stored issues, changes and sprints with what it fetched, in one transaction. It prints how many of each the store held before and holds now, and refuses to replace stored issues or sprints with none unless run with `--allow-empty`. Statuses are reference data and are only added and updated.
+Every collector keeps a watermark, fetches only what changed since it, and upserts by the source system's own IDs, so a rerun or a missed run of `sync` is harmless. A sync removes only an issue that has left scope (one converted to an epic or a sub-task, owner decision D13); work deleted in the source stays until the next `backfill`. `backfill` is the exception to upserting: it fetches everything from the configured start date and replaces the stored issues, changes and sprints with what it fetched, in one transaction. It prints how many of each the store held before and holds now, and refuses to replace stored issues or sprints with none unless run with `--allow-empty`. Statuses are reference data and are only added and updated.
 
 ## Host and operations (laptop phase)
+
+**Built**, except the AWS line, which is planned.
 
 - Runs on demand or via Task Scheduler with "run as soon as possible after a missed start". A missed run costs nothing; what matters is a full run before each sprint's report. Corporate tooling may restrict scheduled tasks, so manual runs must be first-class.
 - First backfill is large: run once, plugged in, overnight. Afterwards runs take minutes.
@@ -24,49 +28,65 @@ Every collector keeps a watermark, fetches only what changed since it, and upser
 
 ## Project structure
 
+**Partly built.** Lines marked `(planned)` name projects, folders or features that do not exist yet.
+
 ```
 src/
   Telltale.Core/            no dependencies; model, interval math, business-day calendar,
-                           stats (median, P85, Monte Carlo), identity hashing, abstractions
-  Telltale.Collectors/      Jira/, GitHub/, Git/, Sessions/ (one project, folder per source)
+                           identity hashing, abstractions; Monte Carlo (planned). Medians and P85s
+                           are computed in the SQL metric views, not here
+  Telltale.Collectors/      Jira/; GitHub/, Git/, Sessions/ (planned) (one project, folder per source)
   Telltale.Storage.Sqlite/  migrations (raw, derived, views), upserts, watermarks,
                            derived rebuild, metric views with minimum group size
-  Telltale.Reporting/       queries over views, charts (PNG), Confluence page builder + publisher
+  Telltale.Reporting/       queries over views, the markdown sprint report; charts (PNG) and the
+                           Confluence page builder + publisher (planned)
   Telltale.Pipeline/        the steps (collect, derive, report, query) and every rule about when one may
                            run: staleness, foreign settings, the salt, the range the store covers
-  Telltale.Contracts/       session summary JSON schema, versioned
+  Telltale.Contracts/       (planned) session summary JSON schema, versioned
   Telltale.Cli/             composition root; the only laptop-specific project
-tools/
+tools/                     (planned)
   SessionExporter/         single-file exe participants run
   ReplayBench/             later; writes results into the same store
-tests/                     Core tests carry most of the weight; collectors use recorded,
-                           sanitized responses; storage uses in-memory SQLite
-config/                    appsettings.json (no secrets), holidays.json
+eng/
+  SeedStore/               fills a store from the tests' fake Jira, for trying the published executable
+tests/
+  Telltale.Core.Tests/     the interval, calendar and workflow rules, directly
+  Telltale.Pipeline.Tests/ most of the tests: the real command tree run against a fake Jira that answers
+                           with invented data in Atlassian's documented shapes (no recorded responses),
+                           and a real SQLite file in a temporary folder
 ```
 
-CLI commands: `discover`, `secrets set`, `backfill`, `sync`, `derive`, `report`, `publish`, and `run` (sync → derive → report). `discover` is run once on the work laptop and writes `appsettings.json` from the live systems: Jira site, board, status IDs and categories, resolution IDs, Sprint and story point field IDs.
+The configuration file is `config/telltale.json` in the folder the tool is run from (no secrets; the holidays are a setting in it). It is not in the repository.
 
-Libraries: `HttpClient` (no Jira SDK, ADR-0004), `Microsoft.Data.Sqlite` + Dapper behind the repository layer, System.CommandLine for the CLI, plain `git` commands, ScottPlot for PNG charts.
+CLI commands: `discover`, `secrets set`, `backfill`, `sync`, `derive`, `report`, `query`, and `run` (sync → derive → report); `publish` is planned. `discover` is run on the work laptop and writes `config/telltale.json` from the live systems: Jira site, board, project keys, a proposed role for each status on the board (taken from its Jira category), and the Sprint and story point field IDs. It lists the site's resolutions but cannot tell which mean abandoned, so it writes `abandonedResolutionIds` empty and the owner fills it in. A rerun keeps what the file already says: once the file has roles, a status new to the board is listed for the owner to give a role, and none is written for it.
 
-Secrets sit behind one secret-store interface: Windows Credential Manager on the work laptop (a DPAPI file if policy blocks it), environment variables for development.
+Libraries: `HttpClient` (no Jira SDK, ADR-0004), `Microsoft.Data.Sqlite` + Dapper behind the repository layer, System.CommandLine for the CLI; plain `git` commands and ScottPlot for PNG charts are planned.
+
+Secrets sit behind one secret-store interface: Windows Credential Manager on the work laptop, environment variables for development. A DPAPI-protected file, for a laptop whose policy blocks Credential Manager, is planned.
 
 Development happens off the work laptop against synthetic fixtures only. Real Jira, GitHub and Confluence are reached only from the work laptop.
 
 ## Where metrics are computed
 
+**Built.**
+
 C# computes per-issue cycle times and per-sprint time in status into derived tables on every run, so business days have one implementation. The SQL metric views do only the medians, P85s (ranked with window functions; SQLite has no percentile function) and the group-size guards.
 
-An issue counts toward its assignee at the time of the sync, hashed; assignee history is not collected. Unassigned issues count toward nobody.
+An issue counts toward its assignee at the time of the sync, hashed; assignee history is not collected, so this holds for past sprints too (owner decision D82). Unassigned issues count toward nobody.
 
 Changelog anomalies are logged by derive (and so by run), the step that builds each issue's history, and each report's footer states how many issues had any.
 
 ## First report
 
+**Built.** The README describes the report as it is now.
+
 One markdown file per sprint, whole-team: delivered issue count; median and P85 cycle time by point bucket in business and calendar days; median time in each status. A baseline column is added once the baseline sprint list is pinned in config.
 
 ## Already built: Telltale.Core
 
-Interval math (`Interval`), business-day calendar (`BusinessCalendar`), status timelines (`StatusTimeline`), sprint membership (`SprintMembership`), and per-sprint time in status (`TimeInStatus`), with 24 TUnit tests on .NET 11.
+**Built.**
+
+Interval math (`Interval`), business-day calendar (`BusinessCalendar`), status timelines (`StatusTimeline`), sprint membership (`SprintMembership`), and per-sprint time in status (`TimeInStatus`), with TUnit tests on .NET 11 in `tests/Telltale.Core.Tests`.
 
 Behaviors to preserve:
 
@@ -78,7 +98,9 @@ Behaviors to preserve:
 
 ## Jira collector
 
-- Changed issues: JQL `updated >= "<watermark>"`, overlapping the window by a few minutes (JQL `updated` has minute precision; upserts make overlap harmless).
+**Built**, except worklogs and the `historyMetadata` reading in the last two points, which are not collected. `docs/research/jira-cloud-rest-api.md` holds the detail, and ticket 13 the checks against a real site that are still open.
+
+- Changed issues: JQL `updated >= "<watermark>"`, overlapping the window by 48 hours (owner decision D26: JQL reads the quoted time in the account's time zone, and account time zones span UTC-12 to UTC+14, and the search index can lag; upserts make overlap harmless).
 - Changelogs: `POST /rest/api/3/changelog/bulkfetch` with `issueIdsOrKeys` (≤1000), `fieldIds` (status, the Sprint custom field and the story point field, ≤10), `maxResults` (≤10000), `nextPageToken`; stop when the token is null. Response: `issueChangeLogs[]` of `{ issueId, changeHistories[] }`; each history has `id`, `created`, `author`, `historyMetadata`, `items[]` with `field`, `fieldId`, `fieldtype`, `from`, `fromString`, `to`, `toString`. Grouped by numeric issue ID, not key.
 - Changelog items: `from`/`to`/`fromString`/`toString` can be null; `fieldId` can be missing on old history (fall back to `field`); `fieldtype` is `jira` or `custom`; user fields may carry `tmpFromAccountId`/`tmpToAccountId`. Sprint items hold comma-separated sprint IDs.
 - `created` timestamps use `+0000` (no colon) offsets; parse with an explicit format.
@@ -88,7 +110,9 @@ Behaviors to preserve:
 
 ### Workflow mapping
 
-The board's statuses, in order: New, Approved, Committed (not started; development cannot start until Committed), Development, Review, QE, Blocked, Done, Shipped. Statuses are matched by ID; the IDs, the abandoned resolution IDs ("Won't Do" is expected, to be confirmed) and any category overrides are configuration written by `discover`.
+**Built.**
+
+The board's statuses, in order: New, Approved, Committed (not started; development cannot start until Committed), Development, Review, QE, Blocked, Done, Shipped. Statuses are matched by ID, and each has a role (not started, work, blocked, done) in `statusRoles`: `discover` proposes one from the status's Jira category, and the owner corrects it in the file. There is no other override of a Jira category. The abandoned resolution IDs ("Won't Do" is expected, to be confirmed) are the owner's to fill in: `discover` writes the list empty and never changes it, and while it is empty an issue closed as abandoned in a done status counts as delivered.
 
 - Cycle start: first entry into Development, or into Review or QE if Development was skipped. Blocked never starts a cycle, but time in Blocked after the start counts. Jira's history does not say which stage a blocked issue was in, so Blocked time is reported as Blocked.
 - Cycle end: last entry into the done category, which is Done. Done → Shipped is a move inside the category and does not move the end. Time in Shipped is kept in status intervals for later use and is not analysed now.
@@ -99,6 +123,8 @@ The board's statuses, in order: New, Approved, Committed (not started; developme
 - One team time zone and one holiday list.
 
 ## GitHub collector
+
+**Planned.**
 
 GraphQL, one query per PR (reviews, review threads with comments, timeline items, size) instead of 4–5 REST calls per PR.
 
@@ -111,9 +137,13 @@ GraphQL, one query per PR (reviews, review threads with comments, timeline items
 
 ## Git collector
 
+**Planned.**
+
 From a local clone: reverts (PR titles / commit messages starting "Revert"), and rework (lines changed again within three weeks of merge) via `git log` / `git blame`. Not practical through the API.
 
 ## Session exporter and importer
+
+**Planned.**
 
 The owner already has a session export script that participants will run; its output becomes the session summary format if it meets ADR-0005 and records the branch at session time and explicitly invoked skill names. The first ticket of the sessions spec brings its field list and one sanitized sample into the repo, and runs one throwaway Kiro session on the work laptop to check what is stored. Kiro (CLI 3.1.0) keeps sessions in `data.sqlite3` or under `~/.kiro/sessions` depending on the agent engine, does not store the git branch, has no confirmed stored record of skill invocations or per-session credits, and auto-deletes old sessions.
 
@@ -123,8 +153,12 @@ As originally sketched: participants run a small exporter that reads local Kiro 
 
 ## Reporting
 
+**Reading only from metric views is built; the Confluence page and the charts are planned.**
+
 Read only from metric views. Build the Confluence page in storage format and update it through the REST API. Charts are PNGs rendered by the tool. Layout: `confluence-page.md`.
 
 ## Forecasting
+
+**Planned.**
 
 Service level expectation from cycle time percentiles; aging work in progress (in-progress items compared with the SLE, also per status); Monte Carlo on daily or weekly throughput (10,000 runs, items not points), simulated in business days and converted to calendar dates. Little's Law for explanation only.

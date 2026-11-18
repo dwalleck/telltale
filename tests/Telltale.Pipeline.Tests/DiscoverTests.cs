@@ -958,6 +958,8 @@ public class DiscoverTests
         var exit = await pipeline.RunWithFilesAsTheyAreAsync(args);
 
         await Assert.That(exit).IsEqualTo(1);
+
+        // The request went to the tenant's path. It was sent once: Jira had not answered yet, so a failed connection is taken for a setting.
         await Assert.That(pipeline.Jira.Handler.Requests.Select(request => request.Path)).IsEquivalentTo(["/tenant/rest/api/3/status"]);
     }
 
@@ -1235,7 +1237,8 @@ public class DiscoverTests
         var exit = await pipeline.RunWithFilesAsTheyAreAsync(FirstDiscover);
 
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo("Jira answered 500 (InternalServerError) to GET rest/api/3/status.\n");
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            JiraNotices.EveryRetry("Jira answered 500 (InternalServerError)", "GET rest/api/3/status") + JiraNotices.AfterEveryRetry("Jira answered 500 (InternalServerError) to GET rest/api/3/status", 5));
     }
 
     [Test]
