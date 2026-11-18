@@ -67,6 +67,21 @@ public class DiscoverReadsTheFileAsRunDoesTests
     }
 
     [Test]
+    public async Task The_position_of_a_fault_counts_characters_as_an_editor_does_not_bytes()
+    {
+        // "é" and "€" are two and three bytes in UTF-8: counted in bytes, the position would be three past the
+        // character an editor shows at the fault. The fault is the bare word on the second line.
+        const string File = "{\n  \"timeZone\": \"Amérique/€\", oops }";
+        var expected = File.Split('\n')[1].IndexOf("oops", StringComparison.Ordinal) + 1;
+        var (discover, run) = await BothAsync(Encoding.UTF8.GetBytes(File));
+
+        var fault = $"it is not JSON the tool can read, and the fault is at line 2, position {expected}";
+        await Assert.That(run.Error).IsEqualTo($"The configuration file {run.Path} is not valid: {fault}.\n");
+        await Assert.That(discover.Error).IsEqualTo(
+            $"The configuration file {discover.Path} cannot be read ({fault}), so it was left as it is. Correct it or move it away, then run discover again.\n");
+    }
+
+    [Test]
     [Arguments("""{ "minimumGroupSize": { "team": "\uD800", "assigneesBehindAFigure": 3 } }""")]
     [Arguments("""{ "minimumGroupSize": "\uD800" }""")]
     [Arguments("""{ "briefVisitThresholds": { "600004": "\uD800" } }""")]

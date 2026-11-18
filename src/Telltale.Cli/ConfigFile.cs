@@ -118,8 +118,8 @@ public static class ConfigFile
     /// </summary>
     /// <param name="NotJsonAt">
     /// The file is not JSON the tool can read, and where the reader stopped: the line and the position in
-    /// that line, each counted from one, the position in bytes. Null for a file that is JSON. Nothing else
-    /// is known of a file that is not.
+    /// that line, each counted from one, the position in characters as an editor counts them, not in bytes.
+    /// Null for a file that is JSON. Nothing else is known of a file that is not.
     /// </param>
     /// <param name="KeyIsNotText">
     /// A key is spelled with an escape for half of a character pair (<c>"\uD800"</c>). No text can hold it, so
@@ -212,10 +212,44 @@ public static class ConfigFile
         catch (JsonException exception)
         {
             // The reader counts lines and bytes from zero. Only the two numbers are taken from the failure.
-            return new KeyFaults { NotJsonAt = ((exception.LineNumber ?? 0) + 1, (exception.BytePositionInLine ?? 0) + 1) };
+            var line = exception.LineNumber ?? 0;
+            return new KeyFaults { NotJsonAt = (line + 1, CharactersBefore(utf8, line, exception.BytePositionInLine ?? 0) + 1) };
         }
 
         return faults;
+    }
+
+    /// <summary>
+    /// How many characters the first <paramref name="bytes"/> bytes of line <paramref name="line"/> (from zero,
+    /// lines ending in a line feed, as the reader counts them) hold. A character is one byte that does not
+    /// continue a UTF-8 sequence, so a letter of two or three bytes counts once, and a byte that is not UTF-8
+    /// counts once as well.
+    /// </summary>
+    private static long CharactersBefore(ReadOnlySpan<byte> utf8, long line, long bytes)
+    {
+        var start = 0;
+        for (var seen = 0L; seen < line; seen++)
+        {
+            var next = utf8[start..].IndexOf((byte)'\n');
+            if (next < 0)
+            {
+                return bytes;
+            }
+
+            start += next + 1;
+        }
+
+        var before = utf8.Slice(start, (int)Math.Min(bytes, utf8.Length - start));
+        var characters = 0L;
+        foreach (var b in before)
+        {
+            if ((b & 0xC0) != 0x80)
+            {
+                characters++;
+            }
+        }
+
+        return characters;
     }
 
     private static bool IsUtf8(ReadOnlySpan<byte> bytes)
