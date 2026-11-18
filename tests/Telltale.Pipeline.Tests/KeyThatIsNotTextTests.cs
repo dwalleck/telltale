@@ -6,7 +6,8 @@ namespace Telltale.Pipeline.Tests;
 /// JSON can spell half of a character pair as a key (<c>"\uD800"</c>), which no text can hold. A configuration
 /// file with such a key, anywhere in it, is refused by every command with one plain line that names the file
 /// and repeats nothing written in it, before anything is fetched or stored; <c>discover</c> says what
-/// <c>run</c> says and leaves the file as it is.
+/// <c>run</c> says and leaves the file as it is. A key with bytes that are not UTF-8 fails in the reader in
+/// the same way and is no text either; it gets a line of its own, because it holds no escape.
 /// </summary>
 public class KeyThatIsNotTextTests
 {
@@ -71,6 +72,31 @@ public class KeyThatIsNotTextTests
         await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(0);
         await Assert.That(await File.ReadAllTextAsync(pipeline.ConfigPath)).IsEqualTo(file);
         await Assert.That((await pipeline.ReadAllFilesAsync()).Keys).IsEquivalentTo(["telltale.json"]);
+    }
+
+    [Test]
+    [MethodDataSource(nameof(EveryCommand))]
+    public async Task A_key_with_bytes_that_are_not_utf8_is_refused_as_what_it_is_and_not_as_an_escape(string command)
+    {
+        // A file saved in a single-byte encoding with an accented letter in a key: the byte 0xE9 alone is not
+        // UTF-8. There is no escape in the file, so the message about an escape would be untrue of it.
+        await using var pipeline = new PipelineHarness();
+        byte[] file = [.. "{ \"caf"u8, 0xE9, .. "\": 1 }"u8];
+        await File.WriteAllBytesAsync(pipeline.ConfigPath, file);
+
+        var exit = await pipeline.RunWithFilesAsTheyAreAsync(command switch
+        {
+            "report" or "run" => [command, "--sprint", "41"],
+            "query" => [command, "SELECT sprint_id FROM delivered_per_sprint;"],
+            _ => [command],
+        });
+
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            $"The configuration file {pipeline.ConfigPath} is not valid: a key holds bytes that are not UTF-8, so it is not text. Save the file as UTF-8.\n");
+        await Assert.That(pipeline.Out.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Jira.Handler.Requests.Count).IsEqualTo(0);
+        await Assert.That(File.Exists(pipeline.DatabasePath)).IsFalse();
     }
 
     [Test]

@@ -74,9 +74,11 @@ public class DiscoverKeyWrittenTwiceTests
     [Test]
     public async Task A_key_written_twice_with_an_escape_in_one_spelling_is_still_one_key_written_twice()
     {
-        // "synthetic-pasted-token" spells the same key: the reader of the file sees one key twice.
+        // "\u0073ynthetic-pasted-token" spells the same key, with an escape for its first letter: the reader of
+        // the file sees one key twice, though the two are not typed alike.
         await using var pipeline = new PipelineHarness();
-        var file = $$"""{ "statusRoles": { "{{Pasted}}": 1, "s{{Pasted[1..]}}": 2 } }""";
+        var file = $$"""{ "statusRoles": { "{{Pasted}}": 1, "\u0073{{Pasted[1..]}}": 2 } }""";
+        await Assert.That(file).Contains("\\u0073ynthetic-pasted-token");
         await File.WriteAllTextAsync(pipeline.ConfigPath, file);
 
         var exit = await pipeline.RunWithFilesAsTheyAreAsync(DiscoverTests.FirstDiscover);

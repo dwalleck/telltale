@@ -506,15 +506,22 @@ internal static class DiscoverCommand
     /// of it is printed, in whatever setting and at whatever depth it is: what was typed as a key could be a
     /// secret pasted into the wrong place. Discover says that a key is written twice, and under which setting
     /// when that setting's name is one the tool knows (owner decision D108). The runtime's own message for
-    /// such a file quotes the key, so it is never passed on. A key that is no text at all is refused as every
-    /// command refuses it.
+    /// such a file quotes the key, so it is never passed on. A file that is not JSON is refused with the line
+    /// and the position of the fault and no text from the file: the runtime's message for it can quote the
+    /// file from the fault to its end (owner decision D110). A key that is no text at all is refused as
+    /// every command refuses it.
     /// </summary>
     private static JsonObject ReadExisting(string text, string path)
     {
         var keys = ConfigFile.FindKeyFaults(Encoding.UTF8.GetBytes(text));
-        if (keys.KeyIsNotText)
+        if (keys.NotJsonAt is { } at)
         {
-            throw RunWouldRefuse(path, ConfigFile.KeyIsNotText(path));
+            throw Unreadable(path, ConfigFile.NotJson(at));
+        }
+
+        if (ConfigFile.RefusalOf(keys, path) is { } refusal)
+        {
+            throw RunWouldRefuse(path, refusal);
         }
 
         try
@@ -526,10 +533,11 @@ internal static class DiscoverCommand
             RequireReadableBriefVisitTreatment(text, path);
             throw Unreadable(path, keys.SettingOfKeyWrittenTwice is { } setting ? $"a key is written twice under {setting}" : "a key is written twice");
         }
-        catch (JsonException exception)
+        catch (JsonException)
         {
-            // Not JSON. The reader's message holds a line, a position and at most the one character it stopped at.
-            throw Unreadable(path, exception.Message, exception);
+            // The walk read the whole file and found nothing, so this is not expected. Whatever the reader
+            // refused, its message is not passed on: it can quote the file.
+            throw Unreadable(path, "it is not JSON the tool can read");
         }
     }
 

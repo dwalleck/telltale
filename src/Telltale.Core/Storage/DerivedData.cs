@@ -202,7 +202,6 @@ public sealed record DerivedSource(
         return System.Text.Json.JsonSerializer.Serialize(minutes);
     }
 
-
     /// <summary><see cref="BriefVisitTreatment"/> when every part is <c>count</c>, which is also what an absent setting means (owner decision D83).</summary>
     public const string BriefVisitsCounted =
         "{\"" + BriefVisitTreatmentSetting.CycleTimeName + "\":\"" + BriefVisitTreatments.Count + "\",\"" + BriefVisitTreatmentSetting.TimeInStatusName + "\":\"" + BriefVisitTreatments.Count + "\"}";
