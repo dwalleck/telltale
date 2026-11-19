@@ -11,7 +11,7 @@ A Jira work item. Identified by its issue key (e.g. PAY-123). On GitHub, team co
 _Avoid_: Ticket (except for agent tickets in `.scratch/`), story, task
 
 **First attributed PR commit**:
-The earliest commit author date on the issue’s earliest-opened attributed pull request. An abandoned attempt counts: work had started, even if a different pull request delivered it. If the first pull request’s commit history is unreadable or incomplete, its earliest author date is unknown. A later attributed pull request can still show that work had started by a known date, but cannot supply the missing first timestamp. This is evidence alongside Jira cycle time, not a replacement for its start.
+For a delivered issue, the earliest commit author date on its earliest-opened attributed pull request that was open by the Jira delivery moment (it may already have closed). A pull request opened after delivery is retained as evidence but cannot supply the comparison timestamp, even if it contains an older commit. An abandoned attempt counts: work had started, even if a different pull request delivered it. If the first pull request’s commit history is unreadable or incomplete, its earliest author date is unknown. A later attributed pull request can still show that work had started by a known date, but cannot supply the missing first timestamp. This is evidence alongside Jira cycle time, not a replacement for its start.
 
 **Status interval**:
 A continuous period an issue spent in one status, identified by status ID.
