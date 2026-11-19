@@ -7,8 +7,11 @@ A delivery metrics tool: it measures how a software team's work flows from ticke
 ### Work and time
 
 **Issue**:
-A Jira work item. Identified by its issue key (e.g. PAY-123), which every branch name carries.
+A Jira work item. Identified by its issue key (e.g. PAY-123). On GitHub, team convention requires the key in both the source branch name and the pull request title. On GitHub and Azure DevOps, an unambiguous key in either the source branch or title, or a Jira link to the specific pull request, is enough to attribute it to the issue. If these sources disagree, the pull request is attributed to neither issue. A shared commit SHA alone identifies a candidate, not an attributed pull request. A key mentioned in a description or commit message may refer to other work.
 _Avoid_: Ticket (except for agent tickets in `.scratch/`), story, task
+
+**First attributed PR commit**:
+The earliest commit author date on the issue’s earliest-opened attributed pull request. An abandoned attempt counts: work had started, even if a different pull request delivered it. This is evidence alongside Jira cycle time, not a replacement for its start.
 
 **Status interval**:
 A continuous period an issue spent in one status, identified by status ID.
