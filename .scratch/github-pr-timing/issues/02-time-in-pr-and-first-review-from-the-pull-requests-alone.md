@@ -32,7 +32,7 @@ It runs on the work laptop. The GitHub half can run now, with the signed-in GitH
 
    Count apart:
    - pull requests completed with no review;
-   - pull requests whose only reviews are from automation (bot or service accounts, Copilot, build validation);
+   - pull requests whose only reviews are from automation (bot or service accounts, Copilot, build validation). On Azure DevOps, the owner confirmed that the designated SonarQube accounts were exclusively automated: exclude every comment and vote from those accounts, regardless of its text. Do not apply the GitHub Ops-group exclusion on Azure DevOps;
    - pull requests whose first review is a comment rather than an approval or a request for changes.
 3. **Per sprint.** Median and 85th percentile per sprint (first code review by review time, time to merge by merge time), in business time and in elapsed time, as the tool reports other measures. Give them per host and combined for the sprints that used both. How many pull requests each figure rests on, and how many distinct authors.
 4. **What links a pull request to an issue.** On GitHub, check both source branch and title before assigning an issue. Count agreement, branch only, title only, differing keys, and neither separately. One unambiguous key in either field suffices when it resolves to an imported issue. If branch and title name different keys, count the PR once under conflicting keys and once in its merge sprint’s PR timing, even if only one key resolves. Attribute neither the PR nor its commit evidence to either issue. Description and commit-message keys are mentions, not fallback assignments. Every merged PR still counts for PR timing. For Azure DevOps, investigate the following classes in order:
@@ -77,4 +77,6 @@ It runs on the work laptop. The GitHub half can run now, with the signed-in GitH
 
 ## Answer
 
-Not started.
+**Observed, GitHub timing (exploratory).** Starting from merged PRs rather than Jira links, paginated reads of reviews and timelines succeeded in the selected closed sprint windows. The work-folder report `notes/github-review-window-results.md` gives elapsed and business-day medians, nearest-rank P85s, contributing PRs and distinct known authors for open-to-merge, ready-to-merge, open-to-first-human-review, ready-to-first-human-review and open-to-first-human-approval. These measure recorded waits, not review effort. Opening can be an inferred ready time; returned-to-draft histories are omitted from ready-based measures. The windows overlap: merges that cannot be assigned uniquely are counted separately. Bot detection cannot rule out automation behind ordinary user accounts.
+
+**Still open.** The run classified branch and title text; it did not resolve candidate keys to imported issues or attribute commit evidence. A later single-repository ADO study read PR histories and searched complete commit lists and source/merge tips independently of issue keys. Shared SHAs can identify a single completed PR, several, or none. In the previously uncorroborated subgroup, expanding the search yielded ambiguous or absent matches, not new unique attributions. Current links and sampled Jira issue changelogs do not establish historical link replacement. Detailed outcomes are in the work folder (`notes/payments-final-coverage.md`). No Jira cycle measure changed.

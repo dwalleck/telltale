@@ -1,0 +1,12 @@
+# 08: Report mixed-host sprints and partial coverage
+
+**What to build:** Show host-specific and combined sprint figures for PRs in configured repositories, making visible which hosts contributed.
+
+**Blocked by:** 04 — Distinguish GitHub code approval from review; 05 — Report ADO review, approval, and merge; 06 — Report sprint timing distributions.
+
+**Status:** ready-for-agent
+
+- [ ] Through the CLI, demonstrate a mixed sprint with unequal host sample sizes where pooling individual waits gives different results from averaging host statistics. Check the combined count, median and nearest-rank P85 for both clocks.
+- [ ] Distinguish hosts not configured or not read, failed reads, and successful reads with no observations. Label partial combined coverage and keep independently known figures available; never turn missing hosts into zero waits.
+- [ ] PR identity includes host, repository and PR number. Repeated records do not inflate totals and number collisions do not collapse distinct PRs.
+- [ ] Check combined and per-host suppression in both report and owner query with configured thresholds and with checks disabled. Do not expose individuals or imply shared repositories contain only team PRs.

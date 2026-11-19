@@ -113,6 +113,12 @@ Both APIs take a repository and PR number, not a live branch. The references do 
 - **Azure DevOps:** Microsoft says retiring a repo in place by renaming and locking its default branch preserves PR records and history, while deletion removes the repo from normal access; the 30-day restore window is not API read availability. GitHub Enterprise Importer can migrate PRs and Git history; a Git-only import is not a PR archive. Ask the migration admin which method is being used, whether the old repos and read permissions will be kept, and whether migrated PR commits and source refs can be read if the archive is the intended fallback. *(documents: [Azure repo deletion](https://learn.microsoft.com/en-us/azure/devops/repos/git/delete-existing-repo?view=azure-devops), [GitHub Enterprise Importer](https://docs.github.com/en/migrations/using-github-enterprise-importer/migrating-from-azure-devops-to-github-enterprise-cloud/about-migrations-from-azure-devops-to-github-enterprise-cloud), [Microsoft migration options](https://learn.microsoft.com/en-us/azure/devops/organizations/projects/migrate-public-project?view=azure-devops#migrate-repositories); admin answer pending)*
 - **Deadline:** no date confirmed. Unless the admins confirm and the read-only check verifies a usable archive or migrated equivalent, collect the older sprints' issue-to-PR matches and author dates in a separately approved company-local archive **before the earliest deletion, decommissioning, or read-access cutoff**. The aggregate spike notes are not that archive. If cutover is the only known milestone, plan to finish before it rather than count on recovery.
 
+### Attribution and reporting decisions after the investigation
+
+- A shared SHA alone supplies a candidate, not attribution. On either host, a single unambiguous key in the source branch or title, or a direct Jira link to the specific PR, establishes attribution unless those sources conflict.
+- Report available commit evidence from both an attributed abandoned attempt and an attributed merged PR. Use the earliest commit author date from the earliest-opened attributed PR for the issue-level comparison, even if it was abandoned. Merge by delivery was an exploratory funnel filter, not a requirement for evidence that work had started.
+- Omit Spike issues (by issue type ID) from the issue–commit evidence report, including its coverage denominator. No separate collection is required for Spikes; evidence already collected need not be discarded. This does not change Jira cycle time or the independent PR timing population.
+
 ### What a spec would have to decide
 
 **Direction from the owner:** Jira is the starting source, not the final authority on when work happened. Enrich cycle time with commit evidence when Jira's brief first work visit misses work that demonstrably preceded it. This is a reason to pursue the second reading, not to rewrite Jira's recorded time in Development or change the pilot's primary measure.
@@ -150,6 +156,10 @@ The team's policy on both hosts puts the Jira key in the source branch. Matching
 - **GitHub:** Expand to confirmed GitHub-only sprint windows. Verify a deleted-source-branch example, quantify multiple-PR effects, and spot-check that the earliest commit belongs to the issue's work. The approved repository list is already on the work laptop.
 - **Azure DevOps:** Get approved local read access and a repository allowlist, test the direct branch-key route, and ask admins about retention and any cutoff. Confirm the sprint-to-period mapping for both hosts.
 - Keep detailed outcomes on the work laptop. See `notes/github-timing-session-index.md` for the current results and which earlier files were superseded. Publish only general findings here.
+
+### Single-repository ADO follow-up (observed)
+
+The delivered-issue funnel and brief-start comparison were run in closed windows with observed ADO activity, not confirmed ADO-only windows. Branch/title matches found more issues than commit-SHA matches, and ambiguous candidates were withheld. In the covered brief-start subset, the earliest author timestamp on the earliest-opened eligible PR preceded first entry into a work status. Coverage does not support imputing starts for the remainder. Between-sprint deliveries are separate. Per-sprint aggregates and method: `notes/payments-final-coverage.md` on the work laptop. Jira cycle time is unchanged.
 
 ### Coverage funnel (proposed 2026-11-18)
 
