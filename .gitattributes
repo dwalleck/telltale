@@ -1,2 +1,6 @@
+# Text files are stored with LF. A Windows working copy has CRLF, and git converts on commit, so a file written with
+# LF or CRLF commits the same; only a file that mixes the two needs fixing.
+* text=auto
+
 # The embedded SQL scripts are the same bytes on every machine: their text identifies the derived objects.
 *.sql text eol=lf

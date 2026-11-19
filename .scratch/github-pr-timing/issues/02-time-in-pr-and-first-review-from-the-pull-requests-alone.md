@@ -58,19 +58,16 @@ It runs on the work laptop. The GitHub half can run now, with the signed-in GitH
 
 ## Rules for the work
 
-- **Read only.** GET requests only. On GitHub, through the signed-in `gh` (`gh api --method GET --paginate`). On Azure DevOps, through `az rest --method get --resource 499b84ac-1321-427f-aa17-267ca6975798`, or a Code (Read) token in Credential Manager. Either way the token never passes through the spike's code or onto a command line. Nothing in Azure DevOps, GitHub or Jira is changed.
-- **Company data stays on company systems.** Notes and counts stay in the work folder on the work laptop, outside this repository.
-- **This repository is public.** No key, pull request number, commit SHA, repository, project or organization name, person, date of a real event or count from real data goes into this ticket, a commit or a test. The answer here is written in general terms.
-- **Nothing about a person is recorded.** Authors and reviewers are used only in memory: to tell automation from people, and to count distinct authors behind a figure. No name, address or account is written anywhere (ADR-0003). Results are per sprint, host and repository, never per person.
-- **Titles, descriptions, branch names and commit messages are read in memory only**, to find keys. None of them is saved.
-- Keep a pull request that fits no rule: count it under its reason, do not drop it.
+Access, where results go, people and what may go in this repository follow [`docs/agents/research-spikes.md`](../../../docs/agents/research-spikes.md). This ticket adds:
+
+- Authors and reviewers are used in memory to tell automation from people, as well as to count distinct authors.
 
 ## Done when
 
 - [ ] Each question has an answer under `## Answer`, in general terms, with how it was found
 - [ ] Each answer says whether it was observed on the real systems, read in a vendor's documents, or told by an administrator
-- [ ] The answer says, per host, which measures give a clean figure for most pull requests, and which need a rule a spec has to decide (draft time, reopened, no review, automation only, a vote with no time)
-- [ ] The answer lists, in order of how many pull requests each would join, what would link more pull requests to issues. For example: reading titles, descriptions or commit messages as well as branches; following a commit Jira names back to its Azure DevOps pull request; importing more Jira projects; or a change in how branches are named
+- [ ] The answer says, per host, which measures can be read as recorded, and which need a rule a spec has to decide (draft time, reopened, no review, automation only, a vote with no time)
+- [ ] The answer lists what would link more pull requests to issues; the ranking by how many pull requests each would join is kept in the work folder, since it is drawn from real counts. For example: reading titles, descriptions or commit messages as well as branches; following a commit Jira names back to its Azure DevOps pull request; importing more Jira projects; or a change in how branches are named
 - [ ] The answer says whether the owner's hypothesis about the migration holds, what is still unknown, and who has to answer it
 - [ ] The answer says how a report would tell the team's pull requests from other teams' in a shared repository, or that it cannot yet
 - [ ] Nothing real is in the repository; the detailed notes are named by where they are kept on the work laptop
