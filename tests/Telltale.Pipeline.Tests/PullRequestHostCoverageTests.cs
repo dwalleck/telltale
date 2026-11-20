@@ -284,6 +284,56 @@ public class PullRequestHostCoverageTests
             + "| Merge | Combined | 2 | 2.0 | 3.0 | 2.0 | 3.0 |\n");
     }
 
+    [Test]
+    public async Task A_pull_request_that_githubs_list_gives_again_on_a_later_page_is_counted_once()
+    {
+        // The list is read newest first while pull requests change, so one can move down and be met again on
+        // the next page. Here the first page gives pull requests 3 and 2, and the second gives 2 again and 1.
+        // All three were opened on Tuesday 20 January at noon and merged one, two and three days later.
+        await using var pipeline = SuppressionOff();
+        pipeline.Jira.AddSprints41And42();
+        var github = FakeGitHub.For(pipeline);
+        foreach (var number in new[] { 1, 2, 3 })
+        {
+            github.AddPullRequest(number, Accounts.AuthorOne, Local(2026, 1, 20, 12)).Merged(Local(2026, 1, 20 + number, 12));
+        }
+
+        const string list = "/api/v3/repos/" + FakeGitHub.Repository + "/pulls";
+        static string Entry(int number) =>
+            $$"""{"number":{{number}},"user":{"id":70000001,"login":"fake-author-one","type":"User"},"state":"closed","created_at":"2026-01-20T18:00:00Z","updated_at":"2026-01-{{20 + number}}T18:00:00Z","closed_at":"2026-01-{{20 + number}}T18:00:00Z","merged_at":"2026-01-{{20 + number}}T18:00:00Z"}""";
+        pipeline.Jira.Handler.Override(HttpMethod.Get, list, _ => true, request =>
+        {
+            if (request.Query.GetValueOrDefault("page", "1") != "1")
+            {
+                return StubHttpHandler.Json($"[{Entry(2)},{Entry(1)}]")(request);
+            }
+
+            var first = StubHttpHandler.Json($"[{Entry(3)},{Entry(2)}]")(request);
+            first.Headers.TryAddWithoutValidation("Link", $"<{FakeGitHub.ApiUrl}repos/{FakeGitHub.Repository}/pulls?state=all&sort=updated&direction=desc&per_page=100&page=2>; rel=\"next\"");
+            return first;
+        });
+
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+
+        // Three pull requests, each asked for its reviews once: three merges, median two days, and three
+        // closed without a first code review.
+        const string totals =
+            "SELECT t.sample_count, t.median_elapsed_days, w.closed_without_review FROM pr_timing_per_sprint t "
+            + "JOIN pr_without_review_per_sprint w ON w.sprint_id = t.sprint_id AND w.host_scope = t.host_scope WHERE t.sprint_id = '42' AND t.measure = 'merge'";
+        await Assert.That(github.PullRequestPagesAsked).IsEquivalentTo(new[] { "1", "2" });
+        await Assert.That(github.ReviewsAskedFor).IsEquivalentTo(new[] { 1, 2, 3 });
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM pull_request")).IsEquivalentTo(new[] { 3L });
+        await Assert.That((await pipeline.QueryAsync<(long, double, long)>(totals)).ToArray()).IsEquivalentTo(new[] { (3L, 2d, 3L) });
+
+        // Collected again, by a sync and whole by a backfill, and derived again: still three, and no review asked for twice.
+        await pipeline.RunAllAsync(["sync"], ["backfill"], ["run", "--sprint", "42"]);
+
+        await Assert.That(github.ReviewsAskedFor).IsEquivalentTo(new[] { 1, 2, 3 });
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM pull_request")).IsEquivalentTo(new[] { 3L });
+        await Assert.That((await pipeline.QueryAsync<(long, double, long)>(totals)).ToArray()).IsEquivalentTo(new[] { (3L, 2d, 3L) });
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("| Merge | 3 | 2.0 | 3.0 | 2.0 | 3.0 |\n");
+    }
+
     /// <summary>
     /// The <c>ado</c> setting for a project and repository whose names are those of <see cref="FakeGitHub.Repository"/>,
     /// and the routes of its one pull request, number 7, which the list gives twice in its first answer and
