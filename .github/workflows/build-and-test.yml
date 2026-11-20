@@ -35,6 +35,12 @@ jobs:
       - name: Build
         run: dotnet build
 
+      # The embedded SQL scripts must be the same bytes on every machine: their text identifies the derived
+      # objects. On Windows this also proves that .gitattributes keeps a checkout from converting them.
+      - name: Check the line endings of the SQL scripts
+        shell: pwsh
+        run: ./eng/check-sql-line-endings.ps1 -RepoRoot .
+
       # Tests run against a fake Jira: no network, no secrets.
       - name: Test
         run: dotnet test --no-build
