@@ -13,12 +13,15 @@ public interface IPullRequestCollector
     string Host { get; }
 
     /// <summary>
-    /// Fetches every pull request of the configured repositories, open or not, and the events that can end a
-    /// wait, classified. <paramref name="stored"/> is what the store holds, for a collector that can tell from
-    /// it what need not be asked again. Fails with a <see cref="UserFacingException"/> when the host cannot be
-    /// read in full: an answer that is missing is never an empty one.
+    /// Fetches what the store does not hold yet of the pull requests of the configured repositories, open or
+    /// not: the rows that are new or differ from <paramref name="stored"/>, and the classified events of those
+    /// whose list entry changed. A pull request the host lists exactly as it is stored has no event the store
+    /// lacks, and costs no request of its own. With <paramref name="everything"/> (a backfill) the whole list
+    /// is read; without it (a sync) a collector whose host lists the most recently updated first may stop
+    /// where nothing has changed. Fails with a <see cref="UserFacingException"/> when the host cannot be read:
+    /// an answer that is missing is never an empty one.
     /// </summary>
-    Task<PullRequestBatch> FetchAsync(RawData stored, CancellationToken cancellationToken);
+    Task<PullRequestBatch> FetchAsync(RawData stored, bool everything, CancellationToken cancellationToken);
 }
 
 /// <summary>Brings the store's pull requests up to date, host by host, the same way for a sync and a backfill.</summary>
@@ -30,14 +33,15 @@ public static class PullRequestCollection
     /// nothing reads them as a host that was read and found empty.
     /// </summary>
     /// <param name="saltFingerprint">The fingerprint of the salt the collectors hash authors with.</param>
-    public static async Task BringUpToDateAsync(IEnumerable<IPullRequestCollector> collectors, ITelltaleStore store, string saltFingerprint, CancellationToken cancellationToken)
+    /// <param name="everything">Read each host's whole list (a backfill), not only as far as something changed (a sync).</param>
+    public static async Task BringUpToDateAsync(IEnumerable<IPullRequestCollector> collectors, ITelltaleStore store, bool everything, string saltFingerprint, CancellationToken cancellationToken)
     {
         foreach (var collector in collectors)
         {
             PullRequestBatch batch;
             try
             {
-                batch = await collector.FetchAsync(await store.ReadRawAsync(cancellationToken), cancellationToken);
+                batch = await collector.FetchAsync(await store.ReadRawAsync(cancellationToken), everything, cancellationToken);
             }
             catch (UserFacingException)
             {

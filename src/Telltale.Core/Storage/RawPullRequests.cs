@@ -31,6 +31,12 @@ public sealed record RawPullRequest
     /// <summary>When it was closed, merged or not. Null while it is open.</summary>
     public required DateTimeOffset? Closed { get; init; }
 
+    /// <summary>
+    /// When the host says the pull request last changed; null when it does not say. It is kept to ask less of
+    /// the host: a pull request whose list entry is as stored has no event the store does not hold.
+    /// </summary>
+    public required DateTimeOffset? Updated { get; init; }
+
     /// <summary>The author as a salted hash. Null when the host names no author (a deleted account).</summary>
     public required string? AuthorHash { get; init; }
 }

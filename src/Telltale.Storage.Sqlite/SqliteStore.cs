@@ -282,19 +282,20 @@ public sealed class SqliteStore : ITelltaleStore
             connection,
             transaction,
             """
-            INSERT INTO pull_request (host, repository, pr_number, opened, merged, closed, author_hash)
-            VALUES (@host, @repository, @number, @opened, @merged, @closed, @authorHash)
+            INSERT INTO pull_request (host, repository, pr_number, opened, merged, closed, updated, author_hash)
+            VALUES (@host, @repository, @number, @opened, @merged, @closed, @updated, @authorHash)
             ON CONFLICT (host, repository, pr_number) DO UPDATE SET
                 opened = excluded.opened,
                 merged = excluded.merged,
                 closed = excluded.closed,
+                updated = excluded.updated,
                 author_hash = excluded.author_hash;
             """,
-            ["@host", "@repository", "@number", "@opened", "@merged", "@closed", "@authorHash"],
+            ["@host", "@repository", "@number", "@opened", "@merged", "@closed", "@updated", "@authorHash"],
             batch.PullRequests.Select(pullRequest => new object?[]
             {
                 pullRequest.Host, pullRequest.Repository, pullRequest.Number, StoredTime.ToStored(pullRequest.Opened),
-                StoredTime.ToStored(pullRequest.Merged), StoredTime.ToStored(pullRequest.Closed), pullRequest.AuthorHash,
+                StoredTime.ToStored(pullRequest.Merged), StoredTime.ToStored(pullRequest.Closed), StoredTime.ToStored(pullRequest.Updated), pullRequest.AuthorHash,
             }),
             cancellationToken);
 
@@ -438,6 +439,7 @@ public sealed class SqliteStore : ITelltaleStore
                 Opened = StoredTime.FromStored(row.Opened),
                 Merged = StoredTime.FromStoredOrNull(row.Merged),
                 Closed = StoredTime.FromStoredOrNull(row.Closed),
+                Updated = StoredTime.FromStoredOrNull(row.Updated),
                 AuthorHash = row.AuthorHash,
             })],
             PullRequestEvents = [.. pullRequestEvents.Select(row => new RawPullRequestEvent
@@ -984,6 +986,7 @@ public sealed class SqliteStore : ITelltaleStore
         public string Opened { get; init; } = "";
         public string? Merged { get; init; }
         public string? Closed { get; init; }
+        public string? Updated { get; init; }
         public string? AuthorHash { get; init; }
     }
 

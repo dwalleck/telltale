@@ -121,12 +121,16 @@ public class PullRequestCollectionTests
         await using var pipeline = SuppressionOff(Local(2026, 2, 2, 12));
         pipeline.Jira.AddSprints41And42();
         var github = FakeGitHub.For(pipeline);
-        github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 16, 12)).Reviewed(Accounts.Reviewer, "COMMENTED", Local(2026, 1, 20, 12));
+        var pullRequest = github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 16, 12)).Reviewed(Accounts.Reviewer, "COMMENTED", Local(2026, 1, 20, 12));
         await pipeline.RunAllAsync(["run", "--sprint", "42"]);
 
+        // A later review moves the pull request's last update, so the next sync reads all its reviews again,
+        // the first one too, now by a member of the Ops team.
         github.OpsMembers.Add(Accounts.Reviewer);
+        pullRequest.Reviewed(Accounts.OpsMember, "APPROVED", Local(2026, 1, 28, 12));
         await pipeline.RunAllAsync(["run", "--sprint", "42"]);
 
+        await Assert.That(github.ReviewsAskedFor).IsEquivalentTo(new[] { 1, 1 });
         await Assert.That((await pipeline.QueryAsync<(string, string, long, double)>(Figures)).ToArray()).IsEquivalentTo(new[] { ("42", "first_code_review", 1L, 4d) });
     }
 
@@ -154,23 +158,73 @@ public class PullRequestCollectionTests
     }
 
     [Test]
-    public async Task A_later_sync_asks_again_for_the_reviews_of_the_pull_requests_that_were_open_and_not_of_those_already_stored_closed()
+    public async Task A_later_sync_asks_for_the_reviews_of_a_pull_request_only_when_its_list_entry_changed()
     {
         await using var pipeline = SuppressionOff();
         pipeline.Jira.AddSprints41And42();
         var github = FakeGitHub.For(pipeline);
         github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 20, 12)).Reviewed(Accounts.Reviewer, "APPROVED", Local(2026, 1, 21, 12)).Merged(Local(2026, 1, 22, 12));
-        var open = github.AddPullRequest(2, Accounts.AuthorTwo, Local(2026, 1, 20, 12));
+        var changing = github.AddPullRequest(2, Accounts.AuthorTwo, Local(2026, 1, 20, 12));
+        github.AddPullRequest(3, Accounts.AuthorThree, Local(2026, 1, 20, 12));
         await pipeline.RunAllAsync(["sync"]);
-        await Assert.That(github.ReviewsAskedFor).IsEquivalentTo(new[] { 1, 2 });
+        await Assert.That(github.ReviewsAskedFor).IsEquivalentTo(new[] { 1, 2, 3 });
 
-        // Pull request 2 is reviewed and merged between the syncs: the sync that first sees it closed still reads its reviews.
-        open.Reviewed(Accounts.Reviewer, "APPROVED", Local(2026, 1, 27, 12)).Merged(Local(2026, 1, 28, 12));
+        // Pull request 2 is reviewed and merged between the syncs. Pull request 1 stays merged and pull
+        // request 3 stays open with nothing new: neither costs a request, at this sync or the one after.
+        changing.Reviewed(Accounts.Reviewer, "APPROVED", Local(2026, 1, 27, 12)).Merged(Local(2026, 1, 28, 12));
         await pipeline.RunAllAsync(["sync"], ["sync"], ["derive"]);
 
-        await Assert.That(github.ReviewsAskedFor).IsEquivalentTo(new[] { 1, 2, 2 });
+        await Assert.That(github.ReviewsAskedFor).IsEquivalentTo(new[] { 1, 2, 3, 2 });
         await Assert.That((await pipeline.QueryAsync<(string, string, long, double)>(Figures)).ToArray())
             .IsEquivalentTo(new[] { ("42", "first_code_review", 2L, 4d), ("42", "merge", 2L, 5d) });
+    }
+
+    [Test]
+    public async Task A_second_sync_with_nothing_changed_reads_one_page_of_the_list_and_no_reviews_and_a_backfill_reads_the_whole_list()
+    {
+        // Two rows a page, five pull requests: the first sync reads three pages and the reviews of all five.
+        await using var pipeline = SuppressionOff();
+        pipeline.Jira.AddSprints41And42();
+        var github = FakeGitHub.For(pipeline);
+        github.PageSize = 2;
+        foreach (var (author, number) in Accounts.Authors.Select((author, index) => (author, index + 1)))
+        {
+            github.AddPullRequest(number, author, Local(2026, 1, 20, 12)).Reviewed(Accounts.Reviewer, "COMMENTED", Local(2026, 1, 20 + number, 12));
+        }
+
+        await pipeline.RunAllAsync(["sync"]);
+        await Assert.That(github.PullRequestPagesAsked).IsEquivalentTo(new[] { "1", "2", "3" });
+        await Assert.That(github.ReviewsAskedFor.Count).IsEqualTo(5);
+
+        // Nothing changed: the newest page is as stored, so the list is read no further and no review is asked for.
+        await pipeline.RunAllAsync(["sync"]);
+        await Assert.That(github.PullRequestPagesAsked).IsEquivalentTo(new[] { "1", "2", "3", "1" });
+        await Assert.That(github.ReviewsAskedFor.Count).IsEqualTo(5);
+
+        // A backfill reads the list to its end, and still asks for no reviews of what is unchanged.
+        await pipeline.RunAllAsync(["backfill"], ["derive"]);
+        await Assert.That(github.PullRequestPagesAsked).IsEquivalentTo(new[] { "1", "2", "3", "1", "1", "2", "3" });
+        await Assert.That(github.ReviewsAskedFor.Count).IsEqualTo(5);
+        await Assert.That((await pipeline.QueryAsync<(string, string, long, double)>(Figures)).ToArray()).IsEquivalentTo(new[] { ("42", "first_code_review", 5L, 3d) });
+    }
+
+    [Test]
+    public async Task A_pull_request_last_updated_before_the_start_date_is_never_asked_for_and_one_opened_before_it_and_reviewed_after_it_is_read()
+    {
+        await using var pipeline = SuppressionOff();
+        pipeline.Jira.AddSprints41And42();
+        var github = FakeGitHub.For(pipeline);
+        pipeline.Config["github"]!["collectFrom"] = "2026-01-15";
+        github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 6, 12)).Reviewed(Accounts.Reviewer, "COMMENTED", Local(2026, 1, 7, 12));
+        github.AddPullRequest(2, Accounts.AuthorTwo, Local(2026, 1, 6, 12)).Reviewed(Accounts.Reviewer, "COMMENTED", Local(2026, 1, 20, 12));
+
+        await pipeline.RunAllAsync(["run", "--sprint", "42"], ["sync"]);
+
+        // The bound is on last activity, not on opening: both were opened before the date.
+        await Assert.That(github.ReviewsAskedFor).IsEquivalentTo(new[] { 2 });
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT pr_number FROM pull_request")).IsEquivalentTo(new[] { 2L });
+        await Assert.That((await pipeline.QueryAsync<(string, string, long, double)>("SELECT sprint_id, measure, sample_count, median_elapsed_days FROM pr_timing_per_sprint WHERE sample_count > 0")).ToArray())
+            .IsEquivalentTo(new[] { ("42", "first_code_review", 1L, 14d) });
     }
 
     [Test]
@@ -189,7 +243,7 @@ public class PullRequestCollectionTests
 
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            "GitHub answered 403 (Forbidden) to GET repos/fake-org/fake-sample/pulls?state=all&sort=created&direction=asc&per_page=100.\n");
+            "GitHub answered 403 (Forbidden) to GET repos/fake-org/fake-sample/pulls?state=all&sort=updated&direction=desc&per_page=100.\n");
 
         // What earlier reads stored stays, and the store says the last read failed.
         await Assert.That((await pipeline.QueryAsync<string>("SELECT state || ', roster ' || roster FROM pull_request_host WHERE host = 'github'")).ToArray()).IsEquivalentTo(new[] { "failed, roster not read" });

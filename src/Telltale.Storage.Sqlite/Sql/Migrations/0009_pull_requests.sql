@@ -1,7 +1,9 @@
 -- Pull requests, from any host (ADR-0002: selected fields only). A pull request is identified by its host
 -- ('github'), its repository as the host's collector names it, and the host's number for it. No title, branch
 -- name or login is kept; author_hash is the author as a salted hash (ADR-0003), null when the host names none.
--- merged is null unless it was merged; closed is null while it is open.
+-- merged is null unless it was merged; closed is null while it is open. updated is when the host says the pull
+-- request last changed, null when it does not say: a sync reads a pull request's events again only when this,
+-- merged or closed differ from what the host lists now.
 CREATE TABLE pull_request (
     host        TEXT NOT NULL,
     repository  TEXT NOT NULL,
@@ -9,6 +11,7 @@ CREATE TABLE pull_request (
     opened      TEXT NOT NULL,
     merged      TEXT NULL,
     closed      TEXT NULL,
+    updated     TEXT NULL,
     author_hash TEXT NULL,
     PRIMARY KEY (host, repository, pr_number)
 ) STRICT;

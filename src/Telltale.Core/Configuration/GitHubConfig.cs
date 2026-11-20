@@ -26,6 +26,14 @@ public sealed record GitHubConfig
     /// Server. Left out, it is <see cref="GitHubSettings.PublicApiUrl"/>.
     /// </summary>
     public Uri? ApiUrl { get; init; }
+
+    /// <summary>
+    /// A date, e.g. <c>"2026-07-01"</c>: a pull request whose last update is before the start of that day (UTC)
+    /// is not collected at all. It bounds how much the first sync asks for. It is a bound on last activity,
+    /// not on opening: a pull request opened before the date and reviewed or merged after it is still read.
+    /// Left out, there is no bound.
+    /// </summary>
+    public DateOnly? CollectFrom { get; init; }
 }
 
 /// <summary>The <c>github</c> setting, checked. Made only by <see cref="Checked"/>.</summary>
@@ -46,6 +54,9 @@ public sealed record GitHubSettings
 
     /// <summary>The Ops group's team, or null when none is configured.</summary>
     public required GitHubTeam? OpsTeam { get; init; }
+
+    /// <summary>The moment before which a pull request's last update puts it out of what is collected, or null for no bound.</summary>
+    public required DateTimeOffset? CollectFrom { get; init; }
 
     /// <summary>
     /// Checks the setting and throws <see cref="SettingRefusedException"/> for the first part that is refused.
@@ -87,7 +98,7 @@ public sealed record GitHubSettings
                 : throw new SettingRefusedException("github.opsTeam must be a team written as organization/team-slug.");
         }
 
-        return new GitHubSettings { ApiUrl = SettingRules.WithTrailingSlash(apiUrl), Repositories = repositories, OpsTeam = opsTeam };
+        return new GitHubSettings { ApiUrl = SettingRules.WithTrailingSlash(apiUrl), Repositories = repositories, OpsTeam = opsTeam, CollectFrom = github.CollectFrom is { } day ? new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero) : null };
     }
 
     /// <summary>

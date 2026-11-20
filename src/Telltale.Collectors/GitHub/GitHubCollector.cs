@@ -51,7 +51,7 @@ public sealed class GitHubCollector : IPullRequestCollector
 
     public string Host => PullRequestHosts.GitHub;
 
-    public async Task<PullRequestBatch> FetchAsync(RawData stored, CancellationToken cancellationToken)
+    public async Task<PullRequestBatch> FetchAsync(RawData stored, bool everything, CancellationToken cancellationToken)
     {
         using var github = new HostClient(_handler, "GitHub", _settings.ApiUrl, new AuthenticationHeaderValue("Bearer", _token), _clock, _notices);
         github.AddHeader("User-Agent", "telltale");
@@ -62,41 +62,58 @@ public sealed class GitHubCollector : IPullRequestCollector
         var opsMemberIds = new HashSet<long>();
         if (_settings.OpsTeam is { } opsTeam)
         {
-            await ForEachAsync(github, $"orgs/{opsTeam.Organization}/teams/{opsTeam.Slug}/members?per_page={PageSize}", "team members", member => opsMemberIds.Add(member.GetProperty("id").GetInt64()), cancellationToken);
+            await ForEachAsync(github, $"orgs/{opsTeam.Organization}/teams/{opsTeam.Slug}/members?per_page={PageSize}", "team members", member => opsMemberIds.Add(member.GetProperty("id").GetInt64()) || true, cancellationToken);
         }
 
         var known = stored.PullRequests.Where(pullRequest => pullRequest.Host == Host).ToDictionary(pullRequest => (pullRequest.Repository, pullRequest.Number));
-        var pullRequests = new Dictionary<(string Repository, long Number), (RawPullRequest Row, long? AuthorId)>();
+        var pullRequests = new Dictionary<(string Repository, long Number), (RawPullRequest Row, long? AuthorId, bool ReadReviews)>();
         foreach (var repository in _settings.Repositories)
         {
-            // Every state, at every sync: an old pull request can be reviewed, merged or reopened at any time.
-            // A pull request repeated on a later page, as happens when one is opened while the list is read, is one.
+            // Every state: an old pull request can be reviewed, merged or reopened at any time. The most
+            // recently updated come first, so a sync can stop at the first page on which nothing is new: every
+            // pull request after it was updated earlier still, and the store has it as it is. A backfill reads
+            // on to the end, which is what brings in older pull requests after the start date is moved back.
+            // A pull request repeated on a later page, as happens when one changes while the list is read, is one.
             await ForEachAsync(
                 github,
-                $"repos/{repository.Owner}/{repository.Name}/pulls?state=all&sort=created&direction=asc&per_page={PageSize}",
+                $"repos/{repository.Owner}/{repository.Name}/pulls?state=all&sort=updated&direction=desc&per_page={PageSize}",
                 "pull requests",
                 pullRequest =>
                 {
                     var (row, authorId) = Read(repository, pullRequest);
-                    pullRequests[(row.Repository, row.Number)] = (row, authorId);
+
+                    // Out of what is collected: last updated before the start date. One that does not say
+                    // when it was last updated cannot be shown to be that old, and is collected.
+                    if (row.Updated < _settings.CollectFrom)
+                    {
+                        return null;
+                    }
+
+                    // The reviews are asked for only when the list entry says something may have happened
+                    // that the store does not hold: the pull request is new to the store, or its merge, close
+                    // or last update differs. An open one that names no last update is asked for every time.
+                    // The store holds a pull request only with the reviews read for the entry it holds, since
+                    // a batch is written whole or not at all, so an entry that is as stored needs no request.
+                    known.TryGetValue((row.Repository, row.Number), out var before);
+                    var readReviews = before is null || before.Merged != row.Merged || before.Closed != row.Closed || before.Updated != row.Updated
+                        || (row.Updated is null && row.Closed is null);
+                    if (!readReviews && before == row)
+                    {
+                        return false;
+                    }
+
+                    pullRequests[(row.Repository, row.Number)] = (row, authorId, readReviews);
+                    return true;
                 },
-                cancellationToken);
+                cancellationToken,
+                stopAtAPageWithNothingNew: !everything);
         }
 
         var events = new List<RawPullRequestEvent>();
         foreach (var repository in _settings.Repositories)
         {
-            foreach (var (row, authorId) in pullRequests.Values.Where(pullRequest => pullRequest.Row.Repository == repository.Key).OrderBy(pullRequest => pullRequest.Row.Number))
+            foreach (var (row, authorId, _) in pullRequests.Values.Where(pullRequest => pullRequest.ReadReviews && pullRequest.Row.Repository == repository.Key).OrderBy(pullRequest => pullRequest.Row.Number))
             {
-                // Only a review made before a pull request closed can end a wait, and those of a pull request
-                // the store already holds as closed at this same moment were read when it was first seen
-                // closed. So each sync asks for the reviews of the pull requests that are open, or were when
-                // last read: one request for each, not one for every pull request the repository ever had.
-                if (row.Closed is not null && known.TryGetValue((row.Repository, row.Number), out var before) && before.Closed == row.Closed)
-                {
-                    continue;
-                }
-
                 await ForEachAsync(
                     github,
                     $"repos/{repository.Owner}/{repository.Name}/pulls/{row.Number.ToString(CultureInfo.InvariantCulture)}/reviews?per_page={PageSize}",
@@ -107,6 +124,8 @@ public sealed class GitHubCollector : IPullRequestCollector
                         {
                             events.Add(submitted);
                         }
+
+                        return true;
                     },
                     cancellationToken);
             }
@@ -137,6 +156,7 @@ public sealed class GitHubCollector : IPullRequestCollector
             // merged_at and never closed_at: a pull request closed without a merge has no merge time.
             Merged = merged,
             Closed = closed ?? merged,
+            Updated = JiraJson.Optional(pullRequest, "updated_at") is { } updatedAt ? JiraTime.Parse(updatedAt) : null,
             AuthorHash = authorId is { } id ? AuthorHash(id) : null,
         }, authorId);
     }
@@ -193,12 +213,17 @@ public sealed class GitHubCollector : IPullRequestCollector
     /// <summary>
     /// Reads a list to its end, following the next page each answer names and never asking past the last one
     /// named: a list is over when an answer names no next page, not when a page comes back empty.
+    /// <paramref name="read"/> says of each row whether it brought anything new, or null for a row older than
+    /// what is collected: a page of only such rows ends the reading, since the rows after it are older still. With
+    /// <paramref name="stopAtAPageWithNothingNew"/> the reading ends after the first page that has rows and
+    /// none of them new, which is only right for a list whose order puts everything new first.
     /// </summary>
-    private static async Task ForEachAsync(HostClient github, string firstPage, string what, Action<JsonElement> read, CancellationToken cancellationToken)
+    private static async Task ForEachAsync(HostClient github, string firstPage, string what, Func<JsonElement, bool?> read, CancellationToken cancellationToken, bool stopAtAPageWithNothingNew = false)
     {
         var asked = new HashSet<string>(StringComparer.Ordinal);
         for (var next = firstPage; next is not null;)
         {
+            var (rows, fresh, tooOld) = (0, 0, 0);
             if (!asked.Add(next) || asked.Count > MaxPagesPerList)
             {
                 throw new UserFacingException($"GitHub's list of {what} did not come to an end: it named a page it had already given, or more than {MaxPagesPerList} pages. Nothing was stored.");
@@ -209,7 +234,10 @@ public sealed class GitHubCollector : IPullRequestCollector
             {
                 foreach (var item in page.Body.RootElement.EnumerateArray())
                 {
-                    read(item);
+                    rows++;
+                    var brought = read(item);
+                    fresh += brought == true ? 1 : 0;
+                    tooOld += brought is null ? 1 : 0;
                 }
             }
             catch (Exception exception) when (exception is KeyNotFoundException or InvalidOperationException or FormatException)
@@ -218,7 +246,7 @@ public sealed class GitHubCollector : IPullRequestCollector
                 throw new UserFacingException($"GitHub's {what} answered in a shape this tool does not understand ({exception.GetType().Name}). Nothing was stored.", exception);
             }
 
-            next = page.Next;
+            next = rows > 0 && (tooOld == rows || (stopAtAPageWithNothingNew && fresh == 0)) ? null : page.Next;
         }
     }
 }

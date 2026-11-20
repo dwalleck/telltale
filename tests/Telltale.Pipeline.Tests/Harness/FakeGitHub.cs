@@ -48,6 +48,10 @@ public sealed class FakePullRequest(FakeGitHub github, int number, FakeAccount? 
 
     public List<FakeReview> Reviews { get; } = [];
 
+    /// <summary>What the list gives as <c>updated_at</c>: the latest of the opening, the submitted reviews, the merge and the close, as GitHub moves it.</summary>
+    public DateTimeOffset Updated =>
+        Reviews.Select(review => review.SubmittedAt).Append(MergedAt).Append(ClosedAt).Append(opened).OfType<DateTimeOffset>().Max();
+
     public FakePullRequest Merged(DateTimeOffset at)
     {
         (MergedAt, ClosedAt) = (at, at);
@@ -102,7 +106,7 @@ public sealed class FakeGitHub
     private FakeGitHub(StubHttpHandler handler)
     {
         _handler = handler;
-        handler.On(HttpMethod.Get, PullsPath, request => Page(request, PullRequests.Select(PullRequestJson)));
+        handler.On(HttpMethod.Get, PullsPath, request => Page(request, Sorted(request).Select(PullRequestJson)));
         handler.On(HttpMethod.Get, MembersPath, request => Page(request, OpsMembers.Select(AccountJson)));
     }
 
@@ -154,6 +158,15 @@ public sealed class FakeGitHub
 
     internal long NextReviewId() => ++_reviewId;
 
+    /// <summary>The pull requests in the order the request asks for: by last update when it says <c>sort=updated</c>, by number otherwise, in its direction.</summary>
+    private IEnumerable<FakePullRequest> Sorted(StubRequest request)
+    {
+        var ascending = request.Query.GetValueOrDefault("sort") == "updated"
+            ? PullRequests.OrderBy(pullRequest => pullRequest.Updated).ThenBy(pullRequest => pullRequest.Number)
+            : PullRequests.OrderBy(pullRequest => pullRequest.Number);
+        return request.Query.GetValueOrDefault("direction") == "asc" ? ascending : ascending.Reverse();
+    }
+
     /// <summary>One page of a list, with GitHub's <c>Link</c> header naming the next page while there is one.</summary>
     private HttpResponseMessage Page(StubRequest request, IEnumerable<JsonObject> rows)
     {
@@ -191,6 +204,7 @@ public sealed class FakeGitHub
         ["state"] = pullRequest.ClosedAt is null ? "open" : "closed",
         ["draft"] = false,
         ["created_at"] = Time(pullRequest.Opened),
+        ["updated_at"] = Time(pullRequest.Updated),
         ["closed_at"] = Time(pullRequest.ClosedAt),
         ["merged_at"] = Time(pullRequest.MergedAt),
     };

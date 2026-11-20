@@ -89,15 +89,15 @@ public sealed class PipelineSteps
 
     /// <summary>
     /// Jira first: the sprints come from its board, and its batch settles which salt the store's people are
-    /// hashed with. Then each configured pull request host, the same way for a backfill and a sync: every pull
-    /// request of the configured repositories is read each time, and a backfill removes none.
+    /// hashed with. Then each configured pull request host. A backfill removes no pull request; it reads each
+    /// host's whole list, where a sync stops once it reaches pull requests that have not changed.
     /// </summary>
     private async Task CollectAsync(CollectionMode mode, bool allowEmpty, CancellationToken cancellationToken)
     {
         var secrets = _secrets ?? throw new InvalidOperationException("This command was started without the secrets a collection needs.");
         await new JiraCollector(_environment.HttpHandler, _settings.Jira, secrets, _environment.Clock, _environment.Notices)
             .BringUpToDateAsync(_store, mode, allowEmpty, cancellationToken);
-        await PullRequestCollection.BringUpToDateAsync(PullRequestCollectors(secrets), _store, IdentityHash.SaltFingerprint(secrets.HashingSalt), cancellationToken);
+        await PullRequestCollection.BringUpToDateAsync(PullRequestCollectors(secrets), _store, everything: mode == CollectionMode.Backfill, IdentityHash.SaltFingerprint(secrets.HashingSalt), cancellationToken);
     }
 
     /// <summary>

@@ -158,7 +158,7 @@ Fetches every issue in the board's projects updated on or after `backfillStart`,
 
 It refuses to replace a non-empty store with an empty fetch, because that usually means a wrong setting or lost access. `--allow-empty` overrides this.
 
-With the `github` setting, `backfill` and `sync` then read pull requests in the same way: every pull request of each listed repository, open, merged or closed, and the submitted reviews of those that are open or were open at the last read. That is one request per such pull request at every sync, and one per pull request of the repository at the first. Stored pull requests are updated and never removed, by `backfill` either. If GitHub cannot be read the command fails after the Jira data is stored, and the pull requests already in the store stay as they were. See [Pull requests](#pull-requests).
+With the `github` setting, `backfill` and `sync` then read pull requests: the list of each listed repository's pull requests, open, merged or closed, most recently updated first, and the submitted reviews of each pull request that is new to the store or whose list entry changed (its merge, its close or its last update). A pull request listed exactly as it is stored costs no request of its own. `sync` stops reading the list at the first page on which nothing is new; `backfill` reads the list to its end. So the first read costs one request per pull request, bounded by `github.collectFrom`, and a later `sync` costs one per pull request that changed. Stored pull requests are updated and never removed, by `backfill` either. If GitHub cannot be read the command fails after the Jira data is stored, and the pull requests already in the store stay as they were. See [Pull requests](#pull-requests).
 
 ### `sync`
 
@@ -241,7 +241,8 @@ The view has two more columns, `left_out_issue_count` and `left_out_suppressed`:
   "github": {
     "repositories": ["example-org/payments"],
     "opsTeam": "example-org/ops",
-    "apiUrl": "https://github.example.com/api/v3/"
+    "apiUrl": "https://github.example.com/api/v3/",
+    "collectFrom": "2026-07-01"
   }
 }
 ```
@@ -263,7 +264,7 @@ The view has two more columns, `left_out_issue_count` and `left_out_suppressed`:
 | `minimumGroupSize` | An object with the two numbers `team` and `assigneesBehindAFigure`. Each is a whole number of zero or more, written in plain digits, not quoted, with no fraction and no exponent, and no greater than 2,147,483,647. Optional; when it is present both numbers are required. | `{ "team": 5, "assigneesBehindAFigure": 3 }` |
 | `briefVisitThresholds` | An object of status ID (a string of digits, as in `statusRoles`) to threshold: a number of minutes greater than zero, not quoted. A fraction is allowed. Each status must be in `statusRoles` with a role other than `done`, and may be listed once. Optional; may be empty. | `{ "10001": 5, "10002": 0.5 }` |
 | `briefVisitTreatment` | An object with the parts `timeInStatus` and `cycleTime`, each `"count"` or `"exclude"`. Optional, and so is each part: a part left out is `"count"`. `"count"` changes no figure. `"exclude"` for `timeInStatus` leaves the time of every brief visit to a listed status out of time in status. `"exclude"` for `cycleTime` gives a delivered issue whose cycle starts with a brief visit no cycle time. `"exclude"` needs a status listed in `briefVisitThresholds`, and for `cycleTime` one with the role `work`. | `{ "timeInStatus": "exclude", "cycleTime": "count" }` |
-| `github` | An object. Optional. `repositories` is required: a list of repositories, each as `"owner/name"`, and only these are read. `opsTeam` is optional: the team whose reviews are not code reviews, as `"organization/team-slug"`. `apiUrl` is optional: the absolute `https://` address of the REST API, for GitHub Enterprise Server the host's address followed by `/api/v3/`; without it the address is `https://api.github.com/`. The token is a secret and has no place here. | `{ "repositories": ["example-org/payments"] }` |
+| `github` | An object. Optional. `repositories` is required: a list of repositories, each as `"owner/name"`, and only these are read. `opsTeam` is optional: the team whose reviews are not code reviews, as `"organization/team-slug"`. `apiUrl` is optional: the absolute `https://` address of the REST API, for GitHub Enterprise Server the host's address followed by `/api/v3/`; without it the address is `https://api.github.com/`. `collectFrom` is optional: a date as `"yyyy-MM-dd"`; a pull request last updated before the start of that day (UTC) is not collected. It bounds last activity, not opening, so a pull request opened earlier and reviewed or merged since is still read. Without it there is no bound. After moving the date back, run `backfill`: a `sync` stops at the first page of unchanged pull requests and would not reach the older ones. The token is a secret and has no place here. | `{ "repositories": ["example-org/payments"] }` |
 
 Things that are refused when the file is loaded, with a message that names the file:
 
