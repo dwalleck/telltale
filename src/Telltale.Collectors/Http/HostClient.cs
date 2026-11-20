@@ -97,7 +97,28 @@ internal sealed class HostClient : IDisposable
         public void Dispose() => Body.Dispose();
     }
 
-    private sealed record Answer(JsonDocument Body, string? Next);
+    /// <summary>
+    /// GET one answer of a list that says there is more in an <c>x-ms-continuationtoken</c> header (Azure
+    /// DevOps). <see cref="ContinuedPage.Continuation"/> is that token, to send back as the host's
+    /// documentation says, or null when the answer carries none: the list has ended.
+    /// </summary>
+    public async Task<ContinuedPage> GetContinuedPageAsync(string relativeUrl, CancellationToken cancellationToken)
+    {
+        var answer = await SendAsync(HttpMethod.Get, relativeUrl, body: null, cancellationToken);
+        return new ContinuedPage(answer.Body, answer.Continuation);
+    }
+
+    /// <summary>One answer of a list: its JSON, and the token to ask for the rest with when the answer carries one.</summary>
+    public sealed record ContinuedPage(JsonDocument Body, string? Continuation) : IDisposable
+    {
+        public void Dispose() => Body.Dispose();
+    }
+
+    private sealed record Answer(JsonDocument Body, string? Next, string? Continuation);
+
+    /// <summary>The token in the answer's <c>x-ms-continuationtoken</c> header; null without one.</summary>
+    private static string? ContinuationToken(HttpResponseMessage response) =>
+        response.Headers.TryGetValues("x-ms-continuationtoken", out var values) && string.Concat(values).Trim() is { Length: > 0 } token ? token : null;
 
     /// <summary>The address of the next page from the answer's <c>Link</c> header, relative to the base address; null without one.</summary>
     private string? NextPage(HttpResponseMessage response, string call)
@@ -286,7 +307,7 @@ internal sealed class HostClient : IDisposable
             try
             {
                 await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-                return new Answer(await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken), NextPage(response, call));
+                return new Answer(await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken), NextPage(response, call), ContinuationToken(response));
             }
             catch (JsonException exception)
             {
