@@ -88,7 +88,11 @@ public class AdoPullRequestsWithoutReviewTests
 
         var exit = await pipeline.RunAsync("sync");
 
+        // Nothing is stored, so nothing may say that a pull request was stored without its threads: the
+        // command says what the third failure was and no more.
         await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Azure DevOps answered 403 (Forbidden) to GET Fake%20Project/_apis/git/repositories/fake-ado-sample/pullRequests/3/threads?api-version=7.1.\n");
         await Assert.That((await pipeline.QueryAsync<string>("SELECT state FROM pull_request_host WHERE host = 'ado'")).ToArray()).IsEquivalentTo(new[] { "failed" });
         await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM pull_request")).IsEquivalentTo(new[] { 0L });
     }

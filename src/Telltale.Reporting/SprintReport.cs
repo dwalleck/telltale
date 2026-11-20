@@ -504,8 +504,9 @@ public static class SprintReport
 
     /// <summary>
     /// The line for the waits a host has no row for in the table, by the reason the view gives
-    /// (<c>coverage</c> is "reviews not read"): the Ops group's members could not be read, so no review of
-    /// that host was collected. With several hosts the line names the host, and says what that makes of the
+    /// (<c>coverage</c> is "reviews not read"): the store holds pull requests of the host without their
+    /// reviews, because the Ops group's members could not be read when those were collected. That may have
+    /// been the last collection or an earlier one, and the line claims neither. With several hosts the line names the host, and says what that makes of the
     /// combined rows. Nothing is written when no row has that reason.
     /// </summary>
     private static void AppendPullRequestMeasuresNotShown(StringBuilder report, IReadOnlyList<PullRequestTimingRow> sprintRows, bool severalHosts)
@@ -514,7 +515,7 @@ public static class SprintReport
         {
             report.Append(severalHosts ? $"- Not shown for {PullRequestHostLabel(host.Key)}: " : "- Not shown: ")
                 .AppendJoin(", ", host.Select(PullRequestMeasureLabel))
-                .Append(". The members of the Ops group could not be read when the pull requests were last collected, so reviews by the group could not be told apart from code reviews, and no review was collected. These waits are given for no sprint until a collection reads the group; nothing here says that no pull request was reviewed or approved. A merge does not depend on who reviewed, and is shown.")
+                .Append(". The members of the Ops group could not be read at a collection of the pull requests, so reviews by the group could not be told apart from code reviews, and the reviews of the pull requests collected then were not read and have not been read since. These waits are given for no sprint until a collection reads those reviews, which takes the group's members; nothing here says that no pull request was reviewed or approved. A merge does not depend on who reviewed, and is shown.")
                 .Append(severalHosts ? " The combined rows of these waits are marked partial: they hold the other hosts' waits only." : "")
                 .Append('\n');
         }

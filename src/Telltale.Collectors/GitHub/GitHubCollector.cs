@@ -73,8 +73,11 @@ public sealed class GitHubCollector : IPullRequestCollector
             catch (UserFacingException exception)
             {
                 rosterRead = false;
+
+                // The failure's own words may end by saying nothing was stored, which is true of a read that
+                // stops there and not of this one: the pull requests are stored, without their reviews.
                 await _notices.WriteLineAsync(
-                    $"GitHub: the members of the Ops team could not be read ({exception.Message}). "
+                    $"GitHub: the members of the Ops team could not be read ({exception.Message.Replace(" Nothing was stored.", "", StringComparison.Ordinal)}). "
                     + "No review was read, and no first code review or first code approval figure is given for GitHub until a sync reads the team.");
             }
         }

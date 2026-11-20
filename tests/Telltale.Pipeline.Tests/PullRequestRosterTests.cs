@@ -19,7 +19,7 @@ public class PullRequestRosterTests
     private const string MembersPath = "/api/v3/orgs/fake-org/teams/fake-ops/members";
 
     private const string NotShown =
-        "- Not shown: First code review, First code approval. The members of the Ops group could not be read when the pull requests were last collected, so reviews by the group could not be told apart from code reviews, and no review was collected. These waits are given for no sprint until a collection reads the group; nothing here says that no pull request was reviewed or approved. A merge does not depend on who reviewed, and is shown.\n";
+        "- Not shown: First code review, First code approval. The members of the Ops group could not be read at a collection of the pull requests, so reviews by the group could not be told apart from code reviews, and the reviews of the pull requests collected then were not read and have not been read since. These waits are given for no sprint until a collection reads those reviews, which takes the group's members; nothing here says that no pull request was reviewed or approved. A merge does not depend on who reviewed, and is shown.\n";
 
     private static async Task<(string, string, long, double)[]> FiguresAsync(PipelineHarness pipeline) =>
         [.. await pipeline.QueryAsync<(string, string, long, double)>(Figures)];
@@ -72,6 +72,26 @@ public class PullRequestRosterTests
         await Assert.That((await pipeline.QueryAsync<string>(HostState)).ToArray()).IsEquivalentTo(new[] { "read, roster read" });
         await Assert.That(await FiguresAsync(pipeline)).IsEquivalentTo(new[] { ("42", "first_code_review", 1L, 1d), ("42", "first_code_approval", 1L, 1d), ("42", "merge", 1L, 2d) });
         await Assert.That(await pipeline.ReadReportAsync(42)).DoesNotContain("Not shown");
+    }
+
+    [Test]
+    public async Task The_notice_of_a_roster_that_cannot_be_understood_does_not_say_that_nothing_was_stored()
+    {
+        // The pull request is stored, without its reviews: the notice must not repeat the failure's own
+        // closing words, which are true only of a read that stops there.
+        await using var pipeline = SuppressionOff();
+        pipeline.Jira.AddSprints41And42();
+        var github = FakeGitHub.For(pipeline);
+        github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 20, 12)).Merged(Local(2026, 1, 22, 12));
+        pipeline.Jira.Handler.Override(HttpMethod.Get, MembersPath, _ => true, StubHttpHandler.Json("""{"members":"Synthetic text of another shape naming fake-ops-one"}"""));
+
+        var exit = await pipeline.RunAsync("sync");
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "GitHub: the members of the Ops team could not be read (GitHub's team members answered in a shape this tool does not understand (InvalidOperationException).). "
+            + "No review was read, and no first code review or first code approval figure is given for GitHub until a sync reads the team.\n");
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM pull_request")).IsEquivalentTo(new[] { 1L });
     }
 
     [Test]

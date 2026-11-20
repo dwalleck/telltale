@@ -76,6 +76,7 @@ public sealed class AdoCollector : IPullRequestCollector
         var rows = new List<RawPullRequest>();
         var events = new List<RawPullRequestEvent>();
         var unreadInARow = 0;
+        var storedWithoutThreads = new List<string>();
         foreach (var repository in _settings.Repositories)
         {
             // Every state: an old pull request can be reviewed, completed or reactivated at any time. The list
@@ -135,8 +136,10 @@ public sealed class AdoCollector : IPullRequestCollector
                 {
                     rows.Add(row with { History = PullRequestHistoryStates.Failed });
                     // The failure's own words end by saying nothing was stored, which is true of a read that
-                    // stops there and not of this one: the pull request is stored, without its threads.
-                    await _notices.WriteLineAsync(
+                    // stops there and not of this one: the pull request is stored, without its threads. That
+                    // is said only once the read has ended, since a later failure can still stop it, and then
+                    // this pull request is not stored either.
+                    storedWithoutThreads.Add(
                         $"Azure DevOps: the threads of a pull request could not be read ({exception.Message.Replace(" Nothing was stored.", "", StringComparison.Ordinal)}). "
                         + "It is stored without them and counted as a pull request whose history was not read; its threads are asked for again at the next sync.");
                     continue;
@@ -146,6 +149,11 @@ public sealed class AdoCollector : IPullRequestCollector
                 rows.Add(row);
                 events.AddRange(itsEvents);
             }
+        }
+
+        foreach (var notice in storedWithoutThreads)
+        {
+            await _notices.WriteLineAsync(notice);
         }
 
         // The list is read whole at every read, so what the store holds afterwards is everything from the

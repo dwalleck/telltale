@@ -243,7 +243,7 @@ public class PullRequestHostCoverageTests
             + "| Merge | GitHub | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n"
             + "| Merge | Azure DevOps | 0 | none | none | none | none |\n"
             + "| Merge | Combined | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n"
-            + "\n- Not shown for GitHub: First code review, First code approval. The members of the Ops group could not be read when the pull requests were last collected, so reviews by the group could not be told apart from code reviews, and no review was collected. These waits are given for no sprint until a collection reads the group; nothing here says that no pull request was reviewed or approved. A merge does not depend on who reviewed, and is shown."
+            + "\n- Not shown for GitHub: First code review, First code approval. The members of the Ops group could not be read at a collection of the pull requests, so reviews by the group could not be told apart from code reviews, and the reviews of the pull requests collected then were not read and have not been read since. These waits are given for no sprint until a collection reads those reviews, which takes the group's members; nothing here says that no pull request was reviewed or approved. A merge does not depend on who reviewed, and is shown."
             + " The combined rows of these waits are marked partial: they hold the other hosts' waits only.\n"
             + CombinedRowsExplained);
     }
