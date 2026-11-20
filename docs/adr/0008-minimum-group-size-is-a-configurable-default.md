@@ -34,3 +34,17 @@ It covers figures derived from Jira, which is the only source built. ADR-0003 wa
 - With either number below its default, a figure for a bucket or a status that one or two people worked on in a sprint is in effect a figure about them, to anyone who knows who worked on what. A report written under such numbers says so (owner decision D67).
 - Changing the setting needs a `derive` and no `backfill`: the store has always held every row, and the numbers decide only what the views show.
 - Opening the database file in another program bypasses the views, as it always has.
+
+## Addendum, 2026-11-19: pull request figures
+
+"A later change that adds ... GitHub data ... decides how the setting applies there." The change that added pull request timing decides it as follows. This is the reading the pull request timing spec was built under, not a numbered owner decision; the owner may replace it.
+
+- For pull request figures both checks count distinct pull request authors, as salted hashes. Jira assignees play no part, also in a sprint that has both kinds of figure.
+- The team check counts the authors of the pull requests that have any pull request observation in the sprint, within the scope the figure covers (one host, or the hosts combined). A sprint that fails it shows no pull request row.
+- The check of a figure counts the authors of the pull requests the figure is computed from. A row that fails only this check keeps its count.
+- Counts that explain a figure (diagnostic counts) are withheld by the same two checks.
+- The numbers are the same two numbers of `minimumGroupSize`, read from the rebuild's record as every view reads them. Zero turns a check off.
+
+The owner's reason above was that the Jira figures aggregate what anyone with access to the board can already see. A repository's pull requests, their authors and their reviews are likewise visible to everyone with access to the repository, so the same default and the same setting are applied. Nothing is stored of who reviewed a pull request, so no figure can be grouped by reviewer.
+
+In a shared repository the authors include people of other teams. The checks count them as they count anyone: the figures are of the configured repositories, and no team membership is inferred.
