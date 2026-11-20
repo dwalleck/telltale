@@ -27,6 +27,14 @@ internal sealed class HostClient : IDisposable
     private static readonly TimeSpan ShortestWait = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan FirstWaitWithoutRetryAfter = TimeSpan.FromSeconds(5);
 
+    // Added to a wait for a reset that is counted from the host's own time: the reset and that time are both
+    // given in whole seconds, and the answer was some moments on its way.
+    private static readonly TimeSpan MarginAfterAReset = TimeSpan.FromSeconds(5);
+
+    // GitHub asks for at least a minute after an answer of its secondary rate limit that names no wait. The
+    // wait doubles with every such answer to one request, up to the longest wait.
+    private static readonly TimeSpan FirstWaitOfGitHubWithoutRetryAfter = TimeSpan.FromMinutes(1);
+
     // How often one request is sent again after a failure that can pass by itself: a 408 or a 5xx that Jira or
     // a gateway answers under load, a connection that drops, an answer that does not come in time. A fetch is one
     // batch (owner decision D38), so without any retry one such moment late in a backfill discards the whole
@@ -70,6 +78,9 @@ internal sealed class HostClient : IDisposable
     /// GitHub's client says so: Azure DevOps sends headers of the same names with another meaning (its reset
     /// is when the usage it tracks is back to nothing, not when requests are taken again) and asks its
     /// clients to wait what <c>Retry-After</c> says, which is what every other host's answers are read by.
+    /// The rest of how GitHub limits its clients goes with it: a 403 that carries a readable
+    /// <c>Retry-After</c> is a rate-limited answer too (its secondary rate limit), and a 429 that names no
+    /// wait is waited on for a minute first, not five seconds.
     /// </param>
     public HostClient(HttpMessageHandler handler, string host, Uri baseUrl, AuthenticationHeaderValue authorization, TimeProvider clock, TextWriter notices, bool namesTheResetOfAUsedUpLimit = false)
     {
@@ -189,8 +200,8 @@ internal sealed class HostClient : IDisposable
     public void Dispose() => _http.Dispose();
 
     /// <summary>
-    /// Sends a request and reads the JSON answer. A rate-limited answer (429, or a used-up limit that names
-    /// its reset, see <see cref="RateLimitReset"/>) is waited out and the request sent again, unless the wait
+    /// Sends a request and reads the JSON answer. A rate-limited answer (429, a used-up limit that names
+    /// its reset, see <see cref="RateLimitReset"/>, or of GitHub a 403 that asks for a wait) is waited out and the request sent again, unless the wait
     /// asked for is longer than <see cref="LongestWait"/>; so is, a few times, a failure that can pass by itself (<see cref="MaxTransientRetries"/>).
     /// Every other way this can fail for reasons outside the tool becomes a
     /// <see cref="UserFacingException"/> that names the request and never quotes the response, which can hold
@@ -300,20 +311,41 @@ internal sealed class HostClient : IDisposable
                 // what the host asked for, and the time named is the end of it.
                 LastRefusal = response.StatusCode;
                 var usedUp = $"{_host}'s rate limit is used up: it answered {(int)response.StatusCode} ({response.StatusCode}) to {call}";
+                //
+                // The reset is a time on the host's clock, and this machine's can run ahead of it: counted
+                // from this machine's clock the wait would end before the limit is lifted. So it is counted
+                // from the time the answer itself gives (its Date header), with a few seconds added because
+                // both times are whole seconds, and from this machine's clock only when the answer gives none.
                 var now = _clock.GetUtcNow();
+                TimeSpan wait;
                 if (RetryAfter(response) is { } asked)
                 {
-                    reset = now + asked;
+                    (reset, wait) = (now + asked, asked);
+                }
+                else if (response.Headers.Date is { } hostTime)
+                {
+                    wait = reset - hostTime;
+                    if (wait <= LongestWait)
+                    {
+                        wait += MarginAfterAReset;
+                    }
+                }
+                else
+                {
+                    wait = reset - now;
                 }
 
-                var wait = reset - now;
                 if (wait > LongestWait)
                 {
                     throw new HostGaveUpException(
                         $"{usedUp} and takes requests again at {reset.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)} UTC. Run the command again after that.");
                 }
 
-                if (await RetryAsync($"{_host}'s rate limit is used up", usedUp, call, started, () => wait > ShortestWait ? wait : ShortestWait, cancellationToken,
+                // A limit the host repeats after it was waited on is not asked about again a second later,
+                // five times over: whatever the answer says, the wait is then at least five seconds, doubled
+                // with every further such answer, so the retries that are left span a clock that is off.
+                var shortest = retries.RateLimited == 0 ? ShortestWait : FirstWaitWithoutRetryAfter * Math.Pow(2, retries.RateLimited - 1);
+                if (await RetryAsync($"{_host}'s rate limit is used up", usedUp, call, started, () => wait > shortest ? wait : shortest, cancellationToken,
                         (retries.RateLimited, MaxRetries)) is { } gaveUp)
                 {
                     throw new HostGaveUpException(gaveUp);
@@ -323,13 +355,18 @@ internal sealed class HostClient : IDisposable
                 return null;
             }
 
-            if (response.StatusCode == HttpStatusCode.TooManyRequests)
+            // GitHub's secondary rate limit is a 403 or a 429 with requests left in the limit the headers
+            // count, so the branch above does not take it. One that carries a readable Retry-After asks for a
+            // wait, whatever its status, and is waited out like any rate-limited answer. A 403 without one
+            // stays a refusal: the answer's body is not read to guess what it meant.
+            var asksForAWaitAsGitHubDoes = _namesTheResetOfAUsedUpLimit && response.StatusCode == HttpStatusCode.Forbidden && RetryAfter(response) is not null;
+            if (response.StatusCode == HttpStatusCode.TooManyRequests || asksForAWaitAsGitHubDoes)
             {
                 // Whatever ends the run below, the request reached Jira and Jira refused it.
                 LastRefusal = response.StatusCode;
-                var rateLimited = RateLimited(call);
+                var rateLimited = RateLimited(call, response.StatusCode);
                 if (await RetryAsync($"{_host} is limiting how often it can be asked", rateLimited, call, started,
-                        () => RetryWait(response, rateLimited, FirstWaitWithoutRetryAfter * Math.Pow(2, retries.RateLimited)), cancellationToken,
+                        () => RetryWait(response, rateLimited, WaitWithoutRetryAfter(retries)), cancellationToken,
                         (retries.RateLimited, MaxRetries)) is { } gaveUp)
                 {
                     throw new HostGaveUpException(gaveUp);
@@ -483,6 +520,23 @@ internal sealed class HostClient : IDisposable
             ? asked.Delta ?? asked.Date - _clock.GetUtcNow()
             : null;
 
-    private string RateLimited(string call) =>
-        $"{_host} is limiting how often it can be asked: it answered 429 (too many requests) to {call}";
+    /// <summary>
+    /// The wait before the next retry for a rate-limited answer that names no wait: five seconds, doubled with
+    /// every such retry. Of GitHub a minute, doubled, and never more than the longest wait: GitHub asks for at
+    /// least a minute after a secondary rate limit, and a wait the tool chose itself must not end the run as
+    /// one the host asked for that was too long.
+    /// </summary>
+    private TimeSpan WaitWithoutRetryAfter(Retries retries)
+    {
+        if (!_namesTheResetOfAUsedUpLimit)
+        {
+            return FirstWaitWithoutRetryAfter * Math.Pow(2, retries.RateLimited);
+        }
+
+        var wait = FirstWaitOfGitHubWithoutRetryAfter * Math.Pow(2, retries.RateLimited);
+        return wait < LongestWait ? wait : LongestWait;
+    }
+
+    private string RateLimited(string call, HttpStatusCode status) =>
+        $"{_host} is limiting how often it can be asked: it answered {(status == HttpStatusCode.TooManyRequests ? "429 (too many requests)" : $"{(int)status} ({status})")} to {call}";
 }

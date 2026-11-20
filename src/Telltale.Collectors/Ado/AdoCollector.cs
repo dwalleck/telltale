@@ -40,7 +40,8 @@ public sealed class AdoCollector : IPullRequestCollector
     private const int MaxRepeatedPagesInARow = 3;
 
     // How many pull requests one after another may fail to give their threads before the read of the host is
-    // given up as failed: the third such failure in a row stops it, and nothing of that read is stored.
+    // given up as failed: the third such failure in a row stops it. What was read before that is kept when
+    // the threads of some pull request were read whole by then (see FetchAsync).
     private const int MaxUnreadHistoriesInARow = 3;
 
     private readonly HttpMessageHandler _handler;
@@ -81,17 +82,57 @@ public sealed class AdoCollector : IPullRequestCollector
         var events = new List<RawPullRequestEvent>();
         var unreadInARow = 0;
         var storedWithoutThreads = new List<string>();
+
+        // The threads are read one pull request at a time, and a pull request counts as read only with all of
+        // them. When the read stops after the threads of some pull requests were read, what was read by then
+        // is given to be stored with the failure, as on GitHub: a first read of a large repository would
+        // otherwise start from nothing every time it stopped late. Three things stop a read that way: the
+        // third pull request in a row whose threads cannot be read, a client that gave up on a thread
+        // request, and the list of a later repository that cannot be read. The pull requests not reached are
+        // left out, row and all, so the next read finds them new or changed and asks for them; those stored
+        // closed with their threads cost it no request. The host is recorded as failed then, never as read.
+        // A read that stops before the threads of any pull request were read gives nothing: it fails as it is.
+        var readWhole = 0;
+        async Task<PullRequestReadStoppedException> StoppedAsync(UserFacingException failure)
+        {
+            // The pull requests stored without their threads are stored by a read that stops, too.
+            await SayAsync(storedWithoutThreads);
+
+            // The failure's own words may end by saying nothing was stored, which is not true of this read.
+            // What the store recorded of the host stays as it was, as after any failed read: the start date
+            // its pull requests were collected under and the repositories the last read that ended went
+            // through. The source is recorded by what writes the batch (PullRequestCollection).
+            return new PullRequestReadStoppedException(
+                $"{failure.Message.Replace(" Nothing was stored.", "", StringComparison.Ordinal)} "
+                + $"The threads of {readWhole.ToString(CultureInfo.InvariantCulture)} pull requests were read before that and are stored, and the next sync reads the rest. "
+                + "Until a read of Azure DevOps finishes, a report says that Azure DevOps's figures rest on a read that failed.",
+                new PullRequestBatch(
+                    rows,
+                    events,
+                    new RawPullRequestHost(Host, PullRequestHostStates.Failed, PullRequestRosterStates.NotRead) { CollectFrom = PullRequestCollection.CollectedFrom(stored, Host), Repositories = PullRequestCollection.RepositoriesRead(stored, Host) },
+                    IdentityHash.SaltFingerprint(_salt),
+                    _clock.GetUtcNow()),
+                failure);
+        }
+
         foreach (var repository in _settings.Repositories)
         {
             // Every state: an old pull request can be reviewed, completed or reactivated at any time. The list
             // does not say when a pull request last changed and cannot be asked for the most recently changed
             // first, so it is read whole at every sync, a backfill or not.
             var listed = new Dictionary<long, (RawPullRequest Row, string? AuthorId)>();
-            await ForEachPullRequestAsync(ado, repository, pullRequest =>
+            try
             {
-                var read = Read(repository, pullRequest);
-                return listed.TryAdd(read.Row.Number, read);
-            }, cancellationToken);
+                await ForEachPullRequestAsync(ado, repository, pullRequest =>
+                {
+                    var read = Read(repository, pullRequest);
+                    return listed.TryAdd(read.Row.Number, read);
+                }, cancellationToken);
+            }
+            catch (UserFacingException failure) when (readWhole > 0)
+            {
+                throw await StoppedAsync(failure);
+            }
 
             foreach (var (row, authorId) in listed.Values.OrderBy(pullRequest => pullRequest.Row.Number))
             {
@@ -153,24 +194,41 @@ public sealed class AdoCollector : IPullRequestCollector
                     rows.Add(row with { History = PullRequestHistoryStates.Failed });
                     // The failure's own words end by saying nothing was stored, which is true of a read that
                     // stops there and not of this one: the pull request is stored, without its threads. That
-                    // is said only once the read has ended, since a later failure can still stop it, and then
-                    // this pull request is not stored either.
+                    // is said only once the read has ended or stopped, since a failure that stops it before
+                    // the threads of any pull request were read leaves this pull request out as well.
                     storedWithoutThreads.Add(
                         $"Azure DevOps: the threads of a pull request could not be read ({exception.Message.Replace(" Nothing was stored.", "", StringComparison.Ordinal)}). "
                         + "It is stored without them and counted as a pull request whose history was not read; its threads are asked for again at the next sync.");
                     continue;
                 }
+                catch (UserFacingException exception)
+                {
+                    // The read stops here: the client gave up, or this is the third pull request in a row
+                    // whose threads could not be read, which the failure's own words do not say.
+                    var failure = exception is HostGaveUpException
+                        ? exception
+                        : new UserFacingException($"{exception.Message} It was the third pull request in a row whose threads could not be read, so the read was stopped.", exception);
+                    if (readWhole > 0)
+                    {
+                        throw await StoppedAsync(failure);
+                    }
+
+                    if (ReferenceEquals(failure, exception))
+                    {
+                        throw;
+                    }
+
+                    throw failure;
+                }
 
                 unreadInARow = 0;
+                readWhole++;
                 rows.Add(row);
                 events.AddRange(itsEvents);
             }
         }
 
-        foreach (var notice in storedWithoutThreads)
-        {
-            await _notices.WriteLineAsync(notice);
-        }
+        await SayAsync(storedWithoutThreads);
 
         // The list is read whole at every read, so what the store holds afterwards is everything from the
         // configured start date on: that date is recorded with it, for derive to mark the sprints before it.
@@ -180,6 +238,14 @@ public sealed class AdoCollector : IPullRequestCollector
             new RawPullRequestHost(Host, PullRequestHostStates.Read, PullRequestRosterStates.NotConfigured) { CollectFrom = _settings.CollectFrom, Repositories = [.. _settings.Repositories.Select(repository => repository.Key)] },
             IdentityHash.SaltFingerprint(_salt),
             _clock.GetUtcNow());
+    }
+
+    private async Task SayAsync(IEnumerable<string> notices)
+    {
+        foreach (var notice in notices)
+        {
+            await _notices.WriteLineAsync(notice);
+        }
     }
 
     /// <summary>The kept fields of one pull request of the list, and its author's identity ID, which is used to classify its events and goes no further.</summary>

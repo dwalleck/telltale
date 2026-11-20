@@ -287,16 +287,21 @@ public sealed class PipelineSteps
     /// <summary>
     /// The as-of time that closes open intervals and the active sprint's window: the clock, read when
     /// derive starts, so after any sync in the same command. It is never earlier than the newest
-    /// thing Jira reported, because Jira's clock can run ahead of this machine's; otherwise an issue
-    /// finished moments ago would fall outside the active sprint.
+    /// thing a host reported, because a host's clock can run ahead of this machine's; otherwise an issue
+    /// finished moments ago would fall outside the active sprint, and a merge or a review made moments ago
+    /// would be missing from the report of the run that collected it. That holds of Jira and of every pull
+    /// request host alike: when a pull request was opened, merged and closed, when each of its events was
+    /// made, and the times of a closing that no longer stands all count toward that newest moment.
     /// </summary>
     private DateTimeOffset AsOf(RawData raw)
     {
         var now = _environment.Clock.GetUtcNow();
-        var newest = raw.Changes.Select(change => change.At)
-            .Concat(raw.Issues.Select(issue => issue.Updated))
-            .DefaultIfEmpty(DateTimeOffset.MinValue)
-            .Max();
+        var newest = raw.Changes.Select(change => (DateTimeOffset?)change.At)
+            .Concat(raw.Issues.Select(issue => (DateTimeOffset?)issue.Updated))
+            .Concat(raw.PullRequests.SelectMany(pullRequest => new[] { pullRequest.Opened, pullRequest.Merged, pullRequest.Closed }))
+            .Concat(raw.PullRequestEvents.Select(happened => (DateTimeOffset?)happened.At))
+            .Concat(raw.PullRequestPastClosures.SelectMany(closure => new[] { closure.Closed, closure.ReopenedBy, closure.Reopened }))
+            .Max() ?? DateTimeOffset.MinValue;
 
         // Windows are half-open, so the as-of time must be after the newest moment, not equal to it.
         // Stored times have millisecond precision.

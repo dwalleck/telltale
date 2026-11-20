@@ -169,11 +169,14 @@ public class PullRequestTimingDistributionTests
     }
 
     [Test]
-    public async Task What_is_dated_at_or_after_the_as_of_time_is_not_counted_until_a_later_run_and_no_wait_is_no_figure()
+    public async Task What_a_host_dates_after_this_machines_clock_is_counted_in_the_same_run_and_the_as_of_time_moves_just_past_it_and_no_wait_is_no_figure()
     {
         // The run is on Wednesday 21 January at noon, in sprint 42, which is still running (it began Monday
         // the 19th at 10:30). One pull request, opened Tuesday the 20th at noon. The host already gives a
-        // review dated at the very instant of the run and a merge dated six hours after it.
+        // review dated at the very instant of the run and a merge dated six hours after it: its clock runs
+        // ahead of this machine's, as Jira's can, and the as-of time is never before what a host reported.
+        // (That nothing dated at or after an as-of time is counted is pinned where it can still happen, on
+        // the derivation itself: PullRequestTimingAsOfTests in the core tests.)
         await using var pipeline = new PipelineHarness(Local(2026, 1, 21, 12));
         pipeline.Jira.AddSprint41();
         pipeline.Jira.AddSprint42(stillRunning: true);
@@ -183,41 +186,37 @@ public class PullRequestTimingDistributionTests
 
         await pipeline.RunAllAsync(["backfill"], ["run", "--sprint", "42"]);
 
-        // Neither has happened as of this run: no pull request and no figure, which is not a figure of zero.
-        await Assert.That(await HarnessSteps.QueryAsync(pipeline, RowsOf("'42'"), RowsOf("NULL"))).IsEqualTo(
-            """
-            | sprint_id | measure | sample_count | median_elapsed_days | p85_elapsed_days | median_business_days | p85_business_days |
-            | --- | --- | --- | --- | --- | --- | --- |
-            | 42 | first_code_review | 0 | NULL | NULL | NULL | NULL |
-            | 42 | first_code_approval | 0 | NULL | NULL | NULL | NULL |
-            | 42 | merge | 0 | NULL | NULL | NULL | NULL |
-            | sprint_id | measure | sample_count | median_elapsed_days | p85_elapsed_days | median_business_days | p85_business_days |
-            | --- | --- | --- | --- | --- | --- | --- |
-            | NULL | first_code_review | 0 | NULL | NULL | NULL | NULL |
-            | NULL | first_code_approval | 0 | NULL | NULL | NULL | NULL |
-            | NULL | merge | 0 | NULL | NULL | NULL | NULL |
-
-            """.ReplaceLineEndings("\n"));
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains(
-            TableHead
-            + "| First code review | 0 | none | none | none | none |\n"
-            + "| First code approval | 0 | none | none | none | none |\n"
-            + "| Merge | 0 | none | none | none | none |\n"
-            + "\n- These are");
-
-        // Twelve hours later, at midnight, both are in the past: the review after 1 day and the merge after
-        // 30 hours, 1.25 days, all on working days.
-        pipeline.Clock.Advance(TimeSpan.FromHours(12));
-        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
-
-        await Assert.That(await HarnessSteps.QueryAsync(pipeline, RowsOf("'42'"))).IsEqualTo(
+        // Both are counted by the run that collected them, in the sprint that is running: the review after
+        // 1 day and the merge after 30 hours, 1.25 days, all on working days. Nothing was approved: no wait
+        // is no figure, which is not a figure of zero.
+        var counted =
             """
             | sprint_id | measure | sample_count | median_elapsed_days | p85_elapsed_days | median_business_days | p85_business_days |
             | --- | --- | --- | --- | --- | --- | --- |
             | 42 | first_code_review | 1 | 1 | 1 | 1 | 1 |
             | 42 | first_code_approval | 0 | NULL | NULL | NULL | NULL |
             | 42 | merge | 1 | 1.25 | 1.25 | 1.25 | 1.25 |
+            | sprint_id | measure | sample_count | median_elapsed_days | p85_elapsed_days | median_business_days | p85_business_days |
+            | --- | --- | --- | --- | --- | --- | --- |
+            | NULL | first_code_review | 0 | NULL | NULL | NULL | NULL |
+            | NULL | first_code_approval | 0 | NULL | NULL | NULL | NULL |
+            | NULL | merge | 0 | NULL | NULL | NULL | NULL |
 
-            """.ReplaceLineEndings("\n"));
+            """.ReplaceLineEndings("\n");
+        await Assert.That(await HarnessSteps.QueryAsync(pipeline, RowsOf("'42'"), RowsOf("NULL"))).IsEqualTo(counted);
+        var report = await pipeline.ReadReportAsync(42);
+        await Assert.That(report).Contains("| First code approval | 0 | none | none | none | none |\n");
+
+        // The as-of time is just past the merge, six hours after this machine's clock.
+        await Assert.That(report).Contains("\n- As-of time: 2026-01-21 18:00 -06:00 (America/Chicago)\n");
+        await Assert.That((await pipeline.QueryAsync<string>("SELECT as_of FROM run")).Single()).IsEqualTo("2026-01-22T00:00:00.001Z");
+
+        // Twelve hours later, at midnight, both are in the past. Nothing is counted twice, and the as-of
+        // time is this machine's clock again.
+        pipeline.Clock.Advance(TimeSpan.FromHours(12));
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+
+        await Assert.That(await HarnessSteps.QueryAsync(pipeline, RowsOf("'42'"), RowsOf("NULL"))).IsEqualTo(counted);
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("\n- As-of time: 2026-01-22 00:00 -06:00 (America/Chicago)\n");
     }
 }

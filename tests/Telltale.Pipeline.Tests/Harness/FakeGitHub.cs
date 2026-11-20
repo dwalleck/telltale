@@ -154,7 +154,7 @@ public sealed class FakeGitHub
     private FakeGitHub(StubHttpHandler handler)
     {
         _handler = handler;
-        handler.On(HttpMethod.Get, PullsPath, request => Page(request, Sorted(request).Select(PullRequestJson)));
+        handler.On(HttpMethod.Get, PullsPath, request => Page(request, Sorted(request).Where(pullRequest => !NotGivenByTheList.Contains(pullRequest.Number)).Select(PullRequestJson)));
         handler.On(HttpMethod.Get, MembersPath, request => Page(request, OpsMembers.Select(AccountJson)));
     }
 
@@ -174,6 +174,21 @@ public sealed class FakeGitHub
 
     /// <summary>The Ops team's members as the next sync reads them.</summary>
     public List<FakeAccount> OpsMembers { get; } = [Accounts.OpsMember];
+
+    /// <summary>
+    /// The numbers of the pull requests the list does not give, as happens to one that changes while the
+    /// list is read and moves to a page already given. Each still answers for itself and for its reviews.
+    /// </summary>
+    public HashSet<int> NotGivenByTheList { get; } = [];
+
+    /// <summary>The numbers of the pull requests asked for one by one (<c>pulls/{number}</c>), in the order asked.</summary>
+    public IReadOnlyList<int> AskedForSingly =>
+        [.. Requests.Select(request => request.Path)
+            .Where(path => path.StartsWith(PullsPath + "/", StringComparison.Ordinal) && path[(PullsPath.Length + 1)..].All(char.IsAsciiDigit))
+            .Select(path => int.Parse(path[(PullsPath.Length + 1)..], CultureInfo.InvariantCulture))];
+
+    /// <summary>The path of the pull request with this number by itself: what a test overrides to make it unreadable.</summary>
+    public static string PullRequestPath(int number) => $"{PullsPath}/{number}";
 
     /// <summary>The most rows any list gives per page, whatever the request asks for.</summary>
     public int PageSize { get; set; } = 100;
@@ -204,6 +219,12 @@ public sealed class FakeGitHub
         // The reviews are those of the pull request that has the number when they are asked for: a test that
         // empties PullRequests and adds the number again is another server's pull request with that number.
         _handler.On(HttpMethod.Get, $"{PullsPath}/{number}/reviews", request => Page(request, PullRequests.Last(listed => listed.Number == number).Reviews.Select(ReviewJson)));
+
+        // The pull request by itself: the same fields as its entry in the list.
+        _handler.On(HttpMethod.Get, PullRequestPath(number), _ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(PullRequestJson(PullRequests.Last(listed => listed.Number == number)).ToJsonString(), Encoding.UTF8, "application/json"),
+        });
 
         // The issue events, as GitHub's REST documentation gives them: besides the closings, a label event,
         // which the tool has no use for, and with each event the account that caused it.

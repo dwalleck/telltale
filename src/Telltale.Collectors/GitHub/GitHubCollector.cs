@@ -188,14 +188,45 @@ public sealed class GitHubCollector : IPullRequestCollector
         // wait that rests on reviews is stated for the whole host. Its list entry is not needed for that. Its
         // author is known here only as the stored hash, which is what a reviewer is compared with.
         // One of a repository that is no longer configured is left as it is: nothing is asked of that repository.
+        //
+        // A row with no stored hash does not say who its author is: a backfill under a new salt cleared the
+        // hash, or the pull request never named an author. Compared with no hash, the author's own review
+        // would be stored as someone else's, and a stored review keeps its class. So the pull request itself
+        // is asked for, which names its author, and the row is stored with the author hashed under the salt
+        // of now. This is the only request for a single pull request, and a row that has its hash costs none.
+        // When the answer is a failure of that pull request (GitHub refuses it, or it cannot be understood),
+        // the row is left as it is, its reviews not read, and the read goes on; a client that gave up stops
+        // the read, as everywhere.
+        var storedWithoutReviews = new List<string>();
         if (rosterRead)
         {
-            var configured = _settings.Repositories.Select(repository => repository.Key).ToHashSet(StringComparer.Ordinal);
+            var configured = _settings.Repositories.ToDictionary(repository => repository.Key, StringComparer.Ordinal);
             foreach (var withoutReviews in known.Values.Where(pullRequest => pullRequest.History != PullRequestHistoryStates.Read
-                && configured.Contains(pullRequest.Repository)
-                && !pullRequests.ContainsKey((pullRequest.Repository, pullRequest.Number))))
+                && configured.ContainsKey(pullRequest.Repository)
+                && !pullRequests.ContainsKey((pullRequest.Repository, pullRequest.Number))).OrderBy(pullRequest => pullRequest.Repository, StringComparer.Ordinal).ThenBy(pullRequest => pullRequest.Number).ToList())
             {
-                pullRequests[(withoutReviews.Repository, withoutReviews.Number)] = (withoutReviews with { History = PullRequestHistoryStates.Read }, id => AuthorHash(id) == withoutReviews.AuthorHash, true);
+                var row = withoutReviews with { History = PullRequestHistoryStates.Read };
+                Func<long, bool> isAuthor = id => AuthorHash(id) == withoutReviews.AuthorHash;
+                if (withoutReviews.AuthorHash is null)
+                {
+                    long? authorId;
+                    try
+                    {
+                        authorId = await AuthorOfAsync(github, configured[withoutReviews.Repository], withoutReviews.Number, cancellationToken);
+                    }
+                    catch (UserFacingException exception) when (exception is not HostGaveUpException)
+                    {
+                        storedWithoutReviews.Add(
+                            $"GitHub: the author of a stored pull request could not be read ({exception.Message}). "
+                            + "Its reviews were not read, since the author's own could not be told from a code review; it stays a pull request whose reviews were not read, and is asked for again at the next sync.");
+                        continue;
+                    }
+
+                    row = row with { AuthorHash = authorId is { } named ? AuthorHash(named) : null };
+                    isAuthor = id => id == authorId;
+                }
+
+                pullRequests[(withoutReviews.Repository, withoutReviews.Number)] = (row, isAuthor, true);
             }
         }
 
@@ -215,7 +246,6 @@ public sealed class GitHubCollector : IPullRequestCollector
         // failed is not counted among them: its failing again says nothing new about the host, and a few such
         // pull requests would otherwise stop every later read at the same place. A client that gave up
         // (HostGaveUpException) is never about one pull request, and stops the read at once.
-        var storedWithoutReviews = new List<string>();
 
         // A pull request found reopened: the list gives it with no closing time, or with another one, and
         // does not say when it was opened again. The store keeps the closing it held, ended by this read's
@@ -386,6 +416,31 @@ public sealed class GitHubCollector : IPullRequestCollector
         // ReopenedBy is the store's to set: the time of the read that gives these.
         var collectedAt = _clock.GetUtcNow();
         return [.. ended.Select(closure => new RawPullRequestPastClosure(Host, repository.Key, number, closure.Key, collectedAt) { Reopened = closure.Value })];
+    }
+
+    /// <summary>
+    /// The account ID of a pull request's author, from the pull request asked for by itself; null when it
+    /// names none. Nothing else of the answer is read, and the ID goes no further than classifying the
+    /// pull request's reviews and the hash.
+    /// </summary>
+    private static async Task<long?> AuthorOfAsync(HostClient github, GitHubRepository repository, long number, CancellationToken cancellationToken)
+    {
+        using var answer = await github.GetAsync($"repos/{repository.Owner}/{repository.Name}/pulls/{number.ToString(CultureInfo.InvariantCulture)}", cancellationToken);
+        try
+        {
+            // An answer that is not this pull request says nothing of its author.
+            if (answer.RootElement.GetProperty("number").GetInt64() != number)
+            {
+                throw new FormatException();
+            }
+
+            return JiraJson.Optional(answer.RootElement, "user")?.GetProperty("id").GetInt64();
+        }
+        catch (Exception exception) when (exception is KeyNotFoundException or InvalidOperationException or FormatException)
+        {
+            // Names only the kind of failure, never a value from the answer.
+            throw new UserFacingException($"GitHub's pull request answered in a shape this tool does not understand ({exception.GetType().Name}).", exception);
+        }
     }
 
     private async Task SayAsync(IEnumerable<string> notices)
