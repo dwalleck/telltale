@@ -99,16 +99,24 @@ public sealed class GitHubCollector : IPullRequestCollector
         // failed may have stored some pull requests and not others (see below), in no order the list has, so
         // a page of stored ones says nothing about the pages after it. The read after a failed one, and the
         // first one, go through the whole list; that costs list pages only, never reviews already read.
+        //
+        // The same holds of one repository: the store may hold some of its pull requests and not others when
+        // the last read that ended did not go through it. That is a repository listed for the first time,
+        // and one listed again after it was taken out, whose earlier read may have stopped part-way. The
+        // store records the repositories the last read that ended went through; the list of any other is
+        // read whole. A store that records none (written before it recorded them) is taken to have gone
+        // through none. A read that stops records what the store had, so it never adds a repository.
         var readInFull = stored.PullRequestHosts.Any(host => host.Host == Host && host.State == PullRequestHostStates.Read);
-        var wholeList = everything || !readInFull;
+        var wentThrough = PullRequestCollection.RepositoriesRead(stored, Host)?.ToHashSet(StringComparer.Ordinal) ?? [];
+        bool WholeListOf(GitHubRepository repository) => everything || !readInFull || !wentThrough.Contains(repository.Key);
 
         // The start date the store's pull requests are collected under after this read, which the store
-        // records: derive marks a sprint that began before it as covered in part. A read of the whole list
+        // records: derive marks a sprint that began before it as covered in part. A read of every whole list
         // brings in everything from the configured date on, so the date is then the configured one. A sync
         // that stops where nothing is new does not go back to older pull requests, so a date moved back, or
         // taken out, takes effect only at a backfill: until then the later of the two dates stands.
         var storedFrom = PullRequestCollection.CollectedFrom(stored, Host);
-        var collectedFrom = wholeList || storedFrom is null || _settings.CollectFrom > storedFrom ? _settings.CollectFrom : storedFrom;
+        var collectedFrom = _settings.Repositories.All(WholeListOf) || storedFrom is null || _settings.CollectFrom > storedFrom ? _settings.CollectFrom : storedFrom;
         foreach (var repository in _settings.Repositories)
         {
             // Every state: an old pull request can be reviewed, merged or reopened at any time. The most
@@ -162,7 +170,7 @@ public sealed class GitHubCollector : IPullRequestCollector
                     return true;
                 },
                 cancellationToken,
-                stopAtAPageWithNothingNew: !wholeList,
+                stopAtAPageWithNothingNew: !WholeListOf(repository),
                 rowsToComeTo: () => storedNotListedYet.Count > 0);
         }
 
