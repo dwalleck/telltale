@@ -88,8 +88,18 @@ internal sealed class HostClient : IDisposable
     /// </summary>
     public async Task<Page> GetPageAsync(string relativeUrl, CancellationToken cancellationToken)
     {
+        // The Link header is read here and nowhere else: an answer to a request that is not paged by it can
+        // carry one too, and that one is never followed, so it must not be able to stop the request.
         var answer = await SendAsync(HttpMethod.Get, relativeUrl, body: null, cancellationToken);
-        return new Page(answer.Body, answer.Next);
+        try
+        {
+            return new Page(answer.Body, answer.Link is null ? null : NextPage(answer.Link, $"{HttpMethod.Get} {relativeUrl}"));
+        }
+        catch
+        {
+            answer.Body.Dispose();
+            throw;
+        }
     }
 
     /// <summary>One page of a list: its JSON, and the next page's address when the answer names one.</summary>
@@ -115,22 +125,22 @@ internal sealed class HostClient : IDisposable
         public void Dispose() => Body.Dispose();
     }
 
-    private sealed record Answer(JsonDocument Body, string? Next, string? Continuation);
+    /// <summary>An answer's JSON, with the two headers a list can be paged by as they came: neither is interpreted until a caller pages by it.</summary>
+    private sealed record Answer(JsonDocument Body, string? Link, string? Continuation);
 
     /// <summary>The token in the answer's <c>x-ms-continuationtoken</c> header; null without one.</summary>
     private static string? ContinuationToken(HttpResponseMessage response) =>
         response.Headers.TryGetValues("x-ms-continuationtoken", out var values) && string.Concat(values).Trim() is { Length: > 0 } token ? token : null;
 
-    /// <summary>The address of the next page from the answer's <c>Link</c> header, relative to the base address; null without one.</summary>
-    private string? NextPage(HttpResponseMessage response, string call)
-    {
-        if (!response.Headers.TryGetValues("Link", out var values))
-        {
-            return null;
-        }
+    /// <summary>The answer's <c>Link</c> header as it came, its values joined; null without one.</summary>
+    private static string? LinkHeader(HttpResponseMessage response) =>
+        response.Headers.TryGetValues("Link", out var values) ? string.Join(",", values) : null;
 
+    /// <summary>The address of the next page from an answer's <c>Link</c> header, relative to the base address; null when it names none.</summary>
+    private string? NextPage(string links, string call)
+    {
         // Link: <https://host/path?page=2>; rel="next", <https://host/path?page=9>; rel="last"
-        foreach (var link in string.Join(",", values).Split(','))
+        foreach (var link in links.Split(','))
         {
             var parts = link.Split(';', StringSplitOptions.TrimEntries);
             if (parts.Length < 2 || !parts.Skip(1).Any(part => part.Replace(" ", "", StringComparison.Ordinal) is "rel=\"next\"" or "rel=next"))
@@ -333,7 +343,7 @@ internal sealed class HostClient : IDisposable
             try
             {
                 await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-                return new Answer(await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken), NextPage(response, call), ContinuationToken(response));
+                return new Answer(await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken), LinkHeader(response), ContinuationToken(response));
             }
             catch (JsonException exception)
             {

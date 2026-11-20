@@ -241,6 +241,28 @@ public class AdoPullRequestCollectionTests
     }
 
     [Test]
+    public async Task A_link_header_on_an_answer_of_a_host_whose_lists_are_not_paged_by_it_is_not_followed_and_stops_nothing()
+    {
+        // Only GitHub's lists name their next page in a Link header. A gateway or the host can put one on any
+        // answer; where the tool does not page by it, it is not read at all, wherever it leads.
+        var (pipeline, ado) = AdoOnly();
+        await using var _ = pipeline;
+        ado.AddPullRequest(1, AdoIdentities.AuthorOne, Local(2026, 1, 20, 12));
+        pipeline.Jira.Handler.Override(HttpMethod.Get, FakeAdo.ThreadsPath(1), _ => true, request =>
+        {
+            var response = StubHttpHandler.Json("""{"count":0,"value":[]}""")(request);
+            response.Headers.TryAddWithoutValidation("Link", "<https://elsewhere.example.invalid/next>; rel=\"next\"");
+            return response;
+        });
+
+        var exit = await pipeline.RunAsync("sync");
+
+        await Assert.That(pipeline.Error.ToString()).IsEmpty();
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That((await pipeline.QueryAsync<string>("SELECT history FROM pull_request")).ToArray()).IsEquivalentTo(new[] { "read" });
+    }
+
+    [Test]
     public async Task Nothing_that_identifies_a_person_or_quotes_a_pull_request_is_written_anywhere()
     {
         var (pipeline, ado) = AdoOnly();
