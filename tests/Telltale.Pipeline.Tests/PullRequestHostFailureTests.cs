@@ -39,7 +39,6 @@ public class PullRequestHostFailureTests
         await Assert.That(pipeline.Out.ToString()).Contains("The store now holds what Jira returned. Issues: 0 before, 2 now. Sprints: 0 before, 2 now.");
     }
 
-#if FINDING_22
     [Test]
     public async Task Run_still_derives_and_writes_the_report_when_only_a_pull_request_host_failed_and_then_fails()
     {
@@ -75,5 +74,4 @@ public class PullRequestHostFailureTests
         await Assert.That(github.Requests).IsEmpty();
         await Assert.That(Directory.Exists(pipeline.ReportDirectory) && Directory.EnumerateFiles(pipeline.ReportDirectory).Any()).IsFalse();
     }
-#endif
 }

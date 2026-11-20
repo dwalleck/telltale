@@ -81,12 +81,42 @@ public sealed class PipelineSteps
     /// The whole pipeline: sync, derive, and the report of <paramref name="sprintId"/> or, without one, of the
     /// most recently completed sprint. When there is no sprint to report, the store has still been brought up
     /// to date, and that is said, not failed (owner decision D28).
+    /// <para>
+    /// A Jira failure stops the run there, as it stops a sync. A pull request host that cannot be read does
+    /// not: by then Jira's batch is stored and so is the host's failure, with whatever the read had read
+    /// whole, and the report has words for exactly that (the host's rows say its last read failed). So the
+    /// run still derives and writes the report, and then fails with the host's message, so that the exit code
+    /// says the store is not up to date.
+    /// </para>
     /// </summary>
     public async Task RunAsync(long? sprintId, CancellationToken cancellationToken)
     {
-        await SyncAsync(cancellationToken);
-        await DeriveAsync(cancellationToken);
-        await ReportAsync(sprintId, needsSprint: false, cancellationToken);
+        await CollectFromJiraAsync(CollectionMode.Incremental, allowEmpty: false, cancellationToken);
+        UserFacingException? hostFailure = null;
+        try
+        {
+            await CollectPullRequestsAsync(CollectionMode.Incremental, cancellationToken);
+        }
+        catch (UserFacingException failure)
+        {
+            hostFailure = failure;
+        }
+
+        try
+        {
+            await DeriveAsync(cancellationToken);
+            await ReportAsync(sprintId, needsSprint: false, cancellationToken);
+        }
+        catch (UserFacingException refusal) when (hostFailure is not null)
+        {
+            // Both are said: the host's failure is why the command fails either way.
+            throw new UserFacingException($"{hostFailure.Message}{Environment.NewLine}{refusal.Message}", new AggregateException(hostFailure, refusal));
+        }
+
+        if (hostFailure is not null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(hostFailure).Throw();
+        }
     }
 
     /// <summary>Brings the raw tables up to date with what changed in Jira since the last sync or backfill.</summary>
