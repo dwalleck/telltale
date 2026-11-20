@@ -42,7 +42,8 @@ public class AdoPullRequestTimingTests
 
         await Assert.That((await pipeline.QueryAsync<(string, string, long, double)>(Figures)).ToArray()).IsEquivalentTo(new[] { ("42", "first_code_review", 1L, 4d) });
         await Assert.That(await pipeline.ReadReportAsync(42)).Contains(
-            "\n## Pull request timing\n\n| Wait from opening to | Pull requests | Median (elapsed days) |\n| --- | ---: | ---: |\n| First code review | 1 | 4.0 |\n| First code approval | 0 | none |\n| Merge | 0 | none |\n");
+            "\n## Pull request timing\n\n| Wait from opening to | Pull requests | Median (elapsed days) | P85 (elapsed days) | Median (business days) | P85 (business days) |\n| --- | ---: | ---: | ---: | ---: | ---: |\n"
+            + "| First code review | 1 | 4.0 | 4.0 | 2.0 | 2.0 |\n| First code approval | 0 | none | none | none | none |\n| Merge | 0 | none | none | none | none |\n");
 
         pullRequest.Voted(AdoIdentities.Reviewer, 5, Local(2026, 2, 3, 12));
         pipeline.Clock.Advance(TimeSpan.FromDays(2));
@@ -50,7 +51,7 @@ public class AdoPullRequestTimingTests
 
         await Assert.That((await pipeline.QueryAsync<(string, string, long, double)>(Figures)).ToArray())
             .IsEquivalentTo(new[] { ("42", "first_code_review", 1L, 4d), ("43", "first_code_approval", 1L, 18d) });
-        await Assert.That(await pipeline.ReadReportAsync(43)).Contains("| First code review | 0 | none |\n| First code approval | 1 | 18.0 |\n| Merge | 0 | none |\n");
+        await Assert.That(await pipeline.ReadReportAsync(43)).Contains("| First code review | 0 | none | none | none | none |\n| First code approval | 1 | 18.0 | 18.0 | 12.0 | 12.0 |\n| Merge | 0 | none | none | none | none |\n");
     }
 
     [Test]
@@ -88,7 +89,7 @@ public class AdoPullRequestTimingTests
 
         // The reviewer's current vote says approved, and has no time: it is no approval the tool can date.
         await Assert.That(await pipeline.QueryAsync<(string, string, long, double)>(Figures)).IsEmpty();
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("| First code review | 0 | none |\n| First code approval | 0 | none |\n| Merge | 0 | none |\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("| First code review | 0 | none | none | none | none |\n| First code approval | 0 | none | none | none | none |\n| Merge | 0 | none | none | none | none |\n");
     }
 
     [Test]
@@ -205,8 +206,8 @@ public class AdoPullRequestTimingTests
 
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).Contains("\nDelivered issues: suppressed\n");
-        await Assert.That(report).Contains("| First code review | 1 | 2.0 |\n| First code approval | 1 | 2.0 |\n| Merge | 1 | 3.0 |\n");
-        await Assert.That(await HarnessSteps.QueryAsync(pipeline, "SELECT sprint_id, measure, sample_count, median_elapsed_days FROM pr_timing_per_sprint ORDER BY measure_position;")).IsEqualTo(
+        await Assert.That(report).Contains("| First code review | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n| First code approval | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n| Merge | 1 | 3.0 | 3.0 | 3.0 | 3.0 |\n");
+        await Assert.That(await HarnessSteps.QueryAsync(pipeline, "SELECT sprint_id, measure, sample_count, median_elapsed_days FROM pr_timing_per_sprint WHERE sprint_id IS NOT NULL ORDER BY measure_position;")).IsEqualTo(
             """
             | sprint_id | measure | sample_count | median_elapsed_days |
             | --- | --- | --- | --- |
