@@ -78,6 +78,10 @@ public class AdoPullRequestCollectionTests
         await Assert.That(ado.Requests.Select(request => request.Headers.Authorization?.ToString() ?? "none").Distinct()).IsEquivalentTo(new[] { basic });
         await Assert.That(ado.Requests.Where(request => request.Path == FakeAdo.ListPath).Select(request => request.Query["searchCriteria.status"]).Distinct()).IsEquivalentTo(new[] { "all" });
         await Assert.That(ado.Requests.All(request => request.Query.ContainsKey("api-version"))).IsTrue();
+
+        // The configured address: its scheme and host (FakeAdo.Requests are those under its organization), and the token goes nowhere else.
+        await Assert.That(ado.Requests.Select(request => request.Address).Distinct()).IsEquivalentTo(new[] { "https://ado.example.invalid" });
+        await Assert.That(pipeline.Jira.Handler.Requests.Where(request => request.Headers.Authorization?.ToString() == basic).Select(request => request.Address).Distinct()).IsEquivalentTo(new[] { "https://ado.example.invalid" });
         await Assert.That((await pipeline.QueryAsync<string>("SELECT repository FROM pull_request WHERE host = 'ado'")).ToArray()).IsEquivalentTo(new[] { FakeAdo.RepositoryKey });
     }
 

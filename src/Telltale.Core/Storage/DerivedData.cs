@@ -345,7 +345,10 @@ public static class PullRequestCoverageStates
     /// <summary>The host's last collection ended and what the measure rests on was read, however little there was.</summary>
     public const string Read = "read";
 
-    /// <summary>The host's last collection failed: what the store holds of it is what earlier collections read.</summary>
+    /// <summary>
+    /// The host's last collection failed: what the store holds of it is what earlier collections read, and what
+    /// the failed one had read whole when it stopped part-way. It may be short of what the host has now.
+    /// </summary>
     public const string FailedRead = "failed read";
 
     /// <summary>The host is configured and no collection of it has ended or failed yet.</summary>
@@ -353,6 +356,13 @@ public static class PullRequestCoverageStates
 
     /// <summary>The host was read, and the reviews the measure rests on were not: the measure has no wait from it.</summary>
     public const string ReviewsNotRead = "reviews not read";
+
+    /// <summary>
+    /// The host's last collection ended, and a repository that is configured now was not one it went through:
+    /// it was added to the configuration since. The host's rows hold the other repositories' pull requests
+    /// only, and the next collection reads the one that is missing.
+    /// </summary>
+    public const string RepositoryNotRead = "repository not read";
 
     /// <summary>A combined row for which every configured host is <see cref="Read"/>.</summary>
     public const string Complete = "complete";

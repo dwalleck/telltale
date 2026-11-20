@@ -91,13 +91,19 @@ public static class PullRequestTiming
                 .ToList();
             foreach (var measure in Measures)
             {
-                // A pull request whose own events the host did not give (PullRequestHistoryStates.Failed) has no
-                // wait that rests on them: an event that was not read can be its first. Its merge is still counted.
-                if (RestsOnReviews(measure) && (withoutReviews.Contains(seen.Host) || seen.History != PullRequestHistoryStates.Read))
+                // A host that is without its reviews has no wait that rests on them, for any pull request. Its merges are still counted.
+                if (RestsOnReviews(measure) && withoutReviews.Contains(seen.Host))
                 {
                     continue;
                 }
 
+                // A pull request whose own events the host did not give at its last collection
+                // (PullRequestHistoryStates.Failed) is not asked about here, on purpose. The events the store
+                // holds of it are from reads that ended, and no event is ever deleted, so one that was not read
+                // is later than all of them: when the stored events already give the first code review or
+                // approval, it stands, and the wait stays in the sprint it was counted in. When they give
+                // none, the event that was not read may be the first, and there is no wait, as for any pull
+                // request without such an event; PullRequestsWithoutReview then counts it as not read.
                 // An end before the opening is no wait the tool can state: the measure has none.
                 if (EndOf(measure, seen, itsEvents) is { } ended && ended >= seen.Opened)
                 {
@@ -128,7 +134,9 @@ public static class PullRequestTiming
     /// say that a host is missing from it, and what keeps a host that was not read from being read as a host
     /// with no pull requests. A host's last collection decides first (never read, or failed); for a host that
     /// was read, a measure that rests on reviews is not covered while the host is without them
-    /// (<see cref="HostsWithoutTheirReviews"/>). A host that is not configured has no row: nothing is said of it.
+    /// (<see cref="HostsWithoutTheirReviews"/>), and no measure is covered in full while a configured repository
+    /// is not among those that read went through (<see cref="RawPullRequestHost.Repositories"/>).
+    /// A host that is not configured has no row: nothing is said of it.
     /// Each row also carries the start date the host's pull requests were collected under, when there is one:
     /// that is per sprint, not per host, so the views apply it (<see cref="PullRequestCoverageStates.Partial"/>).
     /// </summary>
@@ -146,6 +154,11 @@ public static class PullRequestTiming
                 {
                     null => PullRequestCoverageStates.NotRead,
                     PullRequestHostStates.Read when RestsOnReviews(measure) && withoutReviews.Contains(host) => PullRequestCoverageStates.ReviewsNotRead,
+
+                    // The read that ended did not go through every repository that is configured now: one
+                    // was added since. Nothing was asked of it, so the host's rows are not everything the
+                    // configured repositories have, and what is missing is not zero. A sync reads it.
+                    PullRequestHostStates.Read when hosts[host].Repositories is { } read && repositoriesByHost[host].Except(read, StringComparer.Ordinal).Any() => PullRequestCoverageStates.RepositoryNotRead,
                     PullRequestHostStates.Read => PullRequestCoverageStates.Read,
                     _ => PullRequestCoverageStates.FailedRead,
                 },

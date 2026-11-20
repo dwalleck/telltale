@@ -37,6 +37,14 @@ public static class PullRequestsWithoutReview
         {
             // The moment the sprint is looked at: its close, and never later than the as-of time.
             var at = window.Completed is { } completed && completed < asOf ? completed : asOf;
+
+            // A sprint can be started in Jira with a start that is still to come. Its window has not begun at
+            // that moment, so no pull request is its to explain yet: it holds no wait either.
+            if (at <= window.Start)
+            {
+                continue;
+            }
+
             foreach (var pullRequest in counted)
             {
                 if (pullRequest.Opened >= at || pullRequest.Closed < window.Start)
@@ -74,15 +82,20 @@ public static class PullRequestsWithoutReview
             : beforeClosing.Any(happened => happened.Actor == PullRequestEventActors.Automation) ? PullRequestReviewActivities.AutomationOnly
             : PullRequestReviewActivities.None;
 
-        // Events that were not read can hold the first code review, so nothing is said of what the read ones show.
-        if (seen.History != PullRequestHistoryStates.Read)
-        {
-            return (PullRequestReviewStates.HistoryNotRead, activity);
-        }
-
+        // A first code review the stored events already give by that moment stands, whatever the row's
+        // history says now: stored events are from reads that ended and are never deleted, so an event that
+        // was not read since is later than all of them and cannot come before it. A read that fails today
+        // therefore does not put the pull request back into the sprints after its review.
         if (PullRequestTiming.FirstCodeReviewOf(seen, events) is not null)
         {
             return null;
+        }
+
+        // The stored events give none, and events that were not read can hold the first code review: nothing
+        // more is said of what the read ones show.
+        if (seen.History != PullRequestHistoryStates.Read)
+        {
+            return (PullRequestReviewStates.HistoryNotRead, activity);
         }
 
         // The host's rule found no first code review. It stops at an event it cannot classify, which could

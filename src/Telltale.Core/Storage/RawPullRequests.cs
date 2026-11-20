@@ -67,7 +67,8 @@ public static class PullRequestHistoryStates
     /// The pull request's own events were asked for and the host did not give them: it refused or failed the
     /// request, its answer was not understood, or its list did not come to an end. Nothing of that read was
     /// stored, so events may be missing, and they are asked for again at the next sync. Until they are read
-    /// no wait of this pull request that rests on them is stated; the other pull requests of the host are not
+    /// no wait of this pull request that rests on them is stated, unless the events stored by earlier reads
+    /// already give the event that ends it; the other pull requests of the host are not
     /// affected, which is the difference from <see cref="NotRead"/>.
     /// </summary>
     public const string Failed = "failed";
@@ -166,6 +167,15 @@ public sealed record RawPullRequestHost(string Host, string State, string Roster
     /// collection that failed leaves it as it was.
     /// </summary>
     public DateTimeOffset? CollectFrom { get; init; }
+
+    /// <summary>
+    /// The repositories the last read of the host that ended went through, as the host's collector names them
+    /// (<see cref="RawPullRequest.Repository"/>), in the order they were configured then. A read that failed
+    /// leaves it as it was. A repository that is configured now and is not here was added since: no read has
+    /// gone through its list, so what the store lacks of it is not known, and is not nothing. Null when the
+    /// store does not record it (a row written before it was recorded): nothing is concluded from that.
+    /// </summary>
+    public IReadOnlyList<string>? Repositories { get; init; }
 }
 
 /// <summary>The values of <see cref="RawPullRequestHost.State"/>.</summary>

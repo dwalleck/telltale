@@ -321,10 +321,14 @@ public sealed class SqliteStore : ITelltaleStore
         await connection.ExecuteAsync(Command(
             cancellationToken,
             """
-            INSERT INTO pull_request_host (host, state, roster, collect_from) VALUES (@Host, @State, @Roster, @CollectFrom)
-            ON CONFLICT (host) DO UPDATE SET state = excluded.state, roster = excluded.roster, collect_from = excluded.collect_from;
+            INSERT INTO pull_request_host (host, state, roster, collect_from, repositories) VALUES (@Host, @State, @Roster, @CollectFrom, @Repositories)
+            ON CONFLICT (host) DO UPDATE SET state = excluded.state, roster = excluded.roster, collect_from = excluded.collect_from, repositories = excluded.repositories;
             """,
-            new { batch.HostState.Host, batch.HostState.State, batch.HostState.Roster, CollectFrom = StoredTime.ToStored(batch.HostState.CollectFrom) },
+            new
+            {
+                batch.HostState.Host, batch.HostState.State, batch.HostState.Roster, CollectFrom = StoredTime.ToStored(batch.HostState.CollectFrom),
+                Repositories = batch.HostState.Repositories is { } repositories ? JsonSerializer.Serialize(repositories) : null,
+            },
             transaction));
 
         await RecordSaltAsync(connection, transaction, batch.SaltFingerprint, hashedWithBefore, cancellationToken);
@@ -456,7 +460,11 @@ public sealed class SqliteStore : ITelltaleStore
                 Actor = row.Actor,
                 At = StoredTime.FromStored(row.At),
             })],
-            PullRequestHosts = [.. pullRequestHosts.Select(row => new RawPullRequestHost(row.Host, row.State, row.Roster) { CollectFrom = StoredTime.FromStoredOrNull(row.CollectFrom) })],
+            PullRequestHosts = [.. pullRequestHosts.Select(row => new RawPullRequestHost(row.Host, row.State, row.Roster)
+            {
+                CollectFrom = StoredTime.FromStoredOrNull(row.CollectFrom),
+                Repositories = row.Repositories is null ? null : JsonSerializer.Deserialize<string[]>(row.Repositories),
+            })],
         };
     }
 
@@ -1028,6 +1036,7 @@ public sealed class SqliteStore : ITelltaleStore
         public string State { get; init; } = "";
         public string Roster { get; init; } = "";
         public string? CollectFrom { get; init; }
+        public string? Repositories { get; init; }
     }
 
     private sealed class StatusRow

@@ -163,7 +163,7 @@ public sealed class AdoCollector : IPullRequestCollector
         return new PullRequestBatch(
             rows,
             events,
-            new RawPullRequestHost(Host, PullRequestHostStates.Read, PullRequestRosterStates.NotConfigured) { CollectFrom = _settings.CollectFrom },
+            new RawPullRequestHost(Host, PullRequestHostStates.Read, PullRequestRosterStates.NotConfigured) { CollectFrom = _settings.CollectFrom, Repositories = [.. _settings.Repositories.Select(repository => repository.Key)] },
             IdentityHash.SaltFingerprint(_salt));
     }
 

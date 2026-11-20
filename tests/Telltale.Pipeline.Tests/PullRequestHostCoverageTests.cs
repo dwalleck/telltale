@@ -71,7 +71,7 @@ public class PullRequestHostCoverageTests
             "| Merge | GitHub (last read failed) | not known | not known | not known | not known | not known |\n"
             + "| Merge | Azure DevOps | 2 | 3.0 | 4.0 | 3.0 | 4.0 |\n"
             + "| Merge | Combined (partial) | 2 | 3.0 | 4.0 | 3.0 | 4.0 |\n"
-            + "\n- GitHub could not be read when pull requests were last collected. Its figures are of what earlier collections read, so a count may be short of what GitHub has now, and where they read nothing the row says \"not known\": that is not a count of zero."
+            + "\n- GitHub could not be read when pull requests were last collected. Its figures are of what the store holds, which may be short of what GitHub has now: a read that stopped part-way keeps what it had read whole, and the rest is what earlier collections stored. Where the store holds nothing for a row, the row says \"not known\", and so do the rows of the waits for a first code review and a first code approval while the store holds pull requests whose reviews were not read, whatever earlier collections read of them: that is not a count of zero."
             + " The combined rows are marked partial: they leave out whatever a read of GitHub would add.\n"
             + CombinedRowsExplained);
     }
@@ -122,7 +122,7 @@ public class PullRequestHostCoverageTests
             "| First code review | not known | not known | not known | not known | not known |\n"
             + "| First code approval | not known | not known | not known | not known | not known |\n"
             + "| Merge | not known | not known | not known | not known | not known |\n"
-            + "\n- GitHub could not be read when pull requests were last collected. Its figures are of what earlier collections read, so a count may be short of what GitHub has now, and where they read nothing the row says \"not known\": that is not a count of zero.\n"
+            + "\n- GitHub could not be read when pull requests were last collected. Its figures are of what the store holds, which may be short of what GitHub has now: a read that stopped part-way keeps what it had read whole, and the rest is what earlier collections stored. Where the store holds nothing for a row, the row says \"not known\", and so do the rows of the waits for a first code review and a first code approval while the store holds pull requests whose reviews were not read, whatever earlier collections read of them: that is not a count of zero.\n"
             + "- These are");
     }
 

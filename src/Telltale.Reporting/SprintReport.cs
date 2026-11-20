@@ -132,7 +132,7 @@ public static class SprintReport
                 cancellationToken)
             : [];
         var briefVisits = new BriefVisitsInTheReport(briefVisitsChecked, leftOutOfTimeInStatus, leftOutOfCycleTime, HasCycleTimeLine: cycleStarts.Count > 0);
-        AppendMethodNote(report, quality, numbers, briefVisits, baselineSprintIds, withheldBaselineSprints);
+        AppendMethodNote(report, quality, numbers, briefVisits, baselineSprintIds, withheldBaselineSprints, derivedFrom.PullRequestsCounted);
         AppendFooter(report, quality);
 
         if (briefVisitsChecked)
@@ -453,6 +453,7 @@ public static class SprintReport
         var sprintRows = rows.Where(row => row.InNoSprint == 0).ToList();
         AppendPullRequestMeasuresNotShown(report, sprintRows, severalHosts);
         AppendPullRequestHostsNotRead(report, sprintRows, severalHosts);
+        AppendPullRequestHostsWithARepositoryNotRead(report, sprintRows, severalHosts);
         AppendPullRequestHostsCollectedInPart(report, sprintRows, severalHosts);
         if (severalHosts)
         {
@@ -488,7 +489,7 @@ public static class SprintReport
     {
         PullRequestCoverageStates.FailedRead => " (last read failed)",
         PullRequestCoverageStates.NotRead => " (not read yet)",
-        PullRequestCoverageStates.Partial => " (partial)",
+        PullRequestCoverageStates.Partial or PullRequestCoverageStates.RepositoryNotRead => " (partial)",
         _ => "",
     };
 
@@ -525,16 +526,42 @@ public static class SprintReport
     /// One line for each host whose rows do not rest on a finished read, by the reason the view gives: its
     /// last collection failed, or it is configured and was never read. Either way the line says that a row
     /// without a count is not a row that counts nothing. A host that is not configured has no row and no line.
+    /// The figures of a host whose last collection failed are of what the store holds, and not only of
+    /// earlier collections: a read that stopped part-way stores what it had read whole.
     /// </summary>
     private static void AppendPullRequestHostsNotRead(StringBuilder report, IReadOnlyList<PullRequestTimingRow> sprintRows, bool severalHosts)
     {
+        // Said of GitHub only, where reviews can be left unread for a whole host (the Ops group's members).
+        // While the last collection failed, the view gives "failed read" for every measure and cannot say
+        // besides that the review waits are withheld for that reason, though derive gives none then: without
+        // these words the line would explain such a row by a store that holds nothing, which need not be so.
+        const string ReviewRowsOfAFailedRead = ", and so do the rows of the waits for a first code review and a first code approval while the store holds pull requests whose reviews were not read, whatever earlier collections read of them";
+
         foreach (var host in sprintRows.Where(row => row.Coverage is PullRequestCoverageStates.FailedRead or PullRequestCoverageStates.NotRead).GroupBy(row => (row.HostScope, row.Coverage)))
         {
             var name = PullRequestHostLabel(host.Key.HostScope);
             report.Append(host.Key.Coverage == PullRequestCoverageStates.FailedRead
-                    ? $"- {name} could not be read when pull requests were last collected. Its figures are of what earlier collections read, so a count may be short of what {name} has now, and where they read nothing the row says \"not known\": that is not a count of zero."
+                    ? $"- {name} could not be read when pull requests were last collected. Its figures are of what the store holds, which may be short of what {name} has now: a read that stopped part-way keeps what it had read whole, and the rest is what earlier collections stored. Where the store holds nothing for a row, the row says \"not known\"{(host.Key.HostScope == PullRequestHosts.GitHub ? ReviewRowsOfAFailedRead : "")}: that is not a count of zero."
                     : $"- {name} is configured and has not been read yet: no collection of it has finished. Its rows say \"not known\": that is not a count of zero.")
                 .Append(severalHosts ? $" The combined rows are marked partial: they leave out whatever a read of {name} would add." : "")
+                .Append('\n');
+        }
+    }
+
+    /// <summary>
+    /// One line for each host whose rows the view gives as "repository not read": the host's last collection
+    /// ended, and a repository that is configured now was added since, so nothing was asked of it. The line
+    /// names the cause and what repairs it, a sync, and says that a count may be short and that a row without
+    /// a count is not a row that counts nothing. The table marks such a row partial.
+    /// </summary>
+    private static void AppendPullRequestHostsWithARepositoryNotRead(StringBuilder report, IReadOnlyList<PullRequestTimingRow> sprintRows, bool severalHosts)
+    {
+        foreach (var host in sprintRows.Where(row => row.Coverage == PullRequestCoverageStates.RepositoryNotRead).Select(row => row.HostScope).Distinct())
+        {
+            var name = PullRequestHostLabel(host);
+            report.Append($"- A repository was added to {name}'s list in the configuration since {name} was last read, so its pull requests are not in the store: run sync to read it. ")
+                .Append($"Until then {name}'s rows hold only the pull requests of the repositories that were read, so a count may be short of what {name} has, and where the store holds nothing a row says \"not known\": that is not a count of zero.")
+                .Append(severalHosts ? " The combined rows are marked partial: they leave out whatever that repository would add." : "")
                 .Append('\n');
         }
     }
@@ -609,7 +636,7 @@ public static class SprintReport
         // row alone: the view gives no number there for another reason, and the cell says "no Ops group".
         var someNotKnown = rows.Any(row => row.Waiting is null || row.ClosedWithoutReview is null || row.NoActivity is null || row.AutomationOnly is null
             || (row.OpsOnly is null && row.HostScope != PullRequestHosts.Ado) || row.Unclassifiable is null || row.HistoryNotRead is null);
-        report.Append(!someNotKnown ? "\n" : "\n- \"not known\" stands where a row does not rest on a full read of its reviews (the lines under the table above say which and why) and the store holds no such pull request: that is not a count of zero.\n");
+        report.Append(!someNotKnown ? "\n" : "\n- \"not known\" stands where a row does not rest on a full read (the lines under the table above say which rows and why) and the store holds no such pull request: that is not a count of zero.\n");
         report
             .Append("- Still waiting: open at that moment with no first code review yet. A review made later does not take a pull request out of this sprint's number: it was waiting when the sprint closed, and its wait is counted in the sprint of the review.\n")
             .Append("- Closed without one: closed during the sprint, merged or not, with no first code review before it closed. A merge is still counted in the Merge row.\n")
@@ -617,7 +644,7 @@ public static class SprintReport
             .Append("Ops only: something by the Ops group, whatever automation did besides").Append(hosts.Contains(PullRequestHosts.Ado) ? "; Azure DevOps has no Ops group set apart" : "")
             .Append(". Automation only: something by automation and nothing by the Ops group. No activity: nothing, or only the author's own; the pull request's history was read and holds nothing else.\n")
             .Append("- Cannot be classified: something that could have been the first code review cannot be told to be one or not, so the pull request has no first code review that can be relied on. It is in none of the columns before.\n")
-            .Append("- History not read: the pull request's reviews could not be read when it was last collected, so it cannot be said whether it was reviewed. That is not a history that was read and found empty, and the pull request is in none of the columns before.\n")
+            .Append("- History not read: the pull request's reviews could not be read when it was last collected, and no first code review of it was collected before that, so it cannot be said whether it was reviewed. That is not a history that was read and found empty, and the pull request is in none of the columns before.\n")
             .Append("- Like the figures above, these numbers are not subject to the minimum group size, and none is of a person.\n");
     }
 
@@ -638,7 +665,7 @@ public static class SprintReport
     /// built under (<see cref="AppendMinimumGroupSize"/>). The time zone is the one derive stored. The paragraph
     /// on brief visits is its last, and is there only when a status is listed (<see cref="AppendBriefVisitsExplained"/>).
     /// </summary>
-    private static void AppendMethodNote(StringBuilder report, DataQualityRow quality, NumbersInForce numbers, BriefVisitsInTheReport briefVisits, IReadOnlyList<string> baselineSprintIds, IReadOnlyList<string> withheldBaselineSprints)
+    private static void AppendMethodNote(StringBuilder report, DataQualityRow quality, NumbersInForce numbers, BriefVisitsInTheReport briefVisits, IReadOnlyList<string> baselineSprintIds, IReadOnlyList<string> withheldBaselineSprints, bool pullRequestsCounted)
     {
         var (briefVisitsChecked, leftOutOfTimeInStatus, leftOutOfCycleTime, _) = briefVisits;
         report.Append("\n## Method\n\n")
@@ -653,7 +680,7 @@ public static class SprintReport
             // Under exclude a repeated visit that is brief is not in the total, so the sentence says so (owner decision D84).
             .Append(leftOutOfTimeInStatus ? " and leaving out brief visits to a status listed for them (see the paragraph on brief visits below)" : "")
             .Append("; this is accumulated issue time, not effort or the sprint's elapsed duration. Totals and medians use the same privacy rules.\n");
-        AppendMinimumGroupSize(report, numbers, briefVisitsChecked, leftOutOfTimeInStatus);
+        AppendMinimumGroupSize(report, numbers, briefVisitsChecked, leftOutOfTimeInStatus, pullRequestsCounted);
 
         // Said only when there is a baseline: without one the report has no baseline column to explain.
         if (baselineSprintIds.Count > 0)
@@ -849,7 +876,7 @@ public static class SprintReport
     /// after its two counts of the whole store, withheld by their own rule (<see cref="AppendBriefVisitsExplained"/>),
     /// so the sentence on those two says which they are, whether or not this sprint has such a line.
     /// </summary>
-    private static void AppendMinimumGroupSize(StringBuilder report, NumbersInForce numbers, bool briefVisitsChecked, bool leftOutOfTimeInStatus)
+    private static void AppendMinimumGroupSize(StringBuilder report, NumbersInForce numbers, bool briefVisitsChecked, bool leftOutOfTimeInStatus, bool pullRequestsCounted)
     {
         if (!numbers.TeamCheck && !numbers.FigureCheck)
         {
@@ -862,13 +889,19 @@ public static class SprintReport
         var are = numbers.BehindAFigureAre;
 
         // One assignee behind a figure is one person's work, so the opening sentence is said only from two.
+        // With a pull request section in the report, these sentences are about the figures derived from Jira
+        // and say so: the pull request figures are shown whatever the numbers are (owner decision D114), and
+        // "both tables" would no longer say which two.
+        var figure = pullRequestsCounted ? "A figure derived from Jira" : "A figure";
         report.Append(numbers.BehindAFigure >= 2
-            ? "- A figure is shown only where it cannot show one person's work."
-            : "- A figure is shown only for a group of at least the minimum group size.");
+            ? $"- {figure} is shown only where it cannot show one person's work."
+            : $"- {figure} is shown only for a group of at least the minimum group size.");
         if (numbers.TeamCheck)
         {
             report.Append(" The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in it. When the team is smaller than ").Append(team)
-                .Append(", the delivered count and both tables read \"suppressed\", with no rows.");
+                .Append(pullRequestsCounted
+                    ? ", the delivered count, the cycle time table and the time in status table read \"suppressed\", with no rows."
+                    : ", the delivered count and both tables read \"suppressed\", with no rows.");
         }
 
         if (numbers.FigureCheck)
@@ -896,6 +929,11 @@ public static class SprintReport
         else
         {
             report.Append("fewer than ").Append(behindAFigure).Append(' ').Append(are).Append(" among the issues counted. No figure is withheld for the size of a sprint's team.");
+        }
+
+        if (pullRequestsCounted)
+        {
+            report.Append(" The pull request figures and counts are the exception: they are not subject to the minimum group size, and none of them is withheld (see Pull request timing).");
         }
 
         report.Append("\n- An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. An unassigned issue counts toward nobody.\n");

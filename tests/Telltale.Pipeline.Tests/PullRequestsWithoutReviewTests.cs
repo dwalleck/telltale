@@ -138,7 +138,7 @@ public class PullRequestsWithoutReviewTests
         // hold none, which under this coverage is not known: the line that says what that means is there.
         await Assert.That(await pipeline.ReadReportAsync(42)).Contains(
             TableHead + "| GitHub | 1 | 1 | 2 | not known | not known | 1 | 1 |\n"
-            + "\n- \"not known\" stands where a row does not rest on a full read of its reviews (the lines under the table above say which and why) and the store holds no such pull request: that is not a count of zero.\n"
+            + "\n- \"not known\" stands where a row does not rest on a full read (the lines under the table above say which rows and why) and the store holds no such pull request: that is not a count of zero.\n"
             + "- Still waiting");
     }
 
@@ -182,7 +182,7 @@ public class PullRequestsWithoutReviewTests
         await Assert.That(report).Contains("| Merge | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n");
         await Assert.That(report).Contains(
             "| GitHub | not known | not known | not known | not known | not known | not known | 2 |\n\n"
-            + "- \"not known\" stands where a row does not rest on a full read of its reviews (the lines under the table above say which and why) and the store holds no such pull request: that is not a count of zero.\n- Still waiting");
+            + "- \"not known\" stands where a row does not rest on a full read (the lines under the table above say which rows and why) and the store holds no such pull request: that is not a count of zero.\n- Still waiting");
 
         // Read: one was reviewed and is in no column, and the other's history is empty, which is waiting with no activity.
         refused = false;
@@ -221,5 +221,27 @@ public class PullRequestsWithoutReviewTests
             ("42", "github", 0L, 0L, 0L, 0L, (long?)0L, 0L, 0L),
         });
         await Assert.That(await pipeline.ReadReportAsync(42)).Contains("| First code review | 1 | 28.9 |");
+    }
+
+    [Test]
+    public async Task A_sprint_started_in_Jira_with_a_start_still_to_come_counts_no_pull_request()
+    {
+        // Review 2, finding 16. Sprint 43 was started in Jira on Tuesday 3 February with a start date of
+        // Monday the 9th: it is active, and its window has not begun at the as-of time.
+        await using var pipeline = SuppressionOff();
+        pipeline.Jira.AddSprints41And42();
+        pipeline.Jira.AddSprint(43, "Fake Sprint 43", Local(2026, 2, 9, 9), Local(2026, 2, 23, 9));
+        var github = FakeGitHub.For(pipeline);
+        github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 20, 12));
+
+        await pipeline.RunAllAsync(["sync"], ["derive"]);
+
+        // The open pull request was waiting when sprint 42 closed. Sprint 43 has not begun: nothing is its to
+        // explain yet, as it has no wait either.
+        await Assert.That(await CountsAsync(pipeline, "host_scope = 'github' AND sprint_id IN ('42', '43')")).IsEquivalentTo(new[]
+        {
+            ("42", "github", 1L, 0L, 1L, 0L, (long?)0L, 0L, 0L),
+            ("43", "github", 0L, 0L, 0L, 0L, (long?)0L, 0L, 0L),
+        });
     }
 }

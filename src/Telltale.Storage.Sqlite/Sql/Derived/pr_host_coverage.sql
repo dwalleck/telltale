@@ -3,10 +3,14 @@
 -- order the hosts are configured and listed in. coverage is one of:
 --   'read'             the host's last collection ended, and what the measure rests on was read: a count of 0
 --                      is then a count, the host was read and has no such wait;
---   'failed read'      the host's last collection failed: its waits are those of earlier collections, if any;
+--   'failed read'      the host's last collection failed: its waits are those the store holds, from earlier
+--                      collections and from what the failed one had read whole when it stopped part-way;
 --   'not read'         the host is configured and no collection of it has ever ended or failed;
 --   'reviews not read' the host was read, and the reviews the measure rests on were not (the Ops group's
---                      members could not be read): the measure has no wait from this host.
+--                      members could not be read): the measure has no wait from this host;
+--   'repository not read' the host's last collection ended, and a repository configured now was not one it
+--                      went through (pull_request_host.repositories): it was added since, and a sync reads
+--                      it. The rows hold the other repositories' pull requests only.
 -- Under anything but 'read' a missing wait is not known, and is never counted as zero.
 --
 -- collect_from is the start date the host's stored pull requests were collected under, as the collection

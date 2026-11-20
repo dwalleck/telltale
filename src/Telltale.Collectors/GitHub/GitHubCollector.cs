@@ -27,6 +27,10 @@ public sealed class GitHubCollector : IPullRequestCollector
     // that names a next page beyond it, or the same page twice, is not one the tool can read to its end.
     private const int MaxPagesPerList = 10_000;
 
+    // How many pull requests one after another may fail to give their reviews before the read of the host is
+    // stopped as failed: the third such failure in a row stops it.
+    private const int MaxUnreadHistoriesInARow = 3;
+
     private readonly HttpMessageHandler _handler;
     private readonly GitHubSettings _settings;
     private readonly string _token;
@@ -70,8 +74,12 @@ public sealed class GitHubCollector : IPullRequestCollector
             {
                 await ForEachAsync(github, $"orgs/{opsTeam.Organization}/teams/{opsTeam.Slug}/members?per_page={PageSize}", "team members", member => opsMemberIds.Add(member.GetProperty("id").GetInt64()) || true, cancellationToken);
             }
-            catch (UserFacingException exception)
+            catch (UserFacingException exception) when (exception is not HostGaveUpException)
             {
+                // Only a failure that is about the team: GitHub refused it (403, 404), or its list could not
+                // be understood or read to an end. A client that gave up (no connection, the proxy, a rate
+                // limit, a token GitHub does not take) says nothing of the team, and ends the read like any
+                // other failed read, to be run again (owner decision D111).
                 rosterRead = false;
 
                 // The failure's own words may end by saying nothing was stored, which is true of a read that
@@ -168,50 +176,90 @@ public sealed class GitHubCollector : IPullRequestCollector
         // hour, and would start from nothing at every attempt if a failed read kept nothing. Those not reached
         // are left out, row and all, so the next read finds them new or changed and asks for them. The host is
         // recorded as failed then, never as read, and the read after a failed one goes through the whole list.
+        //
+        // One pull request whose own reviews GitHub refuses (403, 404), or whose reviews cannot be understood
+        // or read to their end, does not stop the others from being read, as on Azure DevOps: its row says so
+        // (PullRequestHistoryStates.Failed), none of its reviews is stored from this read, no wait that rests
+        // on them alone is stated, and they are asked for again at every sync until they are read. A few such
+        // pull requests one after another is the host failing, not a pull request: that stops the read, and
+        // those before the last are stored as they are, without their reviews. One the store already holds as
+        // failed is not counted among them: its failing again says nothing new about the host, and a few such
+        // pull requests would otherwise stop every later read at the same place. A client that gave up
+        // (HostGaveUpException) is never about one pull request, and stops the read at once.
         var events = new List<RawPullRequestEvent>();
         var unread = pullRequests.Where(pullRequest => pullRequest.Value.ReadReviews).Select(pullRequest => pullRequest.Key).ToHashSet();
         var toRead = unread.Count;
+        var (readWhole, unreadInARow) = (0, 0);
+        var storedWithoutReviews = new List<string>();
         try
         {
             foreach (var repository in _settings.Repositories)
             {
-                foreach (var (row, isAuthor, _) in pullRequests.Values.Where(pullRequest => pullRequest.ReadReviews && pullRequest.Row.Repository == repository.Key).OrderBy(pullRequest => pullRequest.Row.Number))
+                foreach (var (row, isAuthor, _) in pullRequests.Values.Where(pullRequest => pullRequest.ReadReviews && pullRequest.Row.Repository == repository.Key).OrderBy(pullRequest => pullRequest.Row.Number).ToList())
                 {
+                    var key = (row.Repository, row.Number);
+                    var failedBefore = known.GetValueOrDefault(key)?.History == PullRequestHistoryStates.Failed;
                     var itsEvents = new List<RawPullRequestEvent>();
-                    await ForEachAsync(
-                        github,
-                        $"repos/{repository.Owner}/{repository.Name}/pulls/{row.Number.ToString(CultureInfo.InvariantCulture)}/reviews?per_page={PageSize}",
-                        "pull request reviews",
-                        review =>
-                        {
-                            if (ReadReview(row, isAuthor, opsMemberIds, review) is { } submitted)
+                    try
+                    {
+                        await ForEachAsync(
+                            github,
+                            $"repos/{repository.Owner}/{repository.Name}/pulls/{row.Number.ToString(CultureInfo.InvariantCulture)}/reviews?per_page={PageSize}",
+                            "pull request reviews",
+                            review =>
                             {
-                                itsEvents.Add(submitted);
-                            }
+                                if (ReadReview(row, isAuthor, opsMemberIds, review) is { } submitted)
+                                {
+                                    itsEvents.Add(submitted);
+                                }
 
-                            return true;
-                        },
-                        cancellationToken);
+                                return true;
+                            },
+                            cancellationToken);
+                    }
+                    catch (UserFacingException exception) when (exception is not HostGaveUpException)
+                    {
+                        // The failure's own words may end by saying nothing was stored, which is not true of this pull request.
+                        var said = exception.Message.Replace(" Nothing was stored.", "", StringComparison.Ordinal);
+                        if (!failedBefore && ++unreadInARow >= MaxUnreadHistoriesInARow)
+                        {
+                            throw new UserFacingException($"{said} It was the third pull request in a row whose reviews could not be read, so the read was stopped.", exception);
+                        }
+
+                        pullRequests[key] = (row with { History = PullRequestHistoryStates.Failed }, isAuthor, true);
+                        unread.Remove(key);
+                        storedWithoutReviews.Add(
+                            $"GitHub: the reviews of a pull request could not be read ({said}). "
+                            + "It is stored without them and counted as a pull request whose history was not read; its reviews are asked for again at the next sync.");
+                        continue;
+                    }
+
+                    unreadInARow = 0;
+                    readWhole++;
                     events.AddRange(itsEvents);
-                    unread.Remove((row.Repository, row.Number));
+                    unread.Remove(key);
                 }
             }
         }
         catch (UserFacingException failure) when (unread.Count < toRead)
         {
+            // The pull requests stored without their reviews are stored by a read that stops, too.
+            await SayAsync(storedWithoutReviews);
+
             // The failure's own words may end by saying nothing was stored, which is not true of this read.
             throw new PullRequestReadStoppedException(
                 $"{failure.Message.Replace(" Nothing was stored.", "", StringComparison.Ordinal)} "
-                + $"The reviews of {(toRead - unread.Count).ToString(CultureInfo.InvariantCulture)} of {toRead.ToString(CultureInfo.InvariantCulture)} pull requests were read before that and are stored, and the next sync reads the rest. "
+                + $"The reviews of {readWhole.ToString(CultureInfo.InvariantCulture)} of {toRead.ToString(CultureInfo.InvariantCulture)} pull requests were read before that and are stored, and the next sync reads the rest. "
                 + "Until a read of GitHub finishes, a report says that GitHub's figures rest on a read that failed.",
                 new PullRequestBatch(
                     [.. pullRequests.Where(pullRequest => !unread.Contains(pullRequest.Key)).Select(pullRequest => pullRequest.Value.Row)],
                     events,
-                    new RawPullRequestHost(Host, PullRequestHostStates.Failed, PullRequestRosterStates.NotRead) { CollectFrom = storedFrom },
+                    new RawPullRequestHost(Host, PullRequestHostStates.Failed, PullRequestRosterStates.NotRead) { CollectFrom = storedFrom, Repositories = PullRequestCollection.RepositoriesRead(stored, Host) },
                     IdentityHash.SaltFingerprint(_salt)),
                 failure);
         }
 
+        await SayAsync(storedWithoutReviews);
         return new PullRequestBatch(
             [.. pullRequests.Values.Select(pullRequest => pullRequest.Row)],
             events,
@@ -219,8 +267,16 @@ public sealed class GitHubCollector : IPullRequestCollector
                 Host,
                 PullRequestHostStates.Read,
                 _settings.OpsTeam is null ? PullRequestRosterStates.NotConfigured : rosterRead ? PullRequestRosterStates.Read : PullRequestRosterStates.Failed)
-            { CollectFrom = collectedFrom },
+            { CollectFrom = collectedFrom, Repositories = [.. _settings.Repositories.Select(repository => repository.Key)] },
             IdentityHash.SaltFingerprint(_salt));
+    }
+
+    private async Task SayAsync(IEnumerable<string> notices)
+    {
+        foreach (var notice in notices)
+        {
+            await _notices.WriteLineAsync(notice);
+        }
     }
 
     /// <summary>The kept fields of one pull request of the list, and its author's account ID, which is used to classify its reviews and goes no further.</summary>
