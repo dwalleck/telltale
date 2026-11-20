@@ -14,3 +14,5 @@
 ## Comments
 
 Resolved on synthetic fixtures only (2026-11-19). Nothing was run against a real GitHub host. A sync asks for a pull request's reviews again only when its list entry changed, which assumes a new review moves the pull request's `updated_at`; that is not checked on the enterprise host. The suppression checkbox was replaced by owner decision D114 while the ticket was built.
+
+Checked against the real GitHub host afterwards with the runbook (`docs/runbooks/pr-timing-real-host-check.md`, answers recorded in commit `3d8e5bf`). On the sampled pull request a review moved `updated_at`, the token read the Ops team, the first read fit the rate limit for the pilot repository and start date, the second sync was faster, and hand-checked pull requests were counted in the sprints expected. Still open: `updated_at` was checked on one pull request, a wider backfill was not tested, and no rate-limited answer was seen.
