@@ -69,7 +69,6 @@ public class PullRequestsWithoutReviewTests
             | sprint_id | host_scope | waiting | closed_without_review | no_activity | automation_only | ops_only | unclassifiable | history_not_read |
             | --- | --- | --- | --- | --- | --- | --- | --- | --- |
             | 41 | github | 1 | 1 | 2 | 0 | 0 | 0 | 0 |
-            | 41 | combined | 1 | 1 | 2 | 0 | 0 | 0 | 0 |
             | sprint_id | delivered_count | suppressed |
             | --- | --- | --- |
             | 41 | NULL | 1 |

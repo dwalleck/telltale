@@ -58,11 +58,7 @@ public class AdoPullRequestsWithoutReviewTests
 
         // The unread pull request has no review wait, and its completion is still a merge. The others' waits are given.
         await Assert.That(await FiguresAsync(pipeline)).IsEquivalentTo(new[] { ("42", "first_code_review", 1L, 3d), ("42", "first_code_approval", 1L, 3d), ("42", "merge", 1L, 2d) });
-        await Assert.That(await PullRequestsWithoutReviewTests.CountsAsync(pipeline, "sprint_id = '42'")).IsEquivalentTo(new[]
-        {
-            ("42", "ado", 2L, 0L, 1L, 1L, (long?)null, 0L, 1L),
-            ("42", "combined", 2L, 0L, 1L, 1L, (long?)0L, 0L, 1L),
-        });
+        await Assert.That(await PullRequestsWithoutReviewTests.CountsAsync(pipeline, "sprint_id = '42'")).IsEquivalentTo(new[] { ("42", "ado", 2L, 0L, 1L, 1L, (long?)null, 0L, 1L) });
         var report = await pipeline.ReadReportAsync(42);
         await Assert.That(report).Contains(PullRequestsWithoutReviewTests.TableHead + "| Azure DevOps | 2 | 0 | 1 | 1 | no Ops group | 0 | 1 |\n\n- Still waiting");
         await Assert.That(report).Contains("Ops only: something by the Ops group, whatever automation did besides; Azure DevOps has no Ops group set apart. Automation only:");

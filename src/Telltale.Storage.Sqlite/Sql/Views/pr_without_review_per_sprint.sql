@@ -1,7 +1,8 @@
 -- Pull requests without a first code review, per sprint: the numbers that explain how many pull requests are
 -- behind the first code review figure of pr_timing_per_sprint. One row per sprint that counts and host scope,
 -- when a pull request host is configured; no rows otherwise. host_scope is 'github' or 'ado' for one
--- configured host's pull requests, and 'combined' for those of every configured host together.
+-- configured host's pull requests, and 'combined' for those of every configured host together; there are
+-- 'combined' rows only when more than one host is configured, as in pr_timing_per_sprint.
 --
 -- A sprint is looked at as of its close, or as of the as-of time while it is still running. What happened
 -- later is left out: a pull request reviewed after the close was waiting at the close and is counted so. A
@@ -31,6 +32,7 @@ WITH scope AS (
     SELECT j.key AS host_scope, j.key AS host FROM run r, json_each(r.pull_request_repositories) j
     UNION ALL
     SELECT 'combined', j.key FROM run r, json_each(r.pull_request_repositories) j
+    WHERE (SELECT COUNT(*) FROM run r2, json_each(r2.pull_request_repositories)) > 1
 )
 SELECT s.sprint_id,
        c.host_scope,

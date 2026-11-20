@@ -502,8 +502,8 @@ public static class SprintReport
         AppendTableHead(report, "Host", "Still waiting", "Closed without one", "No activity", "Automation only", "Ops only", "Cannot be classified", "History not read");
         foreach (var (scope, label) in PullRequestHostScopeLabels)
         {
-            // Both hosts together are a row of their own only when there are two: with one it would repeat that host's.
-            if (rows.FirstOrDefault(row => row.HostScope == scope) is not { } row || (scope == "combined" && hosts.Count < 2))
+            // The view gives the row of both hosts together only when there are two: with one it would repeat that host's.
+            if (rows.FirstOrDefault(row => row.HostScope == scope) is not { } row)
             {
                 continue;
             }
