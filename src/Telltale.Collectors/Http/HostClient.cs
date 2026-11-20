@@ -38,9 +38,11 @@ internal sealed class HostClient : IDisposable
     // An answer that does not come in time gets fewer of those retries: each try waits out HttpClient's whole timeout first.
     private const int MaxRetriesAfterNoAnswer = 3;
 
-    // The most one client, and so one command, spends on failures in all: on the requests that failed and were
-    // sent again, and on the waits before sending them. A timeout can take HttpClient's whole timeout, so
-    // counting only the waits would not bound how long a command runs.
+    // The most one client spends on failures in all: on the requests that failed and were sent again, and on
+    // the waits before sending them. A timeout can take HttpClient's whole timeout, so counting only the waits
+    // would not bound how long a read runs. The bound is per client, and so per host: a command makes one
+    // client for Jira and one for each configured pull request host, each with this much of its own, so a
+    // command that reads three hosts can spend three times this.
     private static readonly TimeSpan LongestTimeOnFailures = TimeSpan.FromMinutes(15);
 
     private readonly HttpClient _http;
