@@ -6,13 +6,15 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Telltale.Core;
 
-namespace Telltale.Collectors.Jira;
+namespace Telltale.Collectors.Http;
 
 /// <summary>
-/// Raw HTTP calls to one Jira Cloud site with basic authentication (ADR-0004: no Jira SDK).
+/// Raw HTTP calls to one host: a Jira Cloud site (ADR-0004: no Jira SDK) or a pull request host. The rules
+/// for waiting and giving up were written for Jira and are the same for every host; where a comment below
+/// says Jira, it is the host. Messages name the host the client was made for.
 /// The handler is injected, so production uses the system proxy and certificate store and tests use a stub.
 /// </summary>
-internal sealed class JiraClient : IDisposable
+internal sealed class HostClient : IDisposable
 {
     // How often one request is sent again after a rate-limited answer before the run gives up.
     private const int MaxRetries = 5;
@@ -41,6 +43,7 @@ internal sealed class JiraClient : IDisposable
     private static readonly TimeSpan LongestTimeOnFailures = TimeSpan.FromMinutes(15);
 
     private readonly HttpClient _http;
+    private readonly string _host;
     private readonly TimeProvider _clock;
     private readonly TextWriter _notices;
     private TimeSpan _spentOnFailures;
@@ -49,31 +52,91 @@ internal sealed class JiraClient : IDisposable
     // connection, the proxy's tunnel, TLS, a reset, no answer in time) is most likely a setting, and waiting
     // does not change a setting: it is reported at once. After that the route is known to work, and the same
     // failure is a moment's fault worth waiting out (owner decision D111).
-    private bool _jiraHasAnswered;
+    private bool _hostHasAnswered;
 
     /// <param name="clock">
     /// Times the waits before a request is sent again, and how long a failed request took. Timeouts stay on real time.
     /// </param>
     /// <param name="notices">Where each such wait is announced (standard error), so a waiting command is not a silent one.</param>
-    public JiraClient(HttpMessageHandler handler, Uri siteUrl, string email, string apiToken, TimeProvider clock, TextWriter notices)
+    /// <param name="host">The host's name as messages say it: "Jira", "GitHub".</param>
+    /// <param name="baseUrl">What every request's path is relative to. It ends in a slash.</param>
+    /// <param name="authorization">Sent on every request: no host here sends an authentication challenge.</param>
+    public HostClient(HttpMessageHandler handler, string host, Uri baseUrl, AuthenticationHeaderValue authorization, TimeProvider clock, TextWriter notices)
     {
+        _host = host;
         _clock = clock;
         _notices = notices;
-        _http = new HttpClient(handler, disposeHandler: false) { BaseAddress = siteUrl };
-
-        // Jira sends no authentication challenge, so the header goes on every request.
-        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{email}:{apiToken}")));
+        _http = new HttpClient(handler, disposeHandler: false) { BaseAddress = baseUrl };
+        _http.DefaultRequestHeaders.Authorization = authorization;
         _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
     }
 
+    /// <summary>A client for one Jira Cloud site, with basic authentication.</summary>
+    public static HostClient ForJira(HttpMessageHandler handler, Uri siteUrl, string email, string apiToken, TimeProvider clock, TextWriter notices) =>
+        new(handler, "Jira", siteUrl, new AuthenticationHeaderValue("Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{email}:{apiToken}"))), clock, notices);
+
+    /// <summary>A header sent on every request besides the authorization, e.g. the API version a host asks to be named.</summary>
+    public void AddHeader(string name, string value) => _http.DefaultRequestHeaders.TryAddWithoutValidation(name, value);
+
+    /// <summary>
+    /// GET one page of a list whose answer names the next page in a <c>Link</c> header with <c>rel="next"</c>
+    /// (GitHub). <see cref="Page.Next"/> is that page's address relative to the base address, to pass back
+    /// here, or null when the answer names none: the list has ended. The address is the host's own and is
+    /// followed as given, but only on the host itself: one that leads elsewhere would send the token there,
+    /// so it stops the command.
+    /// </summary>
+    public async Task<Page> GetPageAsync(string relativeUrl, CancellationToken cancellationToken)
+    {
+        var answer = await SendAsync(HttpMethod.Get, relativeUrl, body: null, cancellationToken);
+        return new Page(answer.Body, answer.Next);
+    }
+
+    /// <summary>One page of a list: its JSON, and the next page's address when the answer names one.</summary>
+    public sealed record Page(JsonDocument Body, string? Next) : IDisposable
+    {
+        public void Dispose() => Body.Dispose();
+    }
+
+    private sealed record Answer(JsonDocument Body, string? Next);
+
+    /// <summary>The address of the next page from the answer's <c>Link</c> header, relative to the base address; null without one.</summary>
+    private string? NextPage(HttpResponseMessage response, string call)
+    {
+        if (!response.Headers.TryGetValues("Link", out var values))
+        {
+            return null;
+        }
+
+        // Link: <https://host/path?page=2>; rel="next", <https://host/path?page=9>; rel="last"
+        foreach (var link in string.Join(",", values).Split(','))
+        {
+            var parts = link.Split(';', StringSplitOptions.TrimEntries);
+            if (parts.Length < 2 || !parts.Skip(1).Any(part => part.Replace(" ", "", StringComparison.Ordinal) is "rel=\"next\"" or "rel=next"))
+            {
+                continue;
+            }
+
+            var baseUrl = _http.BaseAddress!.AbsoluteUri;
+            if (parts[0] is ['<', .., '>']
+                && Uri.TryCreate(_http.BaseAddress, parts[0][1..^1], out var next)
+                && next.AbsoluteUri.StartsWith(baseUrl, StringComparison.Ordinal))
+            {
+                return next.AbsoluteUri[baseUrl.Length..];
+            }
+
+            throw new UserFacingException($"{_host} answered {call} with a next page that is not under the configured address, so it was not followed. Nothing was stored.");
+        }
+
+        return null;
+    }
+
     /// <summary>GET a path relative to the site, e.g. <c>rest/api/3/status</c>.</summary>
-    public Task<JsonDocument> GetAsync(string relativeUrl, CancellationToken cancellationToken) =>
-        SendAsync(HttpMethod.Get, relativeUrl, body: null, cancellationToken);
+    public async Task<JsonDocument> GetAsync(string relativeUrl, CancellationToken cancellationToken) =>
+        (await SendAsync(HttpMethod.Get, relativeUrl, body: null, cancellationToken)).Body;
 
     /// <summary>POST a JSON body to a path relative to the site.</summary>
-    public Task<JsonDocument> PostAsync(string relativeUrl, JsonObject body, CancellationToken cancellationToken) =>
-        SendAsync(HttpMethod.Post, relativeUrl, body, cancellationToken);
+    public async Task<JsonDocument> PostAsync(string relativeUrl, JsonObject body, CancellationToken cancellationToken) =>
+        (await SendAsync(HttpMethod.Post, relativeUrl, body, cancellationToken)).Body;
 
     /// <summary>
     /// The status of the last answer that was an error from Jira itself, or null when there has been none.
@@ -90,7 +153,7 @@ internal sealed class JiraClient : IDisposable
     /// <see cref="UserFacingException"/> that names the request and never quotes the response, which can hold
     /// issue or person data.
     /// </summary>
-    private async Task<JsonDocument> SendAsync(HttpMethod method, string relativeUrl, JsonObject? body, CancellationToken cancellationToken)
+    private async Task<Answer> SendAsync(HttpMethod method, string relativeUrl, JsonObject? body, CancellationToken cancellationToken)
     {
         var call = $"{method} {relativeUrl}";
         var retries = new Retries();
@@ -116,7 +179,7 @@ internal sealed class JiraClient : IDisposable
     /// Sends the request once. Null when the request is to be sent again and the wait before that is over:
     /// Jira answered that it is rate limited, or the request failed in a way that can pass by itself.
     /// </summary>
-    private async Task<JsonDocument?> SendOnceAsync(HttpMethod method, string relativeUrl, string call, JsonObject? body, Retries retries, CancellationToken cancellationToken)
+    private async Task<Answer?> SendOnceAsync(HttpMethod method, string relativeUrl, string call, JsonObject? body, Retries retries, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(method, relativeUrl);
         if (body is not null)
@@ -132,10 +195,10 @@ internal sealed class JiraClient : IDisposable
         }
         catch (HttpRequestException exception)
         {
-            if (_jiraHasAnswered && CanPass(exception))
+            if (_hostHasAnswered && CanPass(exception))
             {
-                var failed = $"The connection to Jira failed on {call}";
-                if (await RetryAsync("The connection to Jira failed", failed, call, started, PassingWait(retries), cancellationToken,
+                var failed = $"The connection to {_host} failed on {call}";
+                if (await RetryAsync($"The connection to {_host} failed", failed, call, started, PassingWait(retries), cancellationToken,
                         (retries.Passing, MaxTransientRetries)) is { } gaveUp)
                 {
                     throw new UserFacingException(gaveUp, exception);
@@ -148,20 +211,20 @@ internal sealed class JiraClient : IDisposable
             // DNS, connection, proxy tunnel and TLS failures. The category is enough; the message can name hosts.
             var reason = exception.HttpRequestError == HttpRequestError.Unknown ? "the connection failed" : exception.HttpRequestError.ToString();
             throw new UserFacingException(
-                $"Could not reach Jira ({call}): {reason}. On the corporate network this usually means the proxy or the certificate: "
+                $"Could not reach {_host} ({call}): {reason}. On the corporate network this usually means the proxy or the certificate: "
                 + "check that the system proxy is set and that the corporate root certificate is trusted.",
                 exception);
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
             // Not the user's Ctrl+C: HttpClient's own timeout.
-            var failed = $"Jira did not answer {call} in time";
-            if (!_jiraHasAnswered)
+            var failed = $"{_host} did not answer {call} in time";
+            if (!_hostHasAnswered)
             {
                 throw new UserFacingException($"{failed}.", exception);
             }
 
-            if (await RetryAsync("Jira did not answer in time", failed, call, started, PassingWait(retries), cancellationToken,
+            if (await RetryAsync($"{_host} did not answer in time", failed, call, started, PassingWait(retries), cancellationToken,
                     (retries.Passing, MaxTransientRetries), (retries.NoAnswer, MaxRetriesAfterNoAnswer)) is { } gaveUp)
             {
                 throw new UserFacingException(gaveUp, exception);
@@ -177,19 +240,19 @@ internal sealed class JiraClient : IDisposable
             if (response.StatusCode == HttpStatusCode.ProxyAuthenticationRequired)
             {
                 throw new UserFacingException(
-                    $"The proxy asked for authentication (407) on {call}, so the request never reached Jira. "
+                    $"The proxy asked for authentication (407) on {call}, so the request never reached {_host}. "
                     + "Check the system proxy settings and that this account may use the proxy.");
             }
 
             // An answer came back through the proxy, so the route to Jira works.
-            _jiraHasAnswered = true;
+            _hostHasAnswered = true;
 
             if (response.StatusCode == HttpStatusCode.TooManyRequests)
             {
                 // Whatever ends the run below, the request reached Jira and Jira refused it.
                 LastRefusal = response.StatusCode;
                 var rateLimited = RateLimited(call);
-                if (await RetryAsync("Jira is limiting how often it can be asked", rateLimited, call, started,
+                if (await RetryAsync($"{_host} is limiting how often it can be asked", rateLimited, call, started,
                         () => RetryWait(response, rateLimited, FirstWaitWithoutRetryAfter * Math.Pow(2, retries.RateLimited)), cancellationToken,
                         (retries.RateLimited, MaxRetries)) is { } gaveUp)
                 {
@@ -203,7 +266,7 @@ internal sealed class JiraClient : IDisposable
             if (!response.IsSuccessStatusCode)
             {
                 LastRefusal = response.StatusCode;
-                var answered = $"Jira answered {(int)response.StatusCode} ({response.StatusCode})";
+                var answered = $"{_host} answered {(int)response.StatusCode} ({response.StatusCode})";
                 var failed = $"{answered} to {call}";
                 if (!CanPass(response.StatusCode))
                 {
@@ -223,11 +286,11 @@ internal sealed class JiraClient : IDisposable
             try
             {
                 await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-                return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+                return new Answer(await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken), NextPage(response, call));
             }
             catch (JsonException exception)
             {
-                throw new UserFacingException($"The answer to {call} was not JSON. A proxy or sign-in page may have been served in place of Jira's answer.", exception);
+                throw new UserFacingException($"The answer to {call} was not JSON. A proxy or sign-in page may have been served in place of {_host}'s answer.", exception);
             }
         }
     }
@@ -309,6 +372,6 @@ internal sealed class JiraClient : IDisposable
         return readable > ShortestWait ? readable : ShortestWait;
     }
 
-    private static string RateLimited(string call) =>
-        $"Jira is limiting how often it can be asked: it answered 429 (too many requests) to {call}";
+    private string RateLimited(string call) =>
+        $"{_host} is limiting how often it can be asked: it answered 429 (too many requests) to {call}";
 }

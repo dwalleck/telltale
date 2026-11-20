@@ -7,6 +7,7 @@ using Telltale.Core.Identity;
 using Telltale.Core.Intervals;
 using Telltale.Core.Secrets;
 using Telltale.Core.Storage;
+using Telltale.Collectors.Http;
 using static Telltale.Collectors.Jira.JiraJson;
 
 namespace Telltale.Collectors.Jira;
@@ -69,7 +70,7 @@ public sealed class JiraCollector
     private readonly TextWriter _notices;
 
     /// <param name="secrets">The Jira account's email and API token, and the salt assignees are hashed with.</param>
-    /// <param name="clock">Times the waits before a failed request is sent again, and how long a failed request took (see <see cref="JiraClient"/>).</param>
+    /// <param name="clock">Times the waits before a failed request is sent again, and how long a failed request took (see <see cref="HostClient"/>).</param>
     /// <param name="notices">Where each such wait is announced: standard error.</param>
     public JiraCollector(HttpMessageHandler handler, JiraConfig config, CollectionSecrets secrets, TimeProvider clock, TextWriter notices)
     {
@@ -107,7 +108,7 @@ public sealed class JiraCollector
             IdentityHash.RequireSaltOf(await store.ReadSaltFingerprintAsync(cancellationToken), salt);
         }
 
-        using var jira = new JiraClient(_handler, _config.SiteUrl, _secrets.JiraEmail, _secrets.JiraApiToken, _clock, _notices);
+        using var jira = HostClient.ForJira(_handler, _config.SiteUrl, _secrets.JiraEmail, _secrets.JiraApiToken, _clock, _notices);
 
         var statuses = await FetchStatusesAsync(jira, cancellationToken);
         await RequireConfiguredFieldsAsync(jira, cancellationToken);
@@ -190,7 +191,7 @@ public sealed class JiraCollector
         ? $"\"{(reached - WatermarkOverlap).UtcDateTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}\""
         : $"\"{_config.BackfillStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}\"";
 
-    private static async Task<List<RawStatus>> FetchStatusesAsync(JiraClient jira, CancellationToken cancellationToken)
+    private static async Task<List<RawStatus>> FetchStatusesAsync(HostClient jira, CancellationToken cancellationToken)
     {
         using var document = await jira.GetAsync("rest/api/3/status", cancellationToken);
         return Read<List<RawStatus>>("status list", () => [.. Statuses(document.RootElement).Select(status => new RawStatus(status.Id, status.Name, status.CategoryKey))]);
@@ -203,7 +204,7 @@ public sealed class JiraCollector
     /// Asked once per collection, before anything is fetched with the IDs. The field list's shape is the one
     /// <see cref="JiraDiscovery"/> reads, from Atlassian's documentation; a real site confirms it (ticket 13).
     /// </summary>
-    private async Task RequireConfiguredFieldsAsync(JiraClient jira, CancellationToken cancellationToken)
+    private async Task RequireConfiguredFieldsAsync(HostClient jira, CancellationToken cancellationToken)
     {
         using var document = await jira.GetAsync("rest/api/3/field", cancellationToken);
         var listed = Read("field list", () => document.RootElement.EnumerateArray().Select(field => Text(field, "id")).ToHashSet(StringComparer.Ordinal));
@@ -220,7 +221,7 @@ public sealed class JiraCollector
     /// The board's sprints, from every page of the list (owner decision D11). A list that cannot be followed
     /// to its end for certain stops the run (<see cref="OffsetPaging.StopsWhenInDoubt"/>).
     /// </summary>
-    private async Task<List<RawSprint>> FetchSprintsAsync(JiraClient jira, CancellationToken cancellationToken)
+    private async Task<List<RawSprint>> FetchSprintsAsync(HostClient jira, CancellationToken cancellationToken)
     {
         var listed = await OffsetPages.ReadAllAsync(
             jira,
@@ -252,7 +253,7 @@ public sealed class JiraCollector
             OptionalTime(sprint, "completeDate")));
     }
 
-    private async Task<(List<RawIssue> InScope, List<string> OutOfScopeIssueIds)> FetchIssuesAsync(JiraClient jira, string salt, string updatedSince, CancellationToken cancellationToken)
+    private async Task<(List<RawIssue> InScope, List<string> OutOfScopeIssueIds)> FetchIssuesAsync(HostClient jira, string salt, string updatedSince, CancellationToken cancellationToken)
     {
         // The project keys come from the configuration, not from Jira (owner decision D2). They are checked
         // again here, where they enter the JQL, so no caller can pass text that is more than a key.
@@ -390,7 +391,7 @@ public sealed class JiraCollector
         var value => value?.GetString(),
     };
 
-    private async Task<List<RawChange>> FetchChangesAsync(JiraClient jira, List<RawIssue> issues, CancellationToken cancellationToken)
+    private async Task<List<RawChange>> FetchChangesAsync(HostClient jira, List<RawIssue> issues, CancellationToken cancellationToken)
     {
         var changes = new List<RawChange>();
 
@@ -522,7 +523,7 @@ public sealed class JiraCollector
     /// before gave, until a page gives none. <paramref name="read"/> takes what it keeps from each page and
     /// returns how many entries the page held; the page itself is released before the next is asked for.
     /// </summary>
-    private static async Task ForEachPageAsync(JiraClient jira, string relativeUrl, JsonObject body, string what, Func<JsonElement, int> read, CancellationToken cancellationToken)
+    private static async Task ForEachPageAsync(HostClient jira, string relativeUrl, JsonObject body, string what, Func<JsonElement, int> read, CancellationToken cancellationToken)
     {
         var tokens = new HashSet<string>(StringComparer.Ordinal);
         for (var page = 1; ; page++)
