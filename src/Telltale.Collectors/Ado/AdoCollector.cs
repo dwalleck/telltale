@@ -23,6 +23,8 @@ namespace Telltale.Collectors.Ado;
 /// </summary>
 public sealed class AdoCollector : IPullRequestCollector
 {
+    // The one version asked for, of every request. Azure DevOps Services has it, and Azure DevOps Server from
+    // release 2022.1 on; an older Server refuses it. The README says so beside ado.apiUrl: there is no setting.
     private const string ApiVersion = "api-version=7.1";
 
     // How many pull requests one request of the list asks for. The list is asked again from where the last
@@ -76,6 +78,7 @@ public sealed class AdoCollector : IPullRequestCollector
         var rows = new List<RawPullRequest>();
         var events = new List<RawPullRequestEvent>();
         var unreadInARow = 0;
+        var storedWithoutThreads = new List<string>();
         foreach (var repository in _settings.Repositories)
         {
             // Every state: an old pull request can be reviewed, completed or reactivated at any time. The list
@@ -121,17 +124,24 @@ public sealed class AdoCollector : IPullRequestCollector
                 // does not stop the others from being read: its row says so, none of its threads is stored
                 // from this read, and no wait that rests on them is stated until a sync reads them. A few such
                 // pull requests one after another is the host failing, not a pull request: that stops the read.
+                // One that the store already holds as not read for this reason is not counted among them: it
+                // failed at an earlier sync too, so its failing again says nothing new about the host, and a
+                // few such pull requests would otherwise fail every later read of the host, where those
+                // between them are closed and no longer asked for.
+                var failedBefore = before?.History == PullRequestHistoryStates.Failed;
                 var itsEvents = new List<RawPullRequestEvent>();
                 try
                 {
                     await ForEachThreadAsync(ado, repository, row.Number, thread => itsEvents.AddRange(ReadThread(row, authorId, thread)), cancellationToken);
                 }
-                catch (UserFacingException exception) when (++unreadInARow < MaxUnreadHistoriesInARow)
+                catch (UserFacingException exception) when (failedBefore || ++unreadInARow < MaxUnreadHistoriesInARow)
                 {
                     rows.Add(row with { History = PullRequestHistoryStates.Failed });
                     // The failure's own words end by saying nothing was stored, which is true of a read that
-                    // stops there and not of this one: the pull request is stored, without its threads.
-                    await _notices.WriteLineAsync(
+                    // stops there and not of this one: the pull request is stored, without its threads. That
+                    // is said only once the read has ended, since a later failure can still stop it, and then
+                    // this pull request is not stored either.
+                    storedWithoutThreads.Add(
                         $"Azure DevOps: the threads of a pull request could not be read ({exception.Message.Replace(" Nothing was stored.", "", StringComparison.Ordinal)}). "
                         + "It is stored without them and counted as a pull request whose history was not read; its threads are asked for again at the next sync.");
                     continue;
@@ -143,7 +153,18 @@ public sealed class AdoCollector : IPullRequestCollector
             }
         }
 
-        return new PullRequestBatch(rows, events, new RawPullRequestHost(Host, PullRequestHostStates.Read, PullRequestRosterStates.NotConfigured), IdentityHash.SaltFingerprint(_salt));
+        foreach (var notice in storedWithoutThreads)
+        {
+            await _notices.WriteLineAsync(notice);
+        }
+
+        // The list is read whole at every read, so what the store holds afterwards is everything from the
+        // configured start date on: that date is recorded with it, for derive to mark the sprints before it.
+        return new PullRequestBatch(
+            rows,
+            events,
+            new RawPullRequestHost(Host, PullRequestHostStates.Read, PullRequestRosterStates.NotConfigured) { CollectFrom = _settings.CollectFrom },
+            IdentityHash.SaltFingerprint(_salt));
     }
 
     /// <summary>The kept fields of one pull request of the list, and its author's identity ID, which is used to classify its events and goes no further.</summary>
@@ -154,9 +175,11 @@ public sealed class AdoCollector : IPullRequestCollector
 
         // The closing time is taken only from a pull request that says it is closed: completed or abandoned.
         // One of those without a closing time is an answer in a shape the tool does not know.
+        // Times are cut to what the store keeps (StoredTime): Azure DevOps gives seven digits of a second, and a
+        // row is compared with the stored one to tell whether anything changed.
         DateTimeOffset? closed = status == "active" ? null
-            : (status is "completed" or "abandoned") ? JiraTime.Parse(pullRequest.GetProperty("closedDate"))
-            : JiraJson.Optional(pullRequest, "closedDate") is { } closedDate ? JiraTime.Parse(closedDate)
+            : (status is "completed" or "abandoned") ? StoredTime.AsStored(JiraTime.Parse(pullRequest.GetProperty("closedDate")))
+            : JiraJson.Optional(pullRequest, "closedDate") is { } closedDate ? StoredTime.AsStored(JiraTime.Parse(closedDate))
             : null;
         return (new RawPullRequest
         {
@@ -165,7 +188,7 @@ public sealed class AdoCollector : IPullRequestCollector
             Number = pullRequest.GetProperty("pullRequestId").GetInt64(),
 
             // creationDate is the first opening: it does not move when a draft is published or a pull request is reactivated.
-            Opened = JiraTime.Parse(pullRequest.GetProperty("creationDate")),
+            Opened = StoredTime.AsStored(JiraTime.Parse(pullRequest.GetProperty("creationDate"))),
 
             // Only completion is a merge: an abandoned pull request has a closing time too, and no merge time.
             Merged = status == "completed" ? closed : null,

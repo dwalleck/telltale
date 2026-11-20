@@ -19,7 +19,7 @@ public class PullRequestRosterTests
     private const string MembersPath = "/api/v3/orgs/fake-org/teams/fake-ops/members";
 
     private const string NotShown =
-        "- Not shown: First code review, First code approval. The members of the Ops group could not be read when the pull requests were last collected, so reviews by the group could not be told apart from code reviews, and no review was collected. These waits are given for no sprint until a collection reads the group; nothing here says that no pull request was reviewed or approved. A merge does not depend on who reviewed, and is shown.\n";
+        "- Not shown: First code review, First code approval. The members of the Ops group could not be read at a collection of the pull requests, so reviews by the group could not be told apart from code reviews, and the reviews of the pull requests collected then were not read and have not been read since. These waits are given for no sprint until a collection reads those reviews, which takes the group's members; nothing here says that no pull request was reviewed or approved. A merge does not depend on who reviewed, and is shown.\n";
 
     private static async Task<(string, string, long, double)[]> FiguresAsync(PipelineHarness pipeline) =>
         [.. await pipeline.QueryAsync<(string, string, long, double)>(Figures)];
@@ -75,6 +75,26 @@ public class PullRequestRosterTests
     }
 
     [Test]
+    public async Task The_notice_of_a_roster_that_cannot_be_understood_does_not_say_that_nothing_was_stored()
+    {
+        // The pull request is stored, without its reviews: the notice must not repeat the failure's own
+        // closing words, which are true only of a read that stops there.
+        await using var pipeline = SuppressionOff();
+        pipeline.Jira.AddSprints41And42();
+        var github = FakeGitHub.For(pipeline);
+        github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 20, 12)).Merged(Local(2026, 1, 22, 12));
+        pipeline.Jira.Handler.Override(HttpMethod.Get, MembersPath, _ => true, StubHttpHandler.Json("""{"members":"Synthetic text of another shape naming fake-ops-one"}"""));
+
+        var exit = await pipeline.RunAsync("sync");
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "GitHub: the members of the Ops team could not be read (GitHub's team members answered in a shape this tool does not understand (InvalidOperationException).). "
+            + "No review was read, and no first code review or first code approval figure is given for GitHub until a sync reads the team.\n");
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM pull_request")).IsEquivalentTo(new[] { 1L });
+    }
+
+    [Test]
     public async Task A_roster_that_fails_at_a_later_sync_withholds_the_review_figures_already_given_until_it_is_read_again()
     {
         await using var pipeline = SuppressionOff();
@@ -106,6 +126,41 @@ public class PullRequestRosterTests
 
         await Assert.That(github.ReviewsAskedFor).IsEquivalentTo(new[] { 1, 2 });
         await Assert.That(await FiguresAsync(pipeline)).IsEquivalentTo(new[] { ("42", "first_code_review", 2L, 2d), ("42", "first_code_approval", 1L, 3d), ("42", "merge", 1L, 4d) });
+    }
+
+    [Test]
+    public async Task A_pull_request_stored_without_its_reviews_is_read_once_the_roster_is_although_the_list_no_longer_brings_it()
+    {
+        // Pull request 1 is stored while the roster cannot be read: without its reviews. Then the start date
+        // is set after its last update, so the list pass leaves it out. Its reviews are asked for all the
+        // same: while it stays unread, neither review figure is given for the whole host.
+        await using var pipeline = SuppressionOff();
+        pipeline.Jira.AddSprints41And42();
+        var github = FakeGitHub.For(pipeline);
+        github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 20, 12))
+            .Reviewed(Accounts.AuthorOne, "COMMENTED", Local(2026, 1, 20, 13))
+            .Reviewed(Accounts.OpsMember, "APPROVED", Local(2026, 1, 20, 14))
+            .Reviewed(Accounts.Reviewer, "COMMENTED", Local(2026, 1, 21, 12));
+        var readable = RefuseTheRoster(pipeline);
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+        await Assert.That((await pipeline.QueryAsync<string>("SELECT history FROM pull_request")).ToArray()).IsEquivalentTo(new[] { "not read" });
+
+        readable();
+        pipeline.Config["github"]!["collectFrom"] = "2026-01-25";
+        github.AddPullRequest(2, Accounts.AuthorTwo, Local(2026, 1, 26, 12)).Reviewed(Accounts.Reviewer, "COMMENTED", Local(2026, 1, 28, 12));
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+
+        await Assert.That(github.ReviewsAskedFor).IsEquivalentTo(new[] { 1, 2 });
+        await Assert.That((await pipeline.QueryAsync<string>("SELECT pr_number || ': ' || history FROM pull_request ORDER BY pr_number")).ToArray()).IsEquivalentTo(new[] { "1: read", "2: read" });
+
+        // The author's own review and the Ops approval are told apart as at any other read: the wait of pull
+        // request 1 ends with the reviewer's comment, a day after it was opened.
+        await Assert.That(await FiguresAsync(pipeline)).IsEquivalentTo(new[] { ("42", "first_code_review", 2L, 1.5d) });
+        await Assert.That(await pipeline.ReadReportAsync(42)).DoesNotContain("Not shown");
+
+        // And it is asked for once: read, it costs no request at the next sync.
+        await pipeline.RunAllAsync(["sync"]);
+        await Assert.That(github.ReviewsAskedFor).IsEquivalentTo(new[] { 1, 2 });
     }
 
     [Test]

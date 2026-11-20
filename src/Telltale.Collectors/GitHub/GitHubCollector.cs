@@ -73,14 +73,32 @@ public sealed class GitHubCollector : IPullRequestCollector
             catch (UserFacingException exception)
             {
                 rosterRead = false;
+
+                // The failure's own words may end by saying nothing was stored, which is true of a read that
+                // stops there and not of this one: the pull requests are stored, without their reviews.
                 await _notices.WriteLineAsync(
-                    $"GitHub: the members of the Ops team could not be read ({exception.Message}). "
+                    $"GitHub: the members of the Ops team could not be read ({exception.Message.Replace(" Nothing was stored.", "", StringComparison.Ordinal)}). "
                     + "No review was read, and no first code review or first code approval figure is given for GitHub until a sync reads the team.");
             }
         }
 
         var known = stored.PullRequests.Where(pullRequest => pullRequest.Host == Host).ToDictionary(pullRequest => (pullRequest.Repository, pullRequest.Number));
-        var pullRequests = new Dictionary<(string Repository, long Number), (RawPullRequest Row, long? AuthorId, bool ReadReviews)>();
+        var pullRequests = new Dictionary<(string Repository, long Number), (RawPullRequest Row, Func<long, bool> IsAuthor, bool ReadReviews)>();
+
+        // Stopping at a page with nothing new is right only when the last read of the host ended: one that
+        // failed may have stored some pull requests and not others (see below), in no order the list has, so
+        // a page of stored ones says nothing about the pages after it. The read after a failed one, and the
+        // first one, go through the whole list; that costs list pages only, never reviews already read.
+        var readInFull = stored.PullRequestHosts.Any(host => host.Host == Host && host.State == PullRequestHostStates.Read);
+        var wholeList = everything || !readInFull;
+
+        // The start date the store's pull requests are collected under after this read, which the store
+        // records: derive marks a sprint that began before it as covered in part. A read of the whole list
+        // brings in everything from the configured date on, so the date is then the configured one. A sync
+        // that stops where nothing is new does not go back to older pull requests, so a date moved back, or
+        // taken out, takes effect only at a backfill: until then the later of the two dates stands.
+        var storedFrom = PullRequestCollection.CollectedFrom(stored, Host);
+        var collectedFrom = wholeList || storedFrom is null || _settings.CollectFrom > storedFrom ? _settings.CollectFrom : storedFrom;
         foreach (var repository in _settings.Repositories)
         {
             // Every state: an old pull request can be reviewed, merged or reopened at any time. The most
@@ -120,34 +138,78 @@ public sealed class GitHubCollector : IPullRequestCollector
 
                     pullRequests[(row.Repository, row.Number)] = (
                         readReviews && !rosterRead ? row with { History = PullRequestHistoryStates.NotRead } : row,
-                        authorId,
+                        id => id == authorId,
                         readReviews && rosterRead);
                     return true;
                 },
                 cancellationToken,
-                stopAtAPageWithNothingNew: !everything);
+                stopAtAPageWithNothingNew: !wholeList);
         }
 
-        var events = new List<RawPullRequestEvent>();
-        foreach (var repository in _settings.Repositories)
+        // A stored pull request whose reviews were not read is read now, whether or not the list pass came to
+        // it: it can lie beyond the page a sync stops at, or before the start date, and while it stays unread no
+        // wait that rests on reviews is stated for the whole host. Its list entry is not needed for that. Its
+        // author is known here only as the stored hash, which is what a reviewer is compared with.
+        // One of a repository that is no longer configured is left as it is: nothing is asked of that repository.
+        if (rosterRead)
         {
-            foreach (var (row, authorId, _) in pullRequests.Values.Where(pullRequest => pullRequest.ReadReviews && pullRequest.Row.Repository == repository.Key).OrderBy(pullRequest => pullRequest.Row.Number))
+            var configured = _settings.Repositories.Select(repository => repository.Key).ToHashSet(StringComparer.Ordinal);
+            foreach (var withoutReviews in known.Values.Where(pullRequest => pullRequest.History != PullRequestHistoryStates.Read
+                && configured.Contains(pullRequest.Repository)
+                && !pullRequests.ContainsKey((pullRequest.Repository, pullRequest.Number))))
             {
-                await ForEachAsync(
-                    github,
-                    $"repos/{repository.Owner}/{repository.Name}/pulls/{row.Number.ToString(CultureInfo.InvariantCulture)}/reviews?per_page={PageSize}",
-                    "pull request reviews",
-                    review =>
-                    {
-                        if (ReadReview(row, authorId, opsMemberIds, review) is { } submitted)
-                        {
-                            events.Add(submitted);
-                        }
-
-                        return true;
-                    },
-                    cancellationToken);
+                pullRequests[(withoutReviews.Repository, withoutReviews.Number)] = (withoutReviews with { History = PullRequestHistoryStates.Read }, id => AuthorHash(id) == withoutReviews.AuthorHash, true);
             }
+        }
+
+        // The reviews are read one pull request at a time, and a pull request counts as read only with all of
+        // them. When a request fails after some pull requests were read whole, those are given to be stored
+        // with the failure: a first read of a large repository can need more requests than GitHub allows in an
+        // hour, and would start from nothing at every attempt if a failed read kept nothing. Those not reached
+        // are left out, row and all, so the next read finds them new or changed and asks for them. The host is
+        // recorded as failed then, never as read, and the read after a failed one goes through the whole list.
+        var events = new List<RawPullRequestEvent>();
+        var unread = pullRequests.Where(pullRequest => pullRequest.Value.ReadReviews).Select(pullRequest => pullRequest.Key).ToHashSet();
+        var toRead = unread.Count;
+        try
+        {
+            foreach (var repository in _settings.Repositories)
+            {
+                foreach (var (row, isAuthor, _) in pullRequests.Values.Where(pullRequest => pullRequest.ReadReviews && pullRequest.Row.Repository == repository.Key).OrderBy(pullRequest => pullRequest.Row.Number))
+                {
+                    var itsEvents = new List<RawPullRequestEvent>();
+                    await ForEachAsync(
+                        github,
+                        $"repos/{repository.Owner}/{repository.Name}/pulls/{row.Number.ToString(CultureInfo.InvariantCulture)}/reviews?per_page={PageSize}",
+                        "pull request reviews",
+                        review =>
+                        {
+                            if (ReadReview(row, isAuthor, opsMemberIds, review) is { } submitted)
+                            {
+                                itsEvents.Add(submitted);
+                            }
+
+                            return true;
+                        },
+                        cancellationToken);
+                    events.AddRange(itsEvents);
+                    unread.Remove((row.Repository, row.Number));
+                }
+            }
+        }
+        catch (UserFacingException failure) when (unread.Count < toRead)
+        {
+            // The failure's own words may end by saying nothing was stored, which is not true of this read.
+            throw new PullRequestReadStoppedException(
+                $"{failure.Message.Replace(" Nothing was stored.", "", StringComparison.Ordinal)} "
+                + $"The reviews of {(toRead - unread.Count).ToString(CultureInfo.InvariantCulture)} of {toRead.ToString(CultureInfo.InvariantCulture)} pull requests were read before that and are stored, and the next sync reads the rest. "
+                + "Until a read of GitHub finishes, a report says that GitHub's figures rest on a read that failed.",
+                new PullRequestBatch(
+                    [.. pullRequests.Where(pullRequest => !unread.Contains(pullRequest.Key)).Select(pullRequest => pullRequest.Value.Row)],
+                    events,
+                    new RawPullRequestHost(Host, PullRequestHostStates.Failed, PullRequestRosterStates.NotRead) { CollectFrom = storedFrom },
+                    IdentityHash.SaltFingerprint(_salt)),
+                failure);
         }
 
         return new PullRequestBatch(
@@ -156,7 +218,8 @@ public sealed class GitHubCollector : IPullRequestCollector
             new RawPullRequestHost(
                 Host,
                 PullRequestHostStates.Read,
-                _settings.OpsTeam is null ? PullRequestRosterStates.NotConfigured : rosterRead ? PullRequestRosterStates.Read : PullRequestRosterStates.Failed),
+                _settings.OpsTeam is null ? PullRequestRosterStates.NotConfigured : rosterRead ? PullRequestRosterStates.Read : PullRequestRosterStates.Failed)
+            { CollectFrom = collectedFrom },
             IdentityHash.SaltFingerprint(_salt));
     }
 
@@ -164,8 +227,11 @@ public sealed class GitHubCollector : IPullRequestCollector
     private (RawPullRequest Row, long? AuthorId) Read(GitHubRepository repository, JsonElement pullRequest)
     {
         var authorId = JiraJson.Optional(pullRequest, "user")?.GetProperty("id").GetInt64();
-        var merged = JiraJson.Optional(pullRequest, "merged_at") is { } mergedAt ? JiraTime.Parse(mergedAt) : (DateTimeOffset?)null;
-        var closed = JiraJson.Optional(pullRequest, "closed_at") is { } closedAt ? JiraTime.Parse(closedAt) : (DateTimeOffset?)null;
+
+        // Times are in the form the store keeps (StoredTime), since a row is compared with the stored one.
+        // GitHub gives times to the second today, so this changes nothing unless a host gives more.
+        var merged = JiraJson.Optional(pullRequest, "merged_at") is { } mergedAt ? StoredTime.AsStored(JiraTime.Parse(mergedAt)) : (DateTimeOffset?)null;
+        var closed = JiraJson.Optional(pullRequest, "closed_at") is { } closedAt ? StoredTime.AsStored(JiraTime.Parse(closedAt)) : (DateTimeOffset?)null;
         return (new RawPullRequest
         {
             Host = Host,
@@ -173,12 +239,12 @@ public sealed class GitHubCollector : IPullRequestCollector
             Number = pullRequest.GetProperty("number").GetInt64(),
 
             // created_at is the first opening: it does not move when a draft is marked ready or a pull request is reopened.
-            Opened = JiraTime.Parse(pullRequest.GetProperty("created_at")),
+            Opened = StoredTime.AsStored(JiraTime.Parse(pullRequest.GetProperty("created_at"))),
 
             // merged_at and never closed_at: a pull request closed without a merge has no merge time.
             Merged = merged,
             Closed = closed ?? merged,
-            Updated = JiraJson.Optional(pullRequest, "updated_at") is { } updatedAt ? JiraTime.Parse(updatedAt) : null,
+            Updated = JiraJson.Optional(pullRequest, "updated_at") is { } updatedAt ? StoredTime.AsStored(JiraTime.Parse(updatedAt)) : null,
             AuthorHash = authorId is { } id ? AuthorHash(id) : null,
         }, authorId);
     }
@@ -191,7 +257,7 @@ public sealed class GitHubCollector : IPullRequestCollector
     /// One review as an event, classified, or null for one that was not submitted (a pending review has no
     /// submission time and is not a review yet). Nothing of the reviewer is kept but the class.
     /// </summary>
-    private static RawPullRequestEvent? ReadReview(RawPullRequest pullRequest, long? authorId, HashSet<long> opsMemberIds, JsonElement review)
+    private static RawPullRequestEvent? ReadReview(RawPullRequest pullRequest, Func<long, bool> isAuthor, HashSet<long> opsMemberIds, JsonElement review)
     {
         if (JiraJson.Optional(review, "submitted_at") is not { } submittedAt)
         {
@@ -223,7 +289,7 @@ public sealed class GitHubCollector : IPullRequestCollector
             {
                 ("Bot", _) => PullRequestEventActors.Automation,
                 (_, null) => PullRequestEventActors.Unknown,
-                (_, { } id) when id == authorId => PullRequestEventActors.Author,
+                (_, { } id) when isAuthor(id) => PullRequestEventActors.Author,
                 (_, { } id) when opsMemberIds.Contains(id) => PullRequestEventActors.Ops,
                 ("User", _) => PullRequestEventActors.Human,
                 _ => PullRequestEventActors.Unknown,

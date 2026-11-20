@@ -328,7 +328,12 @@ public sealed record DerivedData(
 /// <param name="Position">The host's place among the configured hosts, from 1.</param>
 /// <param name="Measure">One of <c>PullRequestTiming.Measures</c>.</param>
 /// <param name="Coverage">One of <see cref="PullRequestCoverageStates"/>.</param>
-public sealed record PullRequestHostCoverage(string Host, long Position, string Measure, string Coverage);
+/// <param name="CollectFrom">
+/// The start date the host's stored pull requests were collected under (<see cref="RawPullRequestHost.CollectFrom"/>),
+/// or null when none bounded them. The views mark a host's rows of a sprint that began before it as
+/// <see cref="PullRequestCoverageStates.Partial"/> when the host is otherwise <see cref="PullRequestCoverageStates.Read"/>.
+/// </param>
+public sealed record PullRequestHostCoverage(string Host, long Position, string Measure, string Coverage, DateTimeOffset? CollectFrom = null);
 
 /// <summary>
 /// The values of <see cref="PullRequestHostCoverage.Coverage"/>, and those of a combined row of the view
@@ -352,7 +357,13 @@ public static class PullRequestCoverageStates
     /// <summary>A combined row for which every configured host is <see cref="Read"/>.</summary>
     public const string Complete = "complete";
 
-    /// <summary>A combined row for which at least one configured host is not <see cref="Read"/>: it holds only what the store has.</summary>
+    /// <summary>
+    /// A row that holds only part of what its hosts have. A combined row for which at least one configured
+    /// host is not <see cref="Read"/>. Also a host's own row of a sprint that began before the start date the
+    /// host's pull requests were collected under (<see cref="PullRequestHostCoverage.CollectFrom"/>), and its
+    /// row of the waits in no sprint when there is such a date: the host was read, and pull requests last
+    /// active before the date are not in the store. The views give this value; derive records the date.
+    /// </summary>
     public const string Partial = "partial";
 
     /// <summary>The host scope of the rows that hold every configured host's waits together.</summary>

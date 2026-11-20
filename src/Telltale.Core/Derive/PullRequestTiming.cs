@@ -129,10 +129,12 @@ public static class PullRequestTiming
     /// with no pull requests. A host's last collection decides first (never read, or failed); for a host that
     /// was read, a measure that rests on reviews is not covered while the host is without them
     /// (<see cref="HostsWithoutTheirReviews"/>). A host that is not configured has no row: nothing is said of it.
+    /// Each row also carries the start date the host's pull requests were collected under, when there is one:
+    /// that is per sprint, not per host, so the views apply it (<see cref="PullRequestCoverageStates.Partial"/>).
     /// </summary>
     public static IReadOnlyList<PullRequestHostCoverage> Coverage(RawData raw, IReadOnlyDictionary<string, IReadOnlyList<string>> repositoriesByHost)
     {
-        var states = raw.PullRequestHosts.ToDictionary(host => host.Host, host => host.State, StringComparer.Ordinal);
+        var hosts = raw.PullRequestHosts.ToDictionary(host => host.Host, StringComparer.Ordinal);
         var withoutReviews = HostsWithoutTheirReviews(raw, repositoriesByHost);
         return
         [
@@ -140,13 +142,17 @@ public static class PullRequestTiming
                 host,
                 index + 1,
                 measure,
-                states.GetValueOrDefault(host) switch
+                hosts.GetValueOrDefault(host)?.State switch
                 {
                     null => PullRequestCoverageStates.NotRead,
                     PullRequestHostStates.Read when RestsOnReviews(measure) && withoutReviews.Contains(host) => PullRequestCoverageStates.ReviewsNotRead,
                     PullRequestHostStates.Read => PullRequestCoverageStates.Read,
                     _ => PullRequestCoverageStates.FailedRead,
-                }))),
+                },
+
+                // The start date the stored pull requests were collected under, as the collection recorded
+                // it: the views take a sprint that began before it for covered only in part.
+                hosts.GetValueOrDefault(host)?.CollectFrom))),
         ];
     }
 

@@ -88,9 +88,44 @@ public class AdoPullRequestsWithoutReviewTests
 
         var exit = await pipeline.RunAsync("sync");
 
+        // Nothing is stored, so nothing may say that a pull request was stored without its threads: the
+        // command says what the third failure was and no more.
         await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "Azure DevOps answered 403 (Forbidden) to GET Fake%20Project/_apis/git/repositories/fake-ado-sample/pullRequests/3/threads?api-version=7.1.\n");
         await Assert.That((await pipeline.QueryAsync<string>("SELECT state FROM pull_request_host WHERE host = 'ado'")).ToArray()).IsEquivalentTo(new[] { "failed" });
         await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM pull_request")).IsEquivalentTo(new[] { 0L });
+    }
+
+    [Test]
+    public async Task Pull_requests_whose_threads_can_never_be_read_do_not_fail_the_host_at_a_later_sync_when_those_between_them_are_no_longer_read()
+    {
+        // 100, 101 and 105 cannot be read, at any sync. 102 to 104 can, and are completed. At the first sync
+        // the failures are not three in a row. At the next, the completed ones are read already and cost no
+        // request, so the three retries come one after another: that is not the host failing.
+        var (pipeline, ado) = AdoOnly();
+        await using var _ = pipeline;
+        foreach (var number in new[] { 100, 101, 102, 103, 104, 105 })
+        {
+            var pullRequest = ado.AddPullRequest(number, AdoIdentities.AuthorOne, Local(2026, 1, 20, 12));
+            if (number is 100 or 101 or 105)
+            {
+                pipeline.Jira.Handler.Override(HttpMethod.Get, FakeAdo.ThreadsPath(number), _ => true, Refusal);
+            }
+            else
+            {
+                pullRequest.Voted(AdoIdentities.Reviewer, 10, Local(2026, 1, 21, 12)).Completed(Local(2026, 1, 22, 12));
+            }
+        }
+
+        await pipeline.RunAllAsync(["sync"]);
+        var exit = await pipeline.RunAsync("run", "--sprint", "42");
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(ado.ThreadsAskedFor).IsEquivalentTo(new[] { 100, 101, 102, 103, 104, 105, 100, 101, 105 });
+        await Assert.That((await pipeline.QueryAsync<string>("SELECT state FROM pull_request_host WHERE host = 'ado'")).ToArray()).IsEquivalentTo(new[] { "read" });
+        await Assert.That((await pipeline.QueryAsync<string>(Histories)).ToArray()).IsEquivalentTo(new[] { "100: failed", "101: failed", "102: read", "103: read", "104: read", "105: failed" });
+        await Assert.That(await FiguresAsync(pipeline)).IsEquivalentTo(new[] { ("42", "first_code_review", 3L, 1d), ("42", "first_code_approval", 3L, 1d), ("42", "merge", 3L, 2d) });
     }
 
     [Test]

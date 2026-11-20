@@ -453,6 +453,7 @@ public static class SprintReport
         var sprintRows = rows.Where(row => row.InNoSprint == 0).ToList();
         AppendPullRequestMeasuresNotShown(report, sprintRows, severalHosts);
         AppendPullRequestHostsNotRead(report, sprintRows, severalHosts);
+        AppendPullRequestHostsCollectedInPart(report, sprintRows, severalHosts);
         if (severalHosts)
         {
             report.Append("- Each host has its own rows, and a combined row holds the waits of every host together: its median and P85 are taken of those waits, never of the hosts' medians or P85s.\n");
@@ -503,8 +504,9 @@ public static class SprintReport
 
     /// <summary>
     /// The line for the waits a host has no row for in the table, by the reason the view gives
-    /// (<c>coverage</c> is "reviews not read"): the Ops group's members could not be read, so no review of
-    /// that host was collected. With several hosts the line names the host, and says what that makes of the
+    /// (<c>coverage</c> is "reviews not read"): the store holds pull requests of the host without their
+    /// reviews, because the Ops group's members could not be read when those were collected. That may have
+    /// been the last collection or an earlier one, and the line claims neither. With several hosts the line names the host, and says what that makes of the
     /// combined rows. Nothing is written when no row has that reason.
     /// </summary>
     private static void AppendPullRequestMeasuresNotShown(StringBuilder report, IReadOnlyList<PullRequestTimingRow> sprintRows, bool severalHosts)
@@ -513,7 +515,7 @@ public static class SprintReport
         {
             report.Append(severalHosts ? $"- Not shown for {PullRequestHostLabel(host.Key)}: " : "- Not shown: ")
                 .AppendJoin(", ", host.Select(PullRequestMeasureLabel))
-                .Append(". The members of the Ops group could not be read when the pull requests were last collected, so reviews by the group could not be told apart from code reviews, and no review was collected. These waits are given for no sprint until a collection reads the group; nothing here says that no pull request was reviewed or approved. A merge does not depend on who reviewed, and is shown.")
+                .Append(". The members of the Ops group could not be read at a collection of the pull requests, so reviews by the group could not be told apart from code reviews, and the reviews of the pull requests collected then were not read and have not been read since. These waits are given for no sprint until a collection reads those reviews, which takes the group's members; nothing here says that no pull request was reviewed or approved. A merge does not depend on who reviewed, and is shown.")
                 .Append(severalHosts ? " The combined rows of these waits are marked partial: they hold the other hosts' waits only." : "")
                 .Append('\n');
         }
@@ -533,6 +535,25 @@ public static class SprintReport
                     ? $"- {name} could not be read when pull requests were last collected. Its figures are of what earlier collections read, so a count may be short of what {name} has now, and where they read nothing the row says \"not known\": that is not a count of zero."
                     : $"- {name} is configured and has not been read yet: no collection of it has finished. Its rows say \"not known\": that is not a count of zero.")
                 .Append(severalHosts ? $" The combined rows are marked partial: they leave out whatever a read of {name} would add." : "")
+                .Append('\n');
+        }
+    }
+
+    /// <summary>
+    /// One line for each host whose own rows the view marks partial: the host was read, and the sprint began
+    /// before the start date its pull requests were collected under, so a pull request last active before
+    /// that date is not in the store. What "last active" means is the host's: GitHub's date bounds the last
+    /// update, Azure DevOps's the closing. The line says that a count may be short and that a row without a
+    /// count is not a row that counts nothing. A combined row is partial for its hosts' reasons and has no line.
+    /// </summary>
+    private static void AppendPullRequestHostsCollectedInPart(StringBuilder report, IReadOnlyList<PullRequestTimingRow> sprintRows, bool severalHosts)
+    {
+        foreach (var host in sprintRows.Where(row => row.Coverage == PullRequestCoverageStates.Partial && row.HostScope != PullRequestCoverageStates.CombinedScope).Select(row => row.HostScope).Distinct())
+        {
+            var name = PullRequestHostLabel(host);
+            report.Append($"- {name}'s pull requests are collected from a start date (collectFrom), and this sprint began before it: a pull request {(host == PullRequestHosts.Ado ? "closed" : "last updated")} before that date is not in the store. ")
+                .Append($"{name}'s rows hold only what was collected, so a count may be short of what {name} has, and where nothing was collected a row says \"not known\": that is not a count of zero.")
+                .Append(severalHosts ? $" The combined rows are marked partial: they leave out whatever {name} has from before that date." : "")
                 .Append('\n');
         }
     }
@@ -583,7 +604,11 @@ public static class SprintReport
                 Number(row.HistoryNotRead));
         }
 
-        var someNotKnown = rows.Any(row => row.Waiting is null || row.ClosedWithoutReview is null || row.Unclassifiable is null || row.HistoryNotRead is null);
+
+        // Every column that can print "not known" is looked at. Ops only is left out for the Azure DevOps
+        // row alone: the view gives no number there for another reason, and the cell says "no Ops group".
+        var someNotKnown = rows.Any(row => row.Waiting is null || row.ClosedWithoutReview is null || row.NoActivity is null || row.AutomationOnly is null
+            || (row.OpsOnly is null && row.HostScope != PullRequestHosts.Ado) || row.Unclassifiable is null || row.HistoryNotRead is null);
         report.Append(!someNotKnown ? "\n" : "\n- \"not known\" stands where a row does not rest on a full read of its reviews (the lines under the table above say which and why) and the store holds no such pull request: that is not a count of zero.\n");
         report
             .Append("- Still waiting: open at that moment with no first code review yet. A review made later does not take a pull request out of this sprint's number: it was waiting when the sprint closed, and its wait is counted in the sprint of the review.\n")
