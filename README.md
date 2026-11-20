@@ -476,7 +476,7 @@ Report and query assertions normalize both actual output and multiline expected 
 | Project | Role |
 | --- | --- |
 | `src/Telltale.Core` | Domain rules: business time, status roles, cycle time, settings. |
-| `src/Telltale.Collectors` | The Jira client and collector. |
+| `src/Telltale.Collectors` | The Jira, GitHub and Azure DevOps collectors and the HTTP client they share. |
 | `src/Telltale.Storage.Sqlite` | The store, migrations, derived tables and metric views. |
 | `src/Telltale.Reporting` | The markdown sprint report. |
 | `src/Telltale.Pipeline` | The steps the commands run, and their rules. |

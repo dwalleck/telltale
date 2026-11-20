@@ -32,3 +32,15 @@ Default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-huma
 ### Domain docs
 
 Single-context: `GLOSSARY.md` at the root, ADRs in `docs/adr/`. See `docs/agents/domain.md`. Owner decisions, cited as D<n>, are in `docs/decisions.md`.
+
+### Code map
+
+Where a change goes and what else it must touch: `docs/context/code-map.md`. Read it before adding a setting, a secret, a table, a metric view, a pull request measure or a host.
+
+### Implementing a spec
+
+Telltale's additions to the `implement-spec` skill, the owner's rulings before the first implementer among them: `docs/agents/implement-spec.md`.
+
+### Review
+
+The rules a review applies to a diff: `CODING_STANDARDS.md`.

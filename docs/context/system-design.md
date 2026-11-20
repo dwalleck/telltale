@@ -35,7 +35,7 @@ src/
   Telltale.Core/            no dependencies; model, interval math, business-day calendar,
                            identity hashing, abstractions; Monte Carlo (planned). Medians and P85s
                            are computed in the SQL metric views, not here
-  Telltale.Collectors/      Jira/; GitHub/, Git/, Sessions/ (planned) (one project, folder per source)
+  Telltale.Collectors/      Jira/, GitHub/, Ado/ (pull requests); Git/, Sessions/ (planned) (one project, folder per source)
   Telltale.Storage.Sqlite/  migrations (raw, derived, views), upserts, watermarks,
                            derived rebuild, metric views with minimum group size
   Telltale.Reporting/       queries over views, the markdown sprint report; charts (PNG) and the
