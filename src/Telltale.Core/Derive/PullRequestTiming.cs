@@ -66,6 +66,7 @@ public static class PullRequestTiming
         var events = raw.PullRequestEvents
             .Where(happened => happened.At < asOf)
             .ToLookup(happened => (happened.Host, happened.Repository, happened.Number));
+        var withoutReviews = HostsWithoutTheirReviews(raw, repositoriesByHost);
         var waits = new List<PullRequestWait>();
         foreach (var pullRequest in raw.PullRequests)
         {
@@ -88,6 +89,11 @@ public static class PullRequestTiming
                 .ToList();
             foreach (var measure in Measures)
             {
+                if (RestsOnReviews(measure) && withoutReviews.Contains(seen.Host))
+                {
+                    continue;
+                }
+
                 // An end before the opening is no wait the tool can state: the measure has none.
                 if (EndOf(measure, seen, itsEvents) is { } ended && ended >= seen.Opened)
                 {
@@ -103,6 +109,40 @@ public static class PullRequestTiming
 
         return waits;
     }
+
+    /// <summary>
+    /// The measures a rebuild gives figures for, in the order a report lists them: none when no host is
+    /// configured, and otherwise each measure that at least one configured host can state. A measure that rests
+    /// on reviews is not given while no configured host has its reviews (<see cref="HostsWithoutTheirReviews"/>):
+    /// it then has no row in any sprint, which is not the same as a row that counts no pull request.
+    /// </summary>
+    public static IReadOnlyList<string> MeasuresGiven(RawData raw, IReadOnlyDictionary<string, IReadOnlyList<string>> repositoriesByHost)
+    {
+        var withoutReviews = HostsWithoutTheirReviews(raw, repositoriesByHost);
+        return [.. Measures.Where(measure => repositoriesByHost.Keys.Any(host => !(RestsOnReviews(measure) && withoutReviews.Contains(host))))];
+    }
+
+    /// <summary>
+    /// The configured hosts whose reviews the store does not hold as far as its pull requests go: the last
+    /// collection could not read the Ops group's members (<see cref="PullRequestRosterStates.Failed"/>), or a
+    /// counted pull request's row was written without its events and they have not been read since
+    /// (<see cref="PullRequestHistoryStates.NotRead"/>). For such a host no wait that rests on reviews is
+    /// stated, in any sprint: a review that was not read can be the first of its pull request, so a figure
+    /// from the reviews that were read would count some pull requests and silently leave out others. A merge
+    /// is known from the pull request itself and is still counted.
+    /// </summary>
+    public static IReadOnlySet<string> HostsWithoutTheirReviews(RawData raw, IReadOnlyDictionary<string, IReadOnlyList<string>> repositoriesByHost) =>
+        raw.PullRequestHosts.Where(host => host.Roster == PullRequestRosterStates.Failed).Select(host => host.Host)
+            .Concat(raw.PullRequests
+                .Where(pullRequest => pullRequest.History != PullRequestHistoryStates.Read
+                    && repositoriesByHost.TryGetValue(pullRequest.Host, out var repositories)
+                    && repositories.Contains(pullRequest.Repository, StringComparer.Ordinal))
+                .Select(pullRequest => pullRequest.Host))
+            .Where(repositoriesByHost.ContainsKey)
+            .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>Whether a measure's end is a review, and so needs the host's reviews to have been read and classified.</summary>
+    private static bool RestsOnReviews(string measure) => measure is FirstCodeReview or FirstCodeApproval;
 
     /// <summary>The moment that ends the pull request's wait for <paramref name="measure"/>, or null when it has none.</summary>
     private static DateTimeOffset? EndOf(string measure, RawPullRequest pullRequest, IReadOnlyList<RawPullRequestEvent> events) => measure switch

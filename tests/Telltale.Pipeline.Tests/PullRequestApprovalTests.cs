@@ -45,6 +45,23 @@ public class PullRequestApprovalTests
     }
 
     [Test]
+    public async Task The_report_says_what_a_code_approval_is_and_that_the_ops_group_is_the_one_read_at_collection()
+    {
+        var (pipeline, github) = ThreeSprints();
+        await using var _ = pipeline;
+        github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 20, 12)).Reviewed(Accounts.Reviewer, "APPROVED", Local(2026, 1, 22, 12));
+
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains(
+            "- A first code approval is the first approving review by someone other than the author, made before the pull request closed. When it is also the first review, it ends both waits. "
+            + "A comment-only review and a request for changes are code reviews and not approvals. An approval by the Ops group is kept apart and is never a code approval, and neither is one by the author or by automation. "
+            + "A review that had been dismissed before it was first collected does not say what it was: it is a code review and no approval, and since it may have been one, a pull request with such a review before its first known approval has no first code approval here. "
+            + "An approval that was collected and dismissed afterwards stays an approval. "
+            + "As for code reviews, the Ops group is the one read when a review is first collected: its members today, not those at the time of an older review.\n");
+    }
+
+    [Test]
     public async Task An_approval_that_is_the_first_review_ends_both_waits_at_once()
     {
         var (pipeline, github) = ThreeSprints();
