@@ -87,6 +87,15 @@ public sealed class GitHubCollector : IPullRequestCollector
         // a page of stored ones says nothing about the pages after it. The read after a failed one, and the
         // first one, go through the whole list; that costs list pages only, never reviews already read.
         var readInFull = stored.PullRequestHosts.Any(host => host.Host == Host && host.State == PullRequestHostStates.Read);
+        var wholeList = everything || !readInFull;
+
+        // The start date the store's pull requests are collected under after this read, which the store
+        // records: derive marks a sprint that began before it as covered in part. A read of the whole list
+        // brings in everything from the configured date on, so the date is then the configured one. A sync
+        // that stops where nothing is new does not go back to older pull requests, so a date moved back, or
+        // taken out, takes effect only at a backfill: until then the later of the two dates stands.
+        var storedFrom = PullRequestCollection.CollectedFrom(stored, Host);
+        var collectedFrom = wholeList || storedFrom is null || _settings.CollectFrom > storedFrom ? _settings.CollectFrom : storedFrom;
         foreach (var repository in _settings.Repositories)
         {
             // Every state: an old pull request can be reviewed, merged or reopened at any time. The most
@@ -131,7 +140,7 @@ public sealed class GitHubCollector : IPullRequestCollector
                     return true;
                 },
                 cancellationToken,
-                stopAtAPageWithNothingNew: !everything && readInFull);
+                stopAtAPageWithNothingNew: !wholeList);
         }
 
         // A stored pull request whose reviews were not read is read now, whether or not the list pass came to
@@ -195,7 +204,7 @@ public sealed class GitHubCollector : IPullRequestCollector
                 new PullRequestBatch(
                     [.. pullRequests.Where(pullRequest => !unread.Contains(pullRequest.Key)).Select(pullRequest => pullRequest.Value.Row)],
                     events,
-                    new RawPullRequestHost(Host, PullRequestHostStates.Failed, PullRequestRosterStates.NotRead),
+                    new RawPullRequestHost(Host, PullRequestHostStates.Failed, PullRequestRosterStates.NotRead) { CollectFrom = storedFrom },
                     IdentityHash.SaltFingerprint(_salt)),
                 failure);
         }
@@ -206,7 +215,8 @@ public sealed class GitHubCollector : IPullRequestCollector
             new RawPullRequestHost(
                 Host,
                 PullRequestHostStates.Read,
-                _settings.OpsTeam is null ? PullRequestRosterStates.NotConfigured : rosterRead ? PullRequestRosterStates.Read : PullRequestRosterStates.Failed),
+                _settings.OpsTeam is null ? PullRequestRosterStates.NotConfigured : rosterRead ? PullRequestRosterStates.Read : PullRequestRosterStates.Failed)
+            { CollectFrom = collectedFrom },
             IdentityHash.SaltFingerprint(_salt));
     }
 

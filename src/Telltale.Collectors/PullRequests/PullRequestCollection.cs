@@ -68,9 +68,10 @@ public static class PullRequestCollection
         foreach (var collector in collectors)
         {
             PullRequestBatch batch;
+            var stored = await store.ReadRawAsync(cancellationToken);
             try
             {
-                batch = await collector.FetchAsync(await store.ReadRawAsync(cancellationToken), everything, cancellationToken);
+                batch = await collector.FetchAsync(stored, everything, cancellationToken);
             }
             catch (PullRequestReadStoppedException stopped)
             {
@@ -81,8 +82,13 @@ public static class PullRequestCollection
             }
             catch (UserFacingException failure)
             {
+                // The rows of earlier reads stay, and so does the start date they were collected under.
                 await store.WritePullRequestsAsync(
-                    new PullRequestBatch([], [], new RawPullRequestHost(collector.Host, PullRequestHostStates.Failed, PullRequestRosterStates.NotRead), saltFingerprint),
+                    new PullRequestBatch(
+                        [],
+                        [],
+                        new RawPullRequestHost(collector.Host, PullRequestHostStates.Failed, PullRequestRosterStates.NotRead) { CollectFrom = CollectedFrom(stored, collector.Host) },
+                        saltFingerprint),
                     cancellationToken);
                 failures.Add(failure);
                 continue;
@@ -91,6 +97,15 @@ public static class PullRequestCollection
             await store.WritePullRequestsAsync(batch, cancellationToken);
         }
 
+        ThrowWhatFailed(failures);
+    }
+
+    /// <summary>The start date the store records for the host's pull requests (<see cref="RawPullRequestHost.CollectFrom"/>); null when it records none, or holds nothing of the host.</summary>
+    public static DateTimeOffset? CollectedFrom(RawData stored, string host) =>
+        stored.PullRequestHosts.FirstOrDefault(known => known.Host == host)?.CollectFrom;
+
+    private static void ThrowWhatFailed(List<UserFacingException> failures)
+    {
         switch (failures)
         {
             case []:

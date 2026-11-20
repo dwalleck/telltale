@@ -27,28 +27,39 @@
 -- zero days or any other length. A merge is counted there whatever is said here.
 --
 -- As in pr_timing_per_sprint, a count of 0 is a count only under coverage 'read' (combined: 'complete'). Under
--- any other coverage the numbers are of what the store holds, and one that would be 0 is null: not known.
+-- any other coverage the numbers are of what the store holds, and one that would be 0 is null: not known. As
+-- there, a host's row of a sprint that began before the start date its pull requests were collected under
+-- (pr_host_coverage.collect_from) is 'partial' in place of 'read'. A sprint that began on or after the date
+-- is 'read'. One thing that leaves open: GitHub's start date bounds the last update, so a pull request left
+-- open and untouched since before the date is not in the store, and is in no sprint's waiting number.
 --
 -- Like the pull request figures, these counts are not subject to the minimum group size (owner decision
 -- D114): the view applies neither check and has no suppressed flag. It reads no person.
 CREATE VIEW pr_without_review_per_sprint AS
-WITH scope AS (
-    SELECT c.host AS host_scope, c.host, c.position, c.coverage, c.coverage = 'read' AS covered
-    FROM pr_host_coverage c
-    WHERE c.measure = 'first_code_review'
-    UNION ALL
-    SELECT 'combined', c.host, a.position, a.coverage, a.covered
-    FROM pr_host_coverage c
-    CROSS JOIN (
-        SELECT MAX(position) + 1 AS position, CASE WHEN MIN(coverage = 'read') = 1 THEN 'complete' ELSE 'partial' END AS coverage, MIN(coverage = 'read') AS covered
-        FROM pr_host_coverage
-        WHERE measure = 'first_code_review'
-        HAVING COUNT(*) > 1
-    ) a
+WITH host_scope AS (
+    SELECT s.sprint_id,
+           c.host,
+           c.position,
+           CASE WHEN c.coverage = 'read' AND c.collect_from IS NOT NULL AND s.started < c.collect_from THEN 'partial' ELSE c.coverage END AS coverage
+    FROM sprint_window s
+    CROSS JOIN pr_host_coverage c
     WHERE c.measure = 'first_code_review'
 ),
+scope AS (
+    SELECT h.sprint_id, h.host AS host_scope, h.host, h.position, h.coverage, h.coverage = 'read' AS covered
+    FROM host_scope h
+    UNION ALL
+    SELECT h.sprint_id, 'combined', h.host, a.position, a.coverage, a.covered
+    FROM host_scope h
+    JOIN (
+        SELECT sprint_id, MAX(position) + 1 AS position, CASE WHEN MIN(coverage = 'read') = 1 THEN 'complete' ELSE 'partial' END AS coverage, MIN(coverage = 'read') AS covered
+        FROM host_scope
+        GROUP BY sprint_id
+        HAVING COUNT(*) > 1
+    ) a ON a.sprint_id = h.sprint_id
+),
 counted AS (
-    SELECT s.sprint_id,
+    SELECT c.sprint_id,
            c.host_scope,
            c.position,
            c.coverage,
@@ -60,10 +71,9 @@ counted AS (
            COUNT(CASE WHEN p.state IN ('waiting', 'closed without review') AND p.activity = 'ops only' THEN 1 END) AS ops_only,
            COUNT(CASE WHEN p.state = 'unclassifiable' THEN 1 END) AS unclassifiable,
            COUNT(CASE WHEN p.state = 'history not read' THEN 1 END) AS history_not_read
-    FROM sprint_window s
-    CROSS JOIN scope c
-    LEFT JOIN pr_without_review p ON p.sprint_id = s.sprint_id AND p.host = c.host
-    GROUP BY s.sprint_id, c.host_scope, c.position, c.coverage, c.covered
+    FROM scope c
+    LEFT JOIN pr_without_review p ON p.sprint_id = c.sprint_id AND p.host = c.host
+    GROUP BY c.sprint_id, c.host_scope, c.position, c.coverage, c.covered
 )
 SELECT sprint_id,
        host_scope,

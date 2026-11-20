@@ -155,7 +155,18 @@ public static class PullRequestEventActors
 /// <param name="Host">One of <see cref="PullRequestHosts"/>.</param>
 /// <param name="State">One of <see cref="PullRequestHostStates"/>: how the last read of the host's pull requests ended.</param>
 /// <param name="Roster">One of <see cref="PullRequestRosterStates"/>: how the last read of the Ops group's members ended.</param>
-public sealed record RawPullRequestHost(string Host, string State, string Roster);
+public sealed record RawPullRequestHost(string Host, string State, string Roster)
+{
+    /// <summary>
+    /// The start date the host's stored pull requests were collected under (the host's <c>collectFrom</c>
+    /// setting), as the collection that last read the host's list recorded it; null when no start date
+    /// bounded what was collected. A pull request last active before it may be missing from the store, so a
+    /// sprint that began before it is not covered in full. It is not the setting as it is now: moving the
+    /// setting back changes what the store holds only once a collection has read the whole list again, and a
+    /// collection that failed leaves it as it was.
+    /// </summary>
+    public DateTimeOffset? CollectFrom { get; init; }
+}
 
 /// <summary>The values of <see cref="RawPullRequestHost.State"/>.</summary>
 public static class PullRequestHostStates

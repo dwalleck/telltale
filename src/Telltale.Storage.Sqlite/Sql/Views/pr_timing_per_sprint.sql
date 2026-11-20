@@ -13,9 +13,13 @@
 -- two pull requests, each in its own host's rows and both in the combined ones.
 --
 -- coverage says what the row's count rests on. For a host's row it is pr_host_coverage's: 'read', 'failed
--- read', 'not read' or 'reviews not read'. For a combined row it is 'complete' when every configured host is
--- 'read' for the measure, and 'partial' otherwise: the row then holds only what the store has, which leaves
--- out whatever the hosts that are not 'read' would add.
+-- read', 'not read' or 'reviews not read'; and 'partial' in place of 'read' when the sprint began before the
+-- start date the host's pull requests were collected under (pr_host_coverage.collect_from, the host's
+-- collectFrom setting as the collection recorded it): a pull request last updated before that date (on Azure
+-- DevOps: closed before it) is not in the store, so the row holds only part of what the host has. A sprint
+-- that began on or after the date lacks nothing for that. For a combined row it is 'complete' when every
+-- configured host's row of the sprint is 'read' for the measure, and 'partial' otherwise: the row then holds
+-- only what the store has, which leaves out whatever the hosts that are not 'read' would add.
 --
 -- sample_count is the number of pull requests with such a wait in the sprint. Under coverage 'read' or
 -- 'complete' it is 0 when there is none. Under any other coverage it is null when the store holds no such
@@ -29,7 +33,8 @@
 --
 -- There is one more row per measure and host scope, with no sprint (sprint_id is null): the waits counted in
 -- no sprint, because the event that ended them fell between sprint windows or in more than one. They are kept
--- there and not guessed into a sprint. Its columns mean the same, over everything collected. Every wait is in
+-- there and not guessed into a sprint. Its columns mean the same, over everything collected; a host's row of
+-- them is 'partial' in place of 'read' whenever the host has a start date of collection. Every wait is in
 -- exactly one row of its measure and host scope. Read one sprint with sprint_id = '...', or leave these rows
 -- out with sprint_id IS NOT NULL.
 --
@@ -38,17 +43,26 @@
 -- and reads no person: the derived rows it is built from carry no author.
 CREATE VIEW pr_timing_per_sprint AS
 WITH counted_in AS (
-    SELECT s.sprint_id FROM sprint_window s
+    SELECT s.sprint_id, s.started FROM sprint_window s
     UNION ALL
-    SELECT CAST(NULL AS TEXT)
+    SELECT CAST(NULL AS TEXT), CAST(NULL AS TEXT)
+),
+host_scoped AS (
+    SELECT w.sprint_id,
+           c.host AS host_scope,
+           c.position,
+           c.measure,
+           CASE WHEN c.coverage = 'read' AND c.collect_from IS NOT NULL AND (w.sprint_id IS NULL OR w.started < c.collect_from) THEN 'partial' ELSE c.coverage END AS coverage
+    FROM counted_in w
+    CROSS JOIN pr_host_coverage c
 ),
 scoped AS (
-    SELECT c.host AS host_scope, c.position, c.measure, c.coverage, c.coverage = 'read' AS covered
-    FROM pr_host_coverage c
+    SELECT h.sprint_id, h.host_scope, h.position, h.measure, h.coverage, h.coverage = 'read' AS covered
+    FROM host_scoped h
     UNION ALL
-    SELECT 'combined', MAX(c.position) + 1, c.measure, CASE WHEN MIN(c.coverage = 'read') = 1 THEN 'complete' ELSE 'partial' END, MIN(c.coverage = 'read')
-    FROM pr_host_coverage c
-    GROUP BY c.measure
+    SELECT h.sprint_id, 'combined', MAX(h.position) + 1, h.measure, CASE WHEN MIN(h.coverage = 'read') = 1 THEN 'complete' ELSE 'partial' END, MIN(h.coverage = 'read')
+    FROM host_scoped h
+    GROUP BY h.sprint_id, h.measure
     HAVING COUNT(*) > 1
 )
 SELECT w.sprint_id,
@@ -64,5 +78,5 @@ SELECT w.sprint_id,
        f.p85_business_days
 FROM counted_in w
 CROSS JOIN pr_measure m
-JOIN scoped s ON s.measure = m.measure
+JOIN scoped s ON s.sprint_id IS w.sprint_id AND s.measure = m.measure
 LEFT JOIN pr_wait_figures f ON f.sprint_id IS w.sprint_id AND f.measure = m.measure AND f.host_scope = s.host_scope;

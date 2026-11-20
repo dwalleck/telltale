@@ -453,6 +453,7 @@ public static class SprintReport
         var sprintRows = rows.Where(row => row.InNoSprint == 0).ToList();
         AppendPullRequestMeasuresNotShown(report, sprintRows, severalHosts);
         AppendPullRequestHostsNotRead(report, sprintRows, severalHosts);
+        AppendPullRequestHostsCollectedInPart(report, sprintRows, severalHosts);
         if (severalHosts)
         {
             report.Append("- Each host has its own rows, and a combined row holds the waits of every host together: its median and P85 are taken of those waits, never of the hosts' medians or P85s.\n");
@@ -533,6 +534,25 @@ public static class SprintReport
                     ? $"- {name} could not be read when pull requests were last collected. Its figures are of what earlier collections read, so a count may be short of what {name} has now, and where they read nothing the row says \"not known\": that is not a count of zero."
                     : $"- {name} is configured and has not been read yet: no collection of it has finished. Its rows say \"not known\": that is not a count of zero.")
                 .Append(severalHosts ? $" The combined rows are marked partial: they leave out whatever a read of {name} would add." : "")
+                .Append('\n');
+        }
+    }
+
+    /// <summary>
+    /// One line for each host whose own rows the view marks partial: the host was read, and the sprint began
+    /// before the start date its pull requests were collected under, so a pull request last active before
+    /// that date is not in the store. What "last active" means is the host's: GitHub's date bounds the last
+    /// update, Azure DevOps's the closing. The line says that a count may be short and that a row without a
+    /// count is not a row that counts nothing. A combined row is partial for its hosts' reasons and has no line.
+    /// </summary>
+    private static void AppendPullRequestHostsCollectedInPart(StringBuilder report, IReadOnlyList<PullRequestTimingRow> sprintRows, bool severalHosts)
+    {
+        foreach (var host in sprintRows.Where(row => row.Coverage == PullRequestCoverageStates.Partial && row.HostScope != PullRequestCoverageStates.CombinedScope).Select(row => row.HostScope).Distinct())
+        {
+            var name = PullRequestHostLabel(host);
+            report.Append($"- {name}'s pull requests are collected from a start date (collectFrom), and this sprint began before it: a pull request {(host == PullRequestHosts.Ado ? "closed" : "last updated")} before that date is not in the store. ")
+                .Append($"{name}'s rows hold only what was collected, so a count may be short of what {name} has, and where nothing was collected a row says \"not known\": that is not a count of zero.")
+                .Append(severalHosts ? $" The combined rows are marked partial: they leave out whatever {name} has from before that date." : "")
                 .Append('\n');
         }
     }

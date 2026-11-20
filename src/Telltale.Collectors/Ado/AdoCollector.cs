@@ -148,7 +148,13 @@ public sealed class AdoCollector : IPullRequestCollector
             }
         }
 
-        return new PullRequestBatch(rows, events, new RawPullRequestHost(Host, PullRequestHostStates.Read, PullRequestRosterStates.NotConfigured), IdentityHash.SaltFingerprint(_salt));
+        // The list is read whole at every read, so what the store holds afterwards is everything from the
+        // configured start date on: that date is recorded with it, for derive to mark the sprints before it.
+        return new PullRequestBatch(
+            rows,
+            events,
+            new RawPullRequestHost(Host, PullRequestHostStates.Read, PullRequestRosterStates.NotConfigured) { CollectFrom = _settings.CollectFrom },
+            IdentityHash.SaltFingerprint(_salt));
     }
 
     /// <summary>The kept fields of one pull request of the list, and its author's identity ID, which is used to classify its events and goes no further.</summary>

@@ -321,10 +321,10 @@ public sealed class SqliteStore : ITelltaleStore
         await connection.ExecuteAsync(Command(
             cancellationToken,
             """
-            INSERT INTO pull_request_host (host, state, roster) VALUES (@Host, @State, @Roster)
-            ON CONFLICT (host) DO UPDATE SET state = excluded.state, roster = excluded.roster;
+            INSERT INTO pull_request_host (host, state, roster, collect_from) VALUES (@Host, @State, @Roster, @CollectFrom)
+            ON CONFLICT (host) DO UPDATE SET state = excluded.state, roster = excluded.roster, collect_from = excluded.collect_from;
             """,
-            batch.HostState,
+            new { batch.HostState.Host, batch.HostState.State, batch.HostState.Roster, CollectFrom = StoredTime.ToStored(batch.HostState.CollectFrom) },
             transaction));
 
         await RecordSaltAsync(connection, transaction, batch.SaltFingerprint, hashedWithBefore, cancellationToken);
@@ -456,7 +456,7 @@ public sealed class SqliteStore : ITelltaleStore
                 Actor = row.Actor,
                 At = StoredTime.FromStored(row.At),
             })],
-            PullRequestHosts = [.. pullRequestHosts.Select(row => new RawPullRequestHost(row.Host, row.State, row.Roster))],
+            PullRequestHosts = [.. pullRequestHosts.Select(row => new RawPullRequestHost(row.Host, row.State, row.Roster) { CollectFrom = StoredTime.FromStoredOrNull(row.CollectFrom) })],
         };
     }
 
@@ -596,9 +596,9 @@ public sealed class SqliteStore : ITelltaleStore
         await ExecuteForEachRowAsync(
             connection,
             transaction,
-            "INSERT INTO pr_host_coverage (host, position, measure, coverage) VALUES (@host, @position, @measure, @coverage);",
-            ["@host", "@position", "@measure", "@coverage"],
-            derived.PullRequestCoverage.Select(coverage => new object?[] { coverage.Host, coverage.Position, coverage.Measure, coverage.Coverage }),
+            "INSERT INTO pr_host_coverage (host, position, measure, coverage, collect_from) VALUES (@host, @position, @measure, @coverage, @collectFrom);",
+            ["@host", "@position", "@measure", "@coverage", "@collectFrom"],
+            derived.PullRequestCoverage.Select(coverage => new object?[] { coverage.Host, coverage.Position, coverage.Measure, coverage.Coverage, StoredTime.ToStored(coverage.CollectFrom) }),
             cancellationToken);
 
         await ExecuteForEachRowAsync(
@@ -1027,6 +1027,7 @@ public sealed class SqliteStore : ITelltaleStore
         public string Host { get; init; } = "";
         public string State { get; init; } = "";
         public string Roster { get; init; } = "";
+        public string? CollectFrom { get; init; }
     }
 
     private sealed class StatusRow
