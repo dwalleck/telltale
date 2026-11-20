@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json.Nodes;
 using Telltale.Core.Secrets;
 using Telltale.Pipeline.Tests.Harness;
@@ -104,9 +105,59 @@ public class PullRequestSettingsTests
             "The pull request repositories in the configuration file changed since the derived data was built. Run derive first.\n");
 
         // The stored pull request is of a repository that is no longer listed: it stays in the store and is in no figure.
+        // The repository now listed was never asked for, so nothing is known of it: its rows are not counts
+        // of zero under a full read, and the report says what is missing and what repairs it (review 2, finding 3).
         await pipeline.RunAllAsync(["derive"], ["report", "--sprint", "42"]);
         await Assert.That(await pipeline.QueryAsync<(string, string, long, double)>(Figures)).IsEmpty();
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("| First code review | 0 | none | none | none | none |\n| First code approval | 0 | none | none | none | none |\n| Merge | 0 | none | none | none | none |\n");
+        await Assert.That((await pipeline.QueryAsync<string>(CoverageOfSprint42)).ToArray()).IsEquivalentTo(new[] { "repository not read, no count" });
+        await Assert.That((await pipeline.QueryAsync<string>("SELECT coverage || ', ' || COALESCE(waiting, 'no count') FROM pr_without_review_per_sprint WHERE sprint_id = '42'")).ToArray())
+            .IsEquivalentTo(new[] { "repository not read, no count" });
+        var report = await pipeline.ReadReportAsync(42);
+        await Assert.That(report).Contains("| First code review | not known | not known | not known | not known | not known |\n| First code approval | not known | not known | not known | not known | not known |\n| Merge | not known | not known | not known | not known | not known |\n");
+        await Assert.That(report).Contains(RepositoryNotRead);
+
+        // A sync reads the repository, which has no pull request: after it a count of zero is a count.
+        pipeline.Jira.Handler.On(HttpMethod.Get, "/api/v3/repos/fake-org/fake-other/pulls", StubHttpHandler.Json("[]"));
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+        await Assert.That((await pipeline.QueryAsync<string>(CoverageOfSprint42)).ToArray()).IsEquivalentTo(new[] { "read, 0" });
+        report = await pipeline.ReadReportAsync(42);
+        await Assert.That(report).Contains("| First code review | 0 | none | none | none | none |\n| First code approval | 0 | none | none | none | none |\n| Merge | 0 | none | none | none | none |\n");
+        await Assert.That(report).DoesNotContain("since GitHub was last read");
+    }
+
+    private const string CoverageOfSprint42 = "SELECT DISTINCT coverage || ', ' || COALESCE(sample_count, 'no count') FROM pr_timing_per_sprint WHERE sprint_id = '42'";
+
+    private const string RepositoryNotRead =
+        "- A repository was added to GitHub's list in the configuration since GitHub was last read, so its pull requests are not in the store: run sync to read it. "
+        + "Until then GitHub's rows hold only the pull requests of the repositories that were read, so a count may be short of what GitHub has, and where the store holds nothing a row says \"not known\": that is not a count of zero.\n";
+
+    [Test]
+    public async Task A_repository_added_beside_a_read_one_makes_the_counts_partial_until_a_sync_reads_it()
+    {
+        // Review 2, finding 3: the figures of the repository that was read are still there, and are not
+        // passed off as everything the listed repositories have.
+        await using var pipeline = SuppressionOff();
+        AddOneReviewedPullRequest(pipeline);
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+
+        pipeline.Config["github"]!["repositories"] = new JsonArray(FakeGitHub.Repository, "fake-org/fake-other");
+        await pipeline.RunAllAsync(["derive"], ["report", "--sprint", "42"]);
+
+        await Assert.That((await pipeline.QueryAsync<string>("SELECT measure || ': ' || coverage || ', ' || COALESCE(sample_count, 'no count') FROM pr_timing_per_sprint WHERE sprint_id = '42' ORDER BY measure_position")).ToArray())
+            .IsEquivalentTo(new[] { "first_code_review: repository not read, 1", "first_code_approval: repository not read, no count", "merge: repository not read, no count" });
+        var report = await pipeline.ReadReportAsync(42);
+        await Assert.That(report).Contains("| First code review | 1 | 2.0 | 2.0 |");
+        await Assert.That(report).Contains(RepositoryNotRead);
+
+        // A sync that fails leaves the repository unread, and is said as a failed read; one that ends covers it.
+        pipeline.Jira.Handler.On(HttpMethod.Get, "/api/v3/repos/fake-org/fake-other/pulls", StubHttpHandler.Json("""{"message":"Synthetic refusal"}""", HttpStatusCode.NotFound), StubHttpHandler.Json("[]"));
+        await Assert.That(await pipeline.RunAsync("sync")).IsEqualTo(1);
+        await pipeline.RunAllAsync(["derive"]);
+        await Assert.That((await pipeline.QueryAsync<string>("SELECT DISTINCT coverage FROM pr_timing_per_sprint WHERE sprint_id = '42'")).ToArray()).IsEquivalentTo(new[] { "failed read" });
+
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+        await Assert.That((await pipeline.QueryAsync<string>("SELECT DISTINCT coverage FROM pr_timing_per_sprint WHERE sprint_id = '42'")).ToArray()).IsEquivalentTo(new[] { "read" });
+        await Assert.That(await pipeline.ReadReportAsync(42)).DoesNotContain("since GitHub was last read");
     }
 
     [Test]

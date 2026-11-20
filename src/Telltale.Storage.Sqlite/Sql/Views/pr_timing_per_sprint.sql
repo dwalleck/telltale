@@ -13,7 +13,9 @@
 -- two pull requests, each in its own host's rows and both in the combined ones.
 --
 -- coverage says what the row's count rests on. For a host's row it is pr_host_coverage's: 'read', 'failed
--- read', 'not read' or 'reviews not read'; and 'partial' in place of 'read' when the sprint began before the
+-- read', 'not read', 'reviews not read' or 'repository not read' (a repository was added to the configuration
+-- since the host was last read; a sync reads it). In place of 'read' a host's row is 'partial'
+-- when the sprint began before the
 -- start date the host's pull requests were collected under (pr_host_coverage.collect_from, the host's
 -- collectFrom setting as the collection recorded it): a pull request last updated before that date (on Azure
 -- DevOps: closed before it) is not in the store, so the row holds only part of what the host has. A sprint

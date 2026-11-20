@@ -453,6 +453,7 @@ public static class SprintReport
         var sprintRows = rows.Where(row => row.InNoSprint == 0).ToList();
         AppendPullRequestMeasuresNotShown(report, sprintRows, severalHosts);
         AppendPullRequestHostsNotRead(report, sprintRows, severalHosts);
+        AppendPullRequestHostsWithARepositoryNotRead(report, sprintRows, severalHosts);
         AppendPullRequestHostsCollectedInPart(report, sprintRows, severalHosts);
         if (severalHosts)
         {
@@ -488,7 +489,7 @@ public static class SprintReport
     {
         PullRequestCoverageStates.FailedRead => " (last read failed)",
         PullRequestCoverageStates.NotRead => " (not read yet)",
-        PullRequestCoverageStates.Partial => " (partial)",
+        PullRequestCoverageStates.Partial or PullRequestCoverageStates.RepositoryNotRead => " (partial)",
         _ => "",
     };
 
@@ -535,6 +536,24 @@ public static class SprintReport
                     ? $"- {name} could not be read when pull requests were last collected. Its figures are of what earlier collections read, so a count may be short of what {name} has now, and where they read nothing the row says \"not known\": that is not a count of zero."
                     : $"- {name} is configured and has not been read yet: no collection of it has finished. Its rows say \"not known\": that is not a count of zero.")
                 .Append(severalHosts ? $" The combined rows are marked partial: they leave out whatever a read of {name} would add." : "")
+                .Append('\n');
+        }
+    }
+
+    /// <summary>
+    /// One line for each host whose rows the view gives as "repository not read": the host's last collection
+    /// ended, and a repository that is configured now was added since, so nothing was asked of it. The line
+    /// names the cause and what repairs it, a sync, and says that a count may be short and that a row without
+    /// a count is not a row that counts nothing. The table marks such a row partial.
+    /// </summary>
+    private static void AppendPullRequestHostsWithARepositoryNotRead(StringBuilder report, IReadOnlyList<PullRequestTimingRow> sprintRows, bool severalHosts)
+    {
+        foreach (var host in sprintRows.Where(row => row.Coverage == PullRequestCoverageStates.RepositoryNotRead).Select(row => row.HostScope).Distinct())
+        {
+            var name = PullRequestHostLabel(host);
+            report.Append($"- A repository was added to {name}'s list in the configuration since {name} was last read, so its pull requests are not in the store: run sync to read it. ")
+                .Append($"Until then {name}'s rows hold only the pull requests of the repositories that were read, so a count may be short of what {name} has, and where the store holds nothing a row says \"not known\": that is not a count of zero.")
+                .Append(severalHosts ? " The combined rows are marked partial: they leave out whatever that repository would add." : "")
                 .Append('\n');
         }
     }

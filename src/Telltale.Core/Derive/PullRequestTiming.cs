@@ -134,7 +134,9 @@ public static class PullRequestTiming
     /// say that a host is missing from it, and what keeps a host that was not read from being read as a host
     /// with no pull requests. A host's last collection decides first (never read, or failed); for a host that
     /// was read, a measure that rests on reviews is not covered while the host is without them
-    /// (<see cref="HostsWithoutTheirReviews"/>). A host that is not configured has no row: nothing is said of it.
+    /// (<see cref="HostsWithoutTheirReviews"/>), and no measure is covered in full while a configured repository
+    /// is not among those that read went through (<see cref="RawPullRequestHost.Repositories"/>).
+    /// A host that is not configured has no row: nothing is said of it.
     /// Each row also carries the start date the host's pull requests were collected under, when there is one:
     /// that is per sprint, not per host, so the views apply it (<see cref="PullRequestCoverageStates.Partial"/>).
     /// </summary>
@@ -152,6 +154,11 @@ public static class PullRequestTiming
                 {
                     null => PullRequestCoverageStates.NotRead,
                     PullRequestHostStates.Read when RestsOnReviews(measure) && withoutReviews.Contains(host) => PullRequestCoverageStates.ReviewsNotRead,
+
+                    // The read that ended did not go through every repository that is configured now: one
+                    // was added since. Nothing was asked of it, so the host's rows are not everything the
+                    // configured repositories have, and what is missing is not zero. A sync reads it.
+                    PullRequestHostStates.Read when hosts[host].Repositories is { } read && repositoriesByHost[host].Except(read, StringComparer.Ordinal).Any() => PullRequestCoverageStates.RepositoryNotRead,
                     PullRequestHostStates.Read => PullRequestCoverageStates.Read,
                     _ => PullRequestCoverageStates.FailedRead,
                 },

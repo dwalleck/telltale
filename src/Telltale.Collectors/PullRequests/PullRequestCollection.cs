@@ -83,12 +83,13 @@ public static class PullRequestCollection
             }
             catch (UserFacingException failure)
             {
-                // The rows of earlier reads stay, and so does the start date they were collected under.
+                // The rows of earlier reads stay, and so do the start date they were collected under and the
+                // repositories the last read that ended went through.
                 await store.WritePullRequestsAsync(
                     new PullRequestBatch(
                         [],
                         [],
-                        new RawPullRequestHost(collector.Host, PullRequestHostStates.Failed, PullRequestRosterStates.NotRead) { CollectFrom = CollectedFrom(stored, collector.Host) },
+                        new RawPullRequestHost(collector.Host, PullRequestHostStates.Failed, PullRequestRosterStates.NotRead) { CollectFrom = CollectedFrom(stored, collector.Host), Repositories = RepositoriesRead(stored, collector.Host) },
                         saltFingerprint),
                     cancellationToken);
                 failures.Add(failure);
@@ -104,6 +105,10 @@ public static class PullRequestCollection
     /// <summary>The start date the store records for the host's pull requests (<see cref="RawPullRequestHost.CollectFrom"/>); null when it records none, or holds nothing of the host.</summary>
     public static DateTimeOffset? CollectedFrom(RawData stored, string host) =>
         stored.PullRequestHosts.FirstOrDefault(known => known.Host == host)?.CollectFrom;
+
+    /// <summary>The repositories the last read of the host that ended went through (<see cref="RawPullRequestHost.Repositories"/>); null when the store does not record them, or holds nothing of the host.</summary>
+    public static IReadOnlyList<string>? RepositoriesRead(RawData stored, string host) =>
+        stored.PullRequestHosts.FirstOrDefault(known => known.Host == host)?.Repositories;
 
     private static void ThrowWhatFailed(List<UserFacingException> failures)
     {

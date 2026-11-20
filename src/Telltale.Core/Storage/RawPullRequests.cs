@@ -167,6 +167,15 @@ public sealed record RawPullRequestHost(string Host, string State, string Roster
     /// collection that failed leaves it as it was.
     /// </summary>
     public DateTimeOffset? CollectFrom { get; init; }
+
+    /// <summary>
+    /// The repositories the last read of the host that ended went through, as the host's collector names them
+    /// (<see cref="RawPullRequest.Repository"/>), in the order they were configured then. A read that failed
+    /// leaves it as it was. A repository that is configured now and is not here was added since: no read has
+    /// gone through its list, so what the store lacks of it is not known, and is not nothing. Null when the
+    /// store does not record it (a row written before it was recorded): nothing is concluded from that.
+    /// </summary>
+    public IReadOnlyList<string>? Repositories { get; init; }
 }
 
 /// <summary>The values of <see cref="RawPullRequestHost.State"/>.</summary>

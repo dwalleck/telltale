@@ -254,7 +254,7 @@ public sealed class GitHubCollector : IPullRequestCollector
                 new PullRequestBatch(
                     [.. pullRequests.Where(pullRequest => !unread.Contains(pullRequest.Key)).Select(pullRequest => pullRequest.Value.Row)],
                     events,
-                    new RawPullRequestHost(Host, PullRequestHostStates.Failed, PullRequestRosterStates.NotRead) { CollectFrom = storedFrom },
+                    new RawPullRequestHost(Host, PullRequestHostStates.Failed, PullRequestRosterStates.NotRead) { CollectFrom = storedFrom, Repositories = PullRequestCollection.RepositoriesRead(stored, Host) },
                     IdentityHash.SaltFingerprint(_salt)),
                 failure);
         }
@@ -267,7 +267,7 @@ public sealed class GitHubCollector : IPullRequestCollector
                 Host,
                 PullRequestHostStates.Read,
                 _settings.OpsTeam is null ? PullRequestRosterStates.NotConfigured : rosterRead ? PullRequestRosterStates.Read : PullRequestRosterStates.Failed)
-            { CollectFrom = collectedFrom },
+            { CollectFrom = collectedFrom, Repositories = [.. _settings.Repositories.Select(repository => repository.Key)] },
             IdentityHash.SaltFingerprint(_salt));
     }
 
