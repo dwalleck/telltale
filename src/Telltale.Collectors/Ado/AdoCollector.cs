@@ -23,6 +23,8 @@ namespace Telltale.Collectors.Ado;
 /// </summary>
 public sealed class AdoCollector : IPullRequestCollector
 {
+    // The one version asked for, of every request. Azure DevOps Services has it, and Azure DevOps Server from
+    // release 2022.1 on; an older Server refuses it. The README says so beside ado.apiUrl: there is no setting.
     private const string ApiVersion = "api-version=7.1";
 
     // How many pull requests one request of the list asks for. The list is asked again from where the last
