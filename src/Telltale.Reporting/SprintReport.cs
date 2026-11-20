@@ -113,7 +113,7 @@ public static class SprintReport
             AppendPullRequestTiming(report, await store.QueryViewsAsync<PullRequestTimingRow>(
                 "SELECT measure, sample_count, median_elapsed_days FROM pr_timing_per_sprint WHERE sprint_id = @sprintId ORDER BY measure_position;",
                 new { sprintId },
-                cancellationToken));
+                cancellationToken), derivedFrom.PullRequestHostsCounted);
         }
 
         var quality = await ReadDataQualityAsync(store, cancellationToken);
@@ -373,8 +373,19 @@ public static class SprintReport
     private static readonly IReadOnlyDictionary<string, string> PullRequestMeasureLabels = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         [PullRequestTiming.FirstCodeReview] = "First code review",
+        [PullRequestTiming.FirstCodeApproval] = "First code approval",
         [PullRequestTiming.Merge] = "Merge",
     };
+
+    /// <summary>
+    /// The pull request section's note on Azure DevOps's own rules, written when that host is counted.
+    /// </summary>
+    private const string AzureDevOpsExplained =
+        "- On Azure DevOps, a first code review is the first vote other than a reset, or the first text comment on a file, by someone other than the author, made before the pull request closed. "
+        + "A first code approval is the first such vote in favour: approved, or approved with suggestions. A merge is a completion: an abandoned pull request has none, and keeps the reviews it got before it was closed. "
+        + "A vote is timed by the record of the vote itself and counted for the reviewer who cast it; a reviewer's current vote has no time and is not used. "
+        + "Comments on the pull request as a whole, the author's own comments and votes, and everything from the accounts configured as automation are not code reviews. No Ops group is set apart on Azure DevOps. "
+        + "Which accounts are automation is read from the configuration when a comment or vote is first collected, and it keeps that class.\n";
 
     /// <summary>What a figure's cell says when no pull request has a wait for the row's measure in the sprint: there is no figure.</summary>
     private const string NoWait = "none";
@@ -386,7 +397,7 @@ public static class SprintReport
     /// Nothing in it is withheld for group size (owner decision D114): the view applies neither check, so no
     /// cell here reads "suppressed".
     /// </summary>
-    private static void AppendPullRequestTiming(StringBuilder report, IReadOnlyList<PullRequestTimingRow> rows)
+    private static void AppendPullRequestTiming(StringBuilder report, IReadOnlyList<PullRequestTimingRow> rows, IReadOnlyList<string> hosts)
     {
         report.Append("\n## Pull request timing\n\n");
         AppendTableHead(report, "Wait from opening to", "Pull requests", "Median (elapsed days)");
@@ -399,7 +410,7 @@ public static class SprintReport
                 row.MedianElapsedDays is { } days ? days.ToString("F1", CultureInfo.InvariantCulture) : NoWait);
         }
 
-        AppendPullRequestTimingExplained(report);
+        AppendPullRequestTimingExplained(report, hosts);
     }
 
     /// <summary>
@@ -407,13 +418,15 @@ public static class SprintReport
     /// what is not a code review, and that the minimum group size does not apply here. They stand under the
     /// table and not in the method note, so a report without the section has nothing of them.
     /// </summary>
-    private static void AppendPullRequestTimingExplained(StringBuilder report)
+    /// <param name="hosts">The hosts the figures are of: a host's own rules are worded only when it is one of them.</param>
+    private static void AppendPullRequestTimingExplained(StringBuilder report, IReadOnlyList<string> hosts)
     {
         report.Append('\n')
             .Append("- These are the pull requests of the configured repositories: every one of them, linked to a Jira issue or not, whoever opened it. They are not necessarily this team's pull requests, and no team is inferred from them.\n")
             .Append("- Each wait runs from the moment the pull request was first opened to the event named, and is counted once, at its full length, in the sprint whose window holds that event: a review in this sprint of a pull request opened two sprints ago counts here, with the whole wait. An event between sprint windows, or in more than one, is counted in no sprint. That is not the rule for delivered issues above, where a delivery in overlapping sprints goes to the one that started first.\n")
             .Append("- Elapsed days are the wait divided by 24 hours, weekends and holidays included. A pull request that has no such event yet is not in the row: it has no wait, not a wait of zero. The figures are recorded waits, not the effort a review took.\n")
-            .Append("- A first code review is the first submitted review by someone other than the author: a comment-only review, a request for changes or an approval, also one dismissed later, made before the pull request closed. Reviews by the author, by automation and by the Ops group are not code reviews, and neither are ordinary comments. Who is in the Ops group is read when a review is first collected, so a review collected long after it was made is judged by the group as it was at that collection, not as it was when the review was made.\n")
+            .Append(!hosts.Contains(PullRequestHosts.GitHub) ? "" : "- A first code review is the first submitted review by someone other than the author: a comment-only review, a request for changes or an approval, also one dismissed later, made before the pull request closed. Reviews by the author, by automation and by the Ops group are not code reviews, and neither are ordinary comments. Who is in the Ops group is read when a review is first collected, so a review collected long after it was made is judged by the group as it was at that collection, not as it was when the review was made.\n")
+            .Append(!hosts.Contains(PullRequestHosts.Ado) ? "" : AzureDevOpsExplained)
             .Append("- Pull request figures are not subject to the minimum group size: none is withheld for the number of people behind it, and none is reported per person.\n");
     }
 

@@ -1,4 +1,5 @@
 using System.Globalization;
+using Telltale.Collectors.Ado;
 using Telltale.Collectors.GitHub;
 using Telltale.Collectors.Jira;
 using Telltale.Collectors.PullRequests;
@@ -111,6 +112,14 @@ public sealed class PipelineSteps
             yield return new GitHubCollector(
                 _environment.HttpHandler, github,
                 secrets.GitHubToken ?? throw new InvalidOperationException("This command was started without the GitHub token a collection from GitHub needs."),
+                secrets.HashingSalt, _environment.Clock, _environment.Notices);
+        }
+
+        if (_settings.Ado is { } ado)
+        {
+            yield return new AdoCollector(
+                _environment.HttpHandler, ado,
+                secrets.AdoToken ?? throw new InvalidOperationException("This command was started without the Azure DevOps token a collection from Azure DevOps needs."),
                 secrets.HashingSalt, _environment.Clock, _environment.Notices);
         }
     }

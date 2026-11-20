@@ -106,7 +106,7 @@ public class PullRequestSettingsTests
         // The stored pull request is of a repository that is no longer listed: it stays in the store and is in no figure.
         await pipeline.RunAllAsync(["derive"], ["report", "--sprint", "42"]);
         await Assert.That(await pipeline.QueryAsync<(string, string, long, double)>(Figures)).IsEmpty();
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("| First code review | 0 | none |\n| Merge | 0 | none |\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("| First code review | 0 | none |\n| First code approval | 0 | none |\n| Merge | 0 | none |\n");
     }
 
     [Test]

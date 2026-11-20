@@ -14,6 +14,9 @@ public enum SecretName
 
     /// <summary>The token pull requests are read from GitHub with. Asked for only when the <c>github</c> setting is there. A host's token is added after this one.</summary>
     GitHubToken,
+
+    /// <summary>The personal access token pull requests are read from Azure DevOps with. Asked for only when the <c>ado</c> setting is there.</summary>
+    AdoToken,
 }
 
 /// <summary>Where secrets are kept: Windows Credential Manager on the work laptop, environment variables in development, memory in tests.</summary>

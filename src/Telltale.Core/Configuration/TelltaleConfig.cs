@@ -77,6 +77,13 @@ public sealed record TelltaleConfig
     /// </summary>
     [System.Text.Json.Serialization.JsonPropertyName("github")]
     public GitHubConfig? GitHub { get; init; }
+
+    /// <summary>
+    /// Where pull requests are read from on Azure DevOps (see <see cref="AdoConfig"/>). The setting may be left
+    /// out: then nothing is asked of Azure DevOps. It does not depend on <see cref="GitHub"/>: either host is
+    /// configured without the other.
+    /// </summary>
+    public AdoConfig? Ado { get; init; }
 }
 
 /// <summary>Where the team's work lives in Jira.</summary>

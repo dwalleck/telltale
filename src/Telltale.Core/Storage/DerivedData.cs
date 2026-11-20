@@ -185,6 +185,16 @@ public sealed record DerivedSource(
     /// <summary>Whether the rebuild counted pull requests at all: a pull request host was configured. A report has its pull request section only then.</summary>
     public bool PullRequestsCounted => PullRequestRepositories != NoPullRequestRepositories;
 
+    /// <summary>The pull request hosts the rebuild counted (<c>PullRequestHosts</c>), in the order <see cref="PullRequestRepositories"/> has them. A report words a host's own rules only for a host that is here.</summary>
+    public IReadOnlyList<string> PullRequestHostsCounted
+    {
+        get
+        {
+            using var repositories = System.Text.Json.JsonDocument.Parse(PullRequestRepositories);
+            return [.. repositories.RootElement.EnumerateObject().Select(host => host.Name)];
+        }
+    }
+
     /// <summary>
     /// <see cref="PullRequestRepositories"/> for the configured repositories by host: the form the store keeps,
     /// hosts and repositories in order, e.g. <c>{"github":["owner/name"]}</c>.
