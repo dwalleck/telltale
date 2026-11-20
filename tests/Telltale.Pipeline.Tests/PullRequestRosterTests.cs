@@ -148,6 +148,18 @@ public class PullRequestRosterTests
         await Assert.That((await pipeline.QueryAsync<string>(HostState)).ToArray()).IsEquivalentTo(new[] { "failed, roster not read" });
         await Assert.That(await FiguresAsync(pipeline)).IsEquivalentTo(new[] { ("42", "merge", 1L, 4d) });
 
+        // The report's line for the failed read does not explain the two review rows by a store that holds
+        // nothing: an earlier collection did read pull request 1's review (review 2, finding 19).
+        await pipeline.RunAllAsync(["report", "--sprint", "42"]);
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains(
+            "| First code review | not known | not known | not known | not known | not known |\n"
+            + "| First code approval | not known | not known | not known | not known | not known |\n"
+            + "| Merge | 1 | 4.0 | 4.0 | 3.5 | 3.5 |\n"
+            + "\n- GitHub could not be read when pull requests were last collected. Its figures are of what the store holds, which may be short of what GitHub has now: "
+            + "a read that stopped part-way keeps what it had read whole, and the rest is what earlier collections stored. "
+            + "Where the store holds nothing for a row, the row says \"not known\", and so do the rows of the waits for a first code review and a first code approval "
+            + "while the store holds pull requests whose reviews were not read, whatever earlier collections read of them: that is not a count of zero.\n");
+
         // Read again: only the pull request whose reviews were not read is asked for.
         await pipeline.RunAllAsync(["run", "--sprint", "42"]);
 

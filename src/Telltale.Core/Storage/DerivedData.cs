@@ -345,7 +345,10 @@ public static class PullRequestCoverageStates
     /// <summary>The host's last collection ended and what the measure rests on was read, however little there was.</summary>
     public const string Read = "read";
 
-    /// <summary>The host's last collection failed: what the store holds of it is what earlier collections read.</summary>
+    /// <summary>
+    /// The host's last collection failed: what the store holds of it is what earlier collections read, and what
+    /// the failed one had read whole when it stopped part-way. It may be short of what the host has now.
+    /// </summary>
     public const string FailedRead = "failed read";
 
     /// <summary>The host is configured and no collection of it has ended or failed yet.</summary>

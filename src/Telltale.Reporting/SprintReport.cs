@@ -526,14 +526,22 @@ public static class SprintReport
     /// One line for each host whose rows do not rest on a finished read, by the reason the view gives: its
     /// last collection failed, or it is configured and was never read. Either way the line says that a row
     /// without a count is not a row that counts nothing. A host that is not configured has no row and no line.
+    /// The figures of a host whose last collection failed are of what the store holds, and not only of
+    /// earlier collections: a read that stopped part-way stores what it had read whole.
     /// </summary>
     private static void AppendPullRequestHostsNotRead(StringBuilder report, IReadOnlyList<PullRequestTimingRow> sprintRows, bool severalHosts)
     {
+        // Said of GitHub only, where reviews can be left unread for a whole host (the Ops group's members).
+        // While the last collection failed, the view gives "failed read" for every measure and cannot say
+        // besides that the review waits are withheld for that reason, though derive gives none then: without
+        // these words the line would explain such a row by a store that holds nothing, which need not be so.
+        const string ReviewRowsOfAFailedRead = ", and so do the rows of the waits for a first code review and a first code approval while the store holds pull requests whose reviews were not read, whatever earlier collections read of them";
+
         foreach (var host in sprintRows.Where(row => row.Coverage is PullRequestCoverageStates.FailedRead or PullRequestCoverageStates.NotRead).GroupBy(row => (row.HostScope, row.Coverage)))
         {
             var name = PullRequestHostLabel(host.Key.HostScope);
             report.Append(host.Key.Coverage == PullRequestCoverageStates.FailedRead
-                    ? $"- {name} could not be read when pull requests were last collected. Its figures are of what earlier collections read, so a count may be short of what {name} has now, and where they read nothing the row says \"not known\": that is not a count of zero."
+                    ? $"- {name} could not be read when pull requests were last collected. Its figures are of what the store holds, which may be short of what {name} has now: a read that stopped part-way keeps what it had read whole, and the rest is what earlier collections stored. Where the store holds nothing for a row, the row says \"not known\"{(host.Key.HostScope == PullRequestHosts.GitHub ? ReviewRowsOfAFailedRead : "")}: that is not a count of zero."
                     : $"- {name} is configured and has not been read yet: no collection of it has finished. Its rows say \"not known\": that is not a count of zero.")
                 .Append(severalHosts ? $" The combined rows are marked partial: they leave out whatever a read of {name} would add." : "")
                 .Append('\n');
