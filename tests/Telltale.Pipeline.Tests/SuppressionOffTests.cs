@@ -35,18 +35,6 @@ public class SuppressionOffTests
         + "UNION ALL SELECT 3, CAST(sprint_id AS INTEGER), 'sprint ' || sprint_id, NULL, NULL, NULL, NULL, suppressed FROM baseline_sprint"
         + ") ORDER BY section, position;";
 
-    /// <summary>
-    /// The metric views: what <c>query</c> may read. A view added later is added here, and to what
-    /// <see cref="The_metric_views_are_these_fourteen_with_suppression_off_and_none_holds_a_person"/> says of each.
-    /// </summary>
-    private static readonly string[] MetricViews =
-    [
-        "baseline_cycle_time_per_bucket", "baseline_sprint", "baseline_time_in_status", "brief_visit_treatment", "brief_visits_per_sprint", "cycle_starts_with_brief_visit_per_sprint", "cycle_time_per_sprint_and_bucket", "data_quality",
-        "delivered_per_sprint", "minimum_group_size", "pr_timing_per_sprint",
-        "pr_without_review_per_sprint",
-        "sprint_team", "time_in_status_per_sprint",
-    ];
-
     private const string DataQualitySql = "SELECT anomaly_issue_count, delivered_between_sprints_count, suppressed FROM data_quality;";
 
     [Test]
@@ -638,7 +626,7 @@ public class SuppressionOffTests
         AddScenario(pipeline.Jira);
 
         await pipeline.RunAllAsync(["run", "--sprint", "41"]);
-        foreach (var view in MetricViews)
+        foreach (var view in MetricViews.All)
         {
             await pipeline.RunAllAsync(["query", $"SELECT * FROM {view};"]);
         }
@@ -654,7 +642,7 @@ public class SuppressionOffTests
     }
 
     [Test]
-    public async Task The_metric_views_are_these_fourteen_with_suppression_off_and_none_holds_a_person()
+    public async Task The_metric_views_are_those_of_the_shared_list_with_suppression_off_and_none_holds_a_person()
     {
         // Owner decision D68: turning suppression off adds no view, and no view is about a person. (That each
         // view has the same columns in either state is OptionalSuppressionTests'.)
@@ -664,7 +652,7 @@ public class SuppressionOffTests
         await pipeline.RunAllAsync(["backfill"], ["derive"]);
 
         var views = await pipeline.QueryAsync<string>("SELECT name FROM derived_object WHERE kind = 'view' ORDER BY name;");
-        await Assert.That(views).IsEquivalentTo(MetricViews);
+        await Assert.That(views).IsEquivalentTo(MetricViews.All);
 
         // No column is named for a person. This shows only that no column says it is one: the one name with
         // "assignee" in it is exempted by hand (it is a number of the setting), and a person column under

@@ -144,18 +144,11 @@ public class OptionalSuppressionTests
         await Assert.That(await written.ReadStoreContentAsync(withoutAsOf: true)).IsEqualTo(await absent.ReadStoreContentAsync(withoutAsOf: true));
     }
 
+    /// <summary>Every metric view (<see cref="MetricViews"/>), one test case each.</summary>
+    public static IEnumerable<string> EveryMetricView() => MetricViews.All;
+
     [Test]
-    [Arguments("baseline_cycle_time_per_bucket")]
-    [Arguments("baseline_sprint")]
-    [Arguments("baseline_time_in_status")]
-    [Arguments("cycle_time_per_sprint_and_bucket")]
-    [Arguments("data_quality")]
-    [Arguments("delivered_per_sprint")]
-    [Arguments("minimum_group_size")]
-    [Arguments("pr_timing_per_sprint")]
-    [Arguments("pr_without_review_per_sprint")]
-    [Arguments("sprint_team")]
-    [Arguments("time_in_status_per_sprint")]
+    [MethodDataSource(nameof(EveryMetricView))]
     public async Task A_metric_view_has_the_same_columns_with_both_numbers_zero_as_with_the_default_numbers(string view)
     {
         await using var byDefault = new PipelineHarness();
