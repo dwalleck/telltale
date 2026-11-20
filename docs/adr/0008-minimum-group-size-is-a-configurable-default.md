@@ -17,6 +17,10 @@ The rule is still applied inside the metric views and nowhere else. `derive` rec
 
 It covers figures derived from Jira, which is the only source built. ADR-0003 was written with the volunteers' AI usage in mind, and that is not visible on a Jira board. A later change that adds agent sessions, GitHub data or any result grouped by people decides how the setting applies there.
 
+## PR timing figures (added 2026-11-19)
+
+The change that adds pull request data from GitHub and Azure DevOps decided it as follows (owner decision D114): the setting does not apply to PR timing figures or their diagnostic counts. The PR metric views show them whatever the numbers are. The owner's reason is that the rule was mostly meant to keep names out of reporting, which the salted hash already does, and that withholding PR event data goes further than the project needs. PR data keeps the rest: no names, account names, email addresses or raw payloads in the store, and no result grouped by person. Agent sessions are still undecided.
+
 ## What does not change
 
 - Person fields are pseudonymized at import with the salted hash, whatever the setting. Names, emails, issue keys and free text are still not stored.
