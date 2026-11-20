@@ -79,6 +79,9 @@ public sealed record RawData(
     /// <summary>The classified events of the pull requests.</summary>
     public IReadOnlyList<RawPullRequestEvent> PullRequestEvents { get; init; } = [];
 
+    /// <summary>The closings of pull requests that the store saw and that no longer stand: each was reopened since.</summary>
+    public IReadOnlyList<RawPullRequestPastClosure> PullRequestPastClosures { get; init; } = [];
+
     /// <summary>What the last collection from each pull request host came to.</summary>
     public IReadOnlyList<RawPullRequestHost> PullRequestHosts { get; init; } = [];
 }

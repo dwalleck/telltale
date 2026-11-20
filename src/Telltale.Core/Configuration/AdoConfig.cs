@@ -1,3 +1,5 @@
+using Telltale.Core.Storage;
+
 namespace Telltale.Core.Configuration;
 
 /// <summary>
@@ -53,6 +55,12 @@ public sealed record AdoSettings
 
     /// <summary>The address every request is relative to: the organization's. It ends in a slash.</summary>
     public required Uri OrganizationUrl { get; init; }
+
+    /// <summary>
+    /// Where the pull requests are read from, as the store records it: the organization's address, which
+    /// <c>apiUrl</c> and <c>organization</c> decide together, so a change of either is a change of it.
+    /// </summary>
+    public PullRequestSource Source => new(PullRequestHosts.Ado, "Azure DevOps", OrganizationUrl.AbsoluteUri, "ado.organization or ado.apiUrl", "another organization or server");
 
     /// <summary>The repositories read, each once, in order.</summary>
     public required IReadOnlyList<AdoRepository> Repositories { get; init; }

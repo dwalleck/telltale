@@ -190,7 +190,10 @@ public sealed class FakeGitHub
     {
         var pullRequest = new FakePullRequest(this, number, author, opened);
         PullRequests.Add(pullRequest);
-        _handler.On(HttpMethod.Get, $"{PullsPath}/{number}/reviews", request => Page(request, pullRequest.Reviews.Select(ReviewJson)));
+
+        // The reviews are those of the pull request that has the number when they are asked for: a test that
+        // empties PullRequests and adds the number again is another server's pull request with that number.
+        _handler.On(HttpMethod.Get, $"{PullsPath}/{number}/reviews", request => Page(request, PullRequests.Last(listed => listed.Number == number).Reviews.Select(ReviewJson)));
         return pullRequest;
     }
 

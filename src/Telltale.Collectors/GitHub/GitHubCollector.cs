@@ -55,6 +55,8 @@ public sealed class GitHubCollector : IPullRequestCollector
 
     public string Host => PullRequestHosts.GitHub;
 
+    public PullRequestSource Source => _settings.Source;
+
     public async Task<PullRequestBatch> FetchAsync(RawData stored, bool everything, CancellationToken cancellationToken)
     {
         using var github = new HostClient(_handler, "GitHub", _settings.ApiUrl, new AuthenticationHeaderValue("Bearer", _token), _clock, _notices);
@@ -255,7 +257,8 @@ public sealed class GitHubCollector : IPullRequestCollector
                     [.. pullRequests.Where(pullRequest => !unread.Contains(pullRequest.Key)).Select(pullRequest => pullRequest.Value.Row)],
                     events,
                     new RawPullRequestHost(Host, PullRequestHostStates.Failed, PullRequestRosterStates.NotRead) { CollectFrom = storedFrom, Repositories = PullRequestCollection.RepositoriesRead(stored, Host) },
-                    IdentityHash.SaltFingerprint(_salt)),
+                    IdentityHash.SaltFingerprint(_salt),
+                    _clock.GetUtcNow()),
                 failure);
         }
 
@@ -268,7 +271,8 @@ public sealed class GitHubCollector : IPullRequestCollector
                 PullRequestHostStates.Read,
                 _settings.OpsTeam is null ? PullRequestRosterStates.NotConfigured : rosterRead ? PullRequestRosterStates.Read : PullRequestRosterStates.Failed)
             { CollectFrom = collectedFrom, Repositories = [.. _settings.Repositories.Select(repository => repository.Key)] },
-            IdentityHash.SaltFingerprint(_salt));
+            IdentityHash.SaltFingerprint(_salt),
+            _clock.GetUtcNow());
     }
 
     private async Task SayAsync(IEnumerable<string> notices)

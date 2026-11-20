@@ -150,6 +150,20 @@ public static class PullRequestEventActors
 }
 
 /// <summary>
+/// A closing of a pull request that the store saw and that no longer stands: a collection found the pull
+/// request listed with no closing time (reopened, reactivated) or with another one, where the store held
+/// <see cref="Closed"/>. <see cref="RawPullRequest.Closed"/> is only the closing that stands now, so this is
+/// what lets a sprint that closed while the pull request was closed still be told so.
+/// </summary>
+/// <param name="Closed">The closing time the store held.</param>
+/// <param name="ReopenedBy">
+/// The time of the collection that found that closing gone (<see cref="PullRequestBatch.CollectedAt"/>). A
+/// host's list does not say when a pull request was opened again: it was before this moment, and how long
+/// before is not known. A closing that was made and undone between two collections was never seen at all.
+/// </param>
+public sealed record RawPullRequestPastClosure(string Host, string Repository, long Number, DateTimeOffset Closed, DateTimeOffset ReopenedBy);
+
+/// <summary>
 /// What the last collection from a pull request host came to. A host with no row was never read. Whether a
 /// host is configured is not here: the configuration says that.
 /// </summary>
@@ -176,6 +190,50 @@ public sealed record RawPullRequestHost(string Host, string State, string Roster
     /// store does not record it (a row written before it was recorded): nothing is concluded from that.
     /// </summary>
     public IReadOnlyList<string>? Repositories { get; init; }
+
+    /// <summary>
+    /// Where the host's stored pull requests were read from (<see cref="PullRequestSource.Address"/>), as the
+    /// collection that last wrote them recorded it. A read that failed leaves it as it was. Null when the
+    /// store does not record it (a row written before it was recorded): the source is then taken to be the
+    /// configured one, and the next read of the host records it.
+    /// </summary>
+    public string? Source { get; init; }
+}
+
+/// <summary>
+/// Where a configured host's pull requests are read from. A pull request is one by host, repository and number
+/// (<see cref="RawPullRequest"/>), and none of the three says which server or organization it is of: rows read
+/// from one source would be continued, and overwritten, by another that has the same repository names. So the
+/// store records the source with the host's rows (<see cref="RawPullRequestHost.Source"/>), and every rule
+/// about it is a comparison made here, as <see cref="CollectionScope"/> does for Jira.
+/// </summary>
+/// <param name="Host">One of <see cref="PullRequestHosts"/>.</param>
+/// <param name="HostName">The host's name as a message words it.</param>
+/// <param name="Address">The address every request to the host is relative to. It is recorded in the store and never put into a message.</param>
+/// <param name="Settings">The settings that decide the address, as a message names them.</param>
+/// <param name="AnotherSource">What rows of another address are of, as a message words it.</param>
+public sealed record PullRequestSource(string Host, string HostName, string Address, string Settings, string AnotherSource)
+{
+    /// <summary>
+    /// Whether the store's rows of the host were read from another source than this one. A host that was
+    /// never read has none, and rows that do not say where they were read from are taken to be this source's.
+    /// </summary>
+    public bool DiffersFrom(RawPullRequestHost? recorded) => recorded?.Source is { } source && source != Address;
+
+    /// <summary>
+    /// Stops when the store's rows of the host were read from another source: a sync would write this
+    /// source's pull requests over them, and a rebuild or a report would pass them off as this source's. Only
+    /// a backfill, which removes them and reads the host whole, makes the store this source's. The message
+    /// names the settings and neither address.
+    /// </summary>
+    public void RequireSameAs(RawPullRequestHost? recorded)
+    {
+        if (DiffersFrom(recorded))
+        {
+            throw new UserFacingException(
+                $"{Settings} in the configuration file changed since the store's {HostName} pull requests were last read, so the store holds the pull requests of {AnotherSource}. Run backfill.");
+        }
+    }
 }
 
 /// <summary>The values of <see cref="RawPullRequestHost.State"/>.</summary>
@@ -204,11 +262,27 @@ public static class PullRequestRosterStates
 /// <summary>
 /// One write of pull request rows: what a host's collector fetched, and what the read came to, in one
 /// transaction. Rows are added to the stored ones and replace those of the same pull request; an event already
-/// stored is left as it is, so its classification stays the first one. Nothing is ever deleted by a batch.
+/// stored is left as it is, so its classification stays the first one. Nothing is deleted by a batch, unless it replaces
+/// its host's rows (<see cref="ReplacesHost"/>).
+/// A stored closing time that a row of the batch no longer has is kept as a <see cref="RawPullRequestPastClosure"/>.
 /// </summary>
 /// <param name="SaltFingerprint">The fingerprint of the salt the authors were hashed with; a batch under another salt than the store's people were hashed with is refused.</param>
+/// <param name="CollectedAt">
+/// When the read that gave the batch ended, by the collectors' clock and not by the machine's: the moment by
+/// which a pull request whose stored closing the batch no longer has was seen open again.
+/// </param>
 public sealed record PullRequestBatch(
     IReadOnlyList<RawPullRequest> PullRequests,
     IReadOnlyList<RawPullRequestEvent> Events,
     RawPullRequestHost HostState,
-    string SaltFingerprint);
+    string SaltFingerprint,
+    DateTimeOffset CollectedAt)
+{
+    /// <summary>
+    /// Destructive: the stored rows of the batch's host were read from another source
+    /// (<see cref="PullRequestSource"/>), so the host's pull requests, events and past closures are removed
+    /// and the batch is written in their place, in the same transaction. Only a backfill under a changed
+    /// source writes such a batch; the rows of other hosts are not touched.
+    /// </summary>
+    public bool ReplacesHost { get; init; }
+}
