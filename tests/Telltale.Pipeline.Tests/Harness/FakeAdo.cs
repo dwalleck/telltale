@@ -151,6 +151,9 @@ public sealed class FakeAdo
     /// <summary>The path of the list of pull requests.</summary>
     public const string ListPath = RepositoryPath + "/pullrequests";
 
+    /// <summary>The path of the threads of the pull request with this number: what a test overrides to make one history unreadable.</summary>
+    public static string ThreadsPath(int number) => $"{RepositoryPath}/pullRequests/{number}/threads";
+
     private readonly StubHttpHandler _handler;
     private int _threadId = 4400;
 

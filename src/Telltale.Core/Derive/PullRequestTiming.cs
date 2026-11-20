@@ -91,7 +91,9 @@ public static class PullRequestTiming
                 .ToList();
             foreach (var measure in Measures)
             {
-                if (RestsOnReviews(measure) && withoutReviews.Contains(seen.Host))
+                // A pull request whose own events the host did not give (PullRequestHistoryStates.Failed) has no
+                // wait that rests on them: an event that was not read can be its first. Its merge is still counted.
+                if (RestsOnReviews(measure) && (withoutReviews.Contains(seen.Host) || seen.History != PullRequestHistoryStates.Read))
                 {
                     continue;
                 }
@@ -136,7 +138,7 @@ public static class PullRequestTiming
     public static IReadOnlySet<string> HostsWithoutTheirReviews(RawData raw, IReadOnlyDictionary<string, IReadOnlyList<string>> repositoriesByHost) =>
         raw.PullRequestHosts.Where(host => host.Roster == PullRequestRosterStates.Failed).Select(host => host.Host)
             .Concat(raw.PullRequests
-                .Where(pullRequest => pullRequest.History != PullRequestHistoryStates.Read
+                .Where(pullRequest => pullRequest.History == PullRequestHistoryStates.NotRead
                     && repositoriesByHost.TryGetValue(pullRequest.Host, out var repositories)
                     && repositories.Contains(pullRequest.Repository, StringComparer.Ordinal))
                 .Select(pullRequest => pullRequest.Host))

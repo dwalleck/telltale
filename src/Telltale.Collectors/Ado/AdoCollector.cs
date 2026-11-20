@@ -37,6 +37,10 @@ public sealed class AdoCollector : IPullRequestCollector
     // happen; more of them in a row is a list that is not moving on.
     private const int MaxRepeatedPagesInARow = 3;
 
+    // How many pull requests one after another may fail to give their threads before the read of the host is
+    // given up as failed: the third such failure in a row stops it, and nothing of that read is stored.
+    private const int MaxUnreadHistoriesInARow = 3;
+
     private readonly HttpMessageHandler _handler;
     private readonly AdoSettings _settings;
     private readonly string _token;
@@ -71,6 +75,7 @@ public sealed class AdoCollector : IPullRequestCollector
         var known = stored.PullRequests.Where(pullRequest => pullRequest.Host == Host).ToDictionary(pullRequest => (pullRequest.Repository, pullRequest.Number));
         var rows = new List<RawPullRequest>();
         var events = new List<RawPullRequestEvent>();
+        var unreadInARow = 0;
         foreach (var repository in _settings.Repositories)
         {
             // Every state: an old pull request can be reviewed, completed or reactivated at any time. The list
@@ -96,7 +101,8 @@ public sealed class AdoCollector : IPullRequestCollector
                 // pull request is new to the store, its closing or completion differs, or it is open, since
                 // nothing in the list says whether an open pull request changed. A closed one that is stored
                 // as closed was read after it closed, since a batch is written whole or not at all: what comes
-                // after the closing ends no wait, and it costs no request again.
+                // after the closing ends no wait, and it costs no request again. The exception is a row that says its
+                // threads were not read: they are asked for until they are.
                 known.TryGetValue((row.Repository, row.Number), out var before);
                 var readThreads = before is null || before.Merged != row.Merged || before.Closed != row.Closed || row.Closed is null
                     || before.History != PullRequestHistoryStates.Read;
@@ -105,11 +111,35 @@ public sealed class AdoCollector : IPullRequestCollector
                     continue;
                 }
 
-                rows.Add(row);
-                if (readThreads)
+                if (!readThreads)
                 {
-                    await ForEachThreadAsync(ado, repository, row.Number, thread => events.AddRange(ReadThread(row, authorId, thread)), cancellationToken);
+                    rows.Add(row);
+                    continue;
                 }
+
+                // One pull request whose threads cannot be read, or cannot be read to their end or understood,
+                // does not stop the others from being read: its row says so, none of its threads is stored
+                // from this read, and no wait that rests on them is stated until a sync reads them. A few such
+                // pull requests one after another is the host failing, not a pull request: that stops the read.
+                var itsEvents = new List<RawPullRequestEvent>();
+                try
+                {
+                    await ForEachThreadAsync(ado, repository, row.Number, thread => itsEvents.AddRange(ReadThread(row, authorId, thread)), cancellationToken);
+                }
+                catch (UserFacingException exception) when (++unreadInARow < MaxUnreadHistoriesInARow)
+                {
+                    rows.Add(row with { History = PullRequestHistoryStates.Failed });
+                    // The failure's own words end by saying nothing was stored, which is true of a read that
+                    // stops there and not of this one: the pull request is stored, without its threads.
+                    await _notices.WriteLineAsync(
+                        $"Azure DevOps: the threads of a pull request could not be read ({exception.Message.Replace(" Nothing was stored.", "", StringComparison.Ordinal)}). "
+                        + "It is stored without them and counted as a pull request whose history was not read; its threads are asked for again at the next sync.");
+                    continue;
+                }
+
+                unreadInARow = 0;
+                rows.Add(row);
+                events.AddRange(itsEvents);
             }
         }
 
