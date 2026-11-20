@@ -473,12 +473,14 @@ Tests use TUnit and run against a fake Jira, so they need no network and no secr
 
 At most four tests of each test project run at once, so `dotnet test` leaves the machine usable. The two projects run side by side, so up to eight tests run at once while both are running. Set `TELLTALE_TEST_PARALLELISM` to another whole number on a machine with cores to spare, or to `0` for no limit; any other value stops the run. A test that speaks of every metric view reads the one list in `tests/Telltale.Pipeline.Tests/Harness/MetricViews.cs`. A new view is added there, and a view with a `suppressed` column also gets a row in the flags table of `SuppressionOffTests`.
 
+A commit that only changes layout, such as one that rewraps the glossary, goes into `.git-blame-ignore-revs`, so that `git blame` still shows when each definition was written. Run `git config blame.ignoreRevsFile .git-blame-ignore-revs` once in a clone to have `git blame` skip those commits; GitHub's blame view does so by itself.
+
 Report and query assertions normalize both actual output and multiline expected strings to LF. C# raw strings otherwise inherit the checkout's line endings, so normalizing only the actual output makes a CRLF checkout fail despite matching content.
 
 | Project | Role |
 | --- | --- |
 | `src/Telltale.Core` | Domain rules: business time, status roles, cycle time, settings. |
-| `src/Telltale.Collectors` | The Jira client and collector. |
+| `src/Telltale.Collectors` | The Jira, GitHub and Azure DevOps collectors and the HTTP client they share. |
 | `src/Telltale.Storage.Sqlite` | The store, migrations, derived tables and metric views. |
 | `src/Telltale.Reporting` | The markdown sprint report. |
 | `src/Telltale.Pipeline` | The steps the commands run, and their rules. |

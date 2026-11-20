@@ -19,6 +19,14 @@ Start with `docs/context/handoff.md`: it explains where this project came from, 
 - The minimum group size (withholding figures that rest on few people) is a default, not a hard rule: five and three unless `minimumGroupSize` in the configuration file says otherwise, and zero turns a check off (ADR-0008). The team asked for this tool, and its Jira figures aggregate what anyone with access to the board can already see. The metric views enforce whatever numbers are configured; no report or query may show a figure the configured numbers withhold. PR timing figures are outside the rule: they are never withheld for the size of the group behind them, and their protection is that no name is stored and no result is grouped by person (D114). (Recorded exceptions: the anomaly totals `derive` logs on the console, D37; what can be computed from shown brief visit counts, D78 and D79; what shown figures give or bound about cycles that start with a brief visit and about issues left out under `exclude`, D94, D95, D97, D98 and D106.)
 - Metric definitions live in `docs/context/pilot-plan.md` and the glossary. Changing a definition is a commit with a reason, because the git history is the dated record that criteria were set before results existed.
 
+## Working in the code
+
+This section is kept outside "Agent skills", whose contents the `setup-matt-pocock-skills` skill updates in place when it runs again.
+
+- **Code map:** where a change goes and what else it must touch: `docs/context/code-map.md`. Read it before adding a setting, a secret, a table, a metric view, a pull request measure or a host.
+- **Implementing a spec:** Telltale's additions to the `implement-spec` skill, including the owner's rulings before the first implementer: `docs/agents/implement-spec.md`.
+- **Review:** the rules a review applies to a diff: `CODING_STANDARDS.md`.
+
 ## Agent skills
 
 ### Issue tracker

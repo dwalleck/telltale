@@ -2,15 +2,15 @@
 
 How the tool collects, stores and reports the data. Decisions with real trade-offs are ADRs in `docs/adr/`; this file holds the working design and the source-system details an implementer needs.
 
-**Built and planned.** Only the Jira path is built: the Jira collector, the SQLite store, derive, the per-sprint markdown report and the `query` command. Each section below is marked **Built** (it describes code in the repository) or **Planned** (design for code that does not exist yet; check the repository before relying on it). Last checked against the code on 2026-11-15.
+**Built and planned.** Built: the Jira collector, the GitHub and Azure DevOps pull request collectors, the SQLite store, derive, the per-sprint markdown report and the `query` command. Each section below is marked **Built** (it describes code in the repository) or **Planned** (design for code that does not exist yet; check the repository before relying on it). Last checked against the code on 2026-11-15; the pull request collectors on 2026-11-20.
 
 ## Shape
 
-**Built for Jira; the other three collectors and the Confluence page are planned.** The design is four collectors feeding one SQLite store; reports read only from its metric views.
+**Built for Jira and for pull requests from GitHub and Azure DevOps; the repo-clone and session-log collectors and the Confluence page are planned.** The design is collectors feeding one SQLite store; reports read only from its metric views.
 
 ```
 Jira Cloud  ─┐
-GitHub      ─┤                 ┌─ raw tables (never edited)
+GitHub, ADO ─┤                 ┌─ raw tables (never edited)
 Repo clones ─┼─► sync job ─► SQLite ─┼─ derived tables (rebuilt every run)
 Session logs─┘                 └─ metric views ─► Confluence page, ad hoc SQL
 ```
@@ -35,7 +35,7 @@ src/
   Telltale.Core/            no dependencies; model, interval math, business-day calendar,
                            identity hashing, abstractions; Monte Carlo (planned). Medians and P85s
                            are computed in the SQL metric views, not here
-  Telltale.Collectors/      Jira/; GitHub/, Git/, Sessions/ (planned) (one project, folder per source)
+  Telltale.Collectors/      Jira/, GitHub/, Ado/ (pull requests); Git/, Sessions/ (planned) (one project, folder per source)
   Telltale.Storage.Sqlite/  migrations (raw, derived, views), upserts, watermarks,
                            derived rebuild, metric views with minimum group size
   Telltale.Reporting/       queries over views, the markdown sprint report; charts (PNG) and the
@@ -122,13 +122,12 @@ The board's statuses, in order: New, Approved, Committed (not started; developme
 - Point bucket: the story point value at cycle start, from the story point field's history.
 - One team time zone and one holiday list.
 
-## GitHub collector
+## Pull request collectors (GitHub, Azure DevOps)
 
-**Planned.**
+**Built for pull request timing** (`.scratch/github-pr-timing/spec.md`). The GitHub collector reads each configured repository's pull requests and their submitted reviews over the REST API, and the members of the Ops team when one is configured. The Azure DevOps collector reads each configured repository's pull requests and their threads. Neither stores a title, branch, description or login; an author is stored only as a salted hash. The measures are the waits from first opening to first code review, first code approval and merge (`PullRequestTiming.Measures`), defined in `GLOSSARY.md` under "Pull request wait". `code-map.md` lists what a new host or measure touches.
 
-GraphQL, one query per PR (reviews, review threads with comments, timeline items, size) instead of 4–5 REST calls per PR.
+**Planned** for GitHub: the figures below. This design came before the build and proposed GraphQL, one query per PR (reviews, review threads with comments, timeline items, size), instead of 4–5 REST calls per PR; the built collector uses REST. The built wait to first code review starts at first opening, not at `ready_for_review`.
 
-- Time to first review: `ready_for_review` (or creation if never draft) → first submitted review.
 - Reviewer wait vs. author wait: order of reviews and pushes on the timeline.
 - Review rounds: count from timeline order (review with comments → push → review), not by comparing commit IDs (force pushes rewrite them) and not by `CHANGES_REQUESTED` state (many reviewers only comment).
 - Not-fixed threads: `reviewThreads` with `isResolved`, `isOutdated`, each comment's author, time and commit. A reviewer comment in the same thread after a newer push is a likely "still not fixed". It's a heuristic: spot-check a sample before reporting it.
