@@ -222,4 +222,26 @@ public class PullRequestsWithoutReviewTests
         });
         await Assert.That(await pipeline.ReadReportAsync(42)).Contains("| First code review | 1 | 28.9 |");
     }
+
+    [Test]
+    public async Task A_sprint_started_in_Jira_with_a_start_still_to_come_counts_no_pull_request()
+    {
+        // Review 2, finding 16. Sprint 43 was started in Jira on Tuesday 3 February with a start date of
+        // Monday the 9th: it is active, and its window has not begun at the as-of time.
+        await using var pipeline = SuppressionOff();
+        pipeline.Jira.AddSprints41And42();
+        pipeline.Jira.AddSprint(43, "Fake Sprint 43", Local(2026, 2, 9, 9), Local(2026, 2, 23, 9));
+        var github = FakeGitHub.For(pipeline);
+        github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 20, 12));
+
+        await pipeline.RunAllAsync(["sync"], ["derive"]);
+
+        // The open pull request was waiting when sprint 42 closed. Sprint 43 has not begun: nothing is its to
+        // explain yet, as it has no wait either.
+        await Assert.That(await CountsAsync(pipeline, "host_scope = 'github' AND sprint_id IN ('42', '43')")).IsEquivalentTo(new[]
+        {
+            ("42", "github", 1L, 0L, 1L, 0L, (long?)0L, 0L, 0L),
+            ("43", "github", 0L, 0L, 0L, 0L, (long?)0L, 0L, 0L),
+        });
+    }
 }

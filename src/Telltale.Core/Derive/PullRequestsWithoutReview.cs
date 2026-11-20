@@ -37,6 +37,14 @@ public static class PullRequestsWithoutReview
         {
             // The moment the sprint is looked at: its close, and never later than the as-of time.
             var at = window.Completed is { } completed && completed < asOf ? completed : asOf;
+
+            // A sprint can be started in Jira with a start that is still to come. Its window has not begun at
+            // that moment, so no pull request is its to explain yet: it holds no wait either.
+            if (at <= window.Start)
+            {
+                continue;
+            }
+
             foreach (var pullRequest in counted)
             {
                 if (pullRequest.Opened >= at || pullRequest.Closed < window.Start)
