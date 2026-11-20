@@ -28,14 +28,17 @@ public interface IPullRequestCollector
 public static class PullRequestCollection
 {
     /// <summary>
-    /// Reads each host in turn and writes its batch. A host that cannot be read stops the command, and the
+    /// Reads each host in turn and writes its batch. A host that cannot be read fails the command, and the
     /// store then says so (<see cref="PullRequestHostStates.Failed"/>): its rows of earlier reads stay, and
-    /// nothing reads them as a host that was read and found empty.
+    /// nothing reads them as a host that was read and found empty. The hosts after it are still read first,
+    /// so that what one host has does not go unread because another could not be reached; the command then
+    /// fails with what each host that could not be read said.
     /// </summary>
     /// <param name="saltFingerprint">The fingerprint of the salt the collectors hash authors with.</param>
     /// <param name="everything">Read each host's whole list (a backfill), not only as far as something changed (a sync).</param>
     public static async Task BringUpToDateAsync(IEnumerable<IPullRequestCollector> collectors, ITelltaleStore store, bool everything, string saltFingerprint, CancellationToken cancellationToken)
     {
+        var failures = new List<UserFacingException>();
         foreach (var collector in collectors)
         {
             PullRequestBatch batch;
@@ -43,15 +46,27 @@ public static class PullRequestCollection
             {
                 batch = await collector.FetchAsync(await store.ReadRawAsync(cancellationToken), everything, cancellationToken);
             }
-            catch (UserFacingException)
+            catch (UserFacingException failure)
             {
                 await store.WritePullRequestsAsync(
                     new PullRequestBatch([], [], new RawPullRequestHost(collector.Host, PullRequestHostStates.Failed, PullRequestRosterStates.NotRead), saltFingerprint),
                     cancellationToken);
-                throw;
+                failures.Add(failure);
+                continue;
             }
 
             await store.WritePullRequestsAsync(batch, cancellationToken);
+        }
+
+        switch (failures)
+        {
+            case []:
+                return;
+            case [var only]:
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(only).Throw();
+                return;
+            default:
+                throw new UserFacingException(string.Join(Environment.NewLine, failures.Select(failure => failure.Message)), new AggregateException(failures));
         }
     }
 }
