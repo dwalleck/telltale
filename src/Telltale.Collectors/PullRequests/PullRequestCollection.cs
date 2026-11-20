@@ -5,7 +5,8 @@ namespace Telltale.Collectors.PullRequests;
 
 /// <summary>
 /// Reads the pull requests of one host. A host's collector only fetches and classifies: it gives back a batch
-/// and writes nothing, so a fetch that fails part-way stores no row (<see cref="PullRequestCollection"/> writes).
+/// and writes nothing: <see cref="PullRequestCollection"/> writes. A fetch that fails part-way stores no row,
+/// unless the collector hands over the pull requests it had read whole (<see cref="PullRequestReadStoppedException"/>).
 /// </summary>
 public interface IPullRequestCollector
 {
