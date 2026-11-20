@@ -134,13 +134,21 @@ public sealed class AdoCollector : IPullRequestCollector
                 // failed at an earlier sync too, so its failing again says nothing new about the host, and a
                 // few such pull requests would otherwise fail every later read of the host, where those
                 // between them are closed and no longer asked for.
+                //
+                // Only a failure that is about the pull request counts here: Azure DevOps refused its threads
+                // (403, 404), or they could not be understood or read to an end. A client that gave up
+                // (HostGaveUpException: retries used up, the time allowed for failures spent, a throttle, the
+                // proxy, a token the host does not take) is never about one pull request, and stops the read
+                // at once, as on GitHub. Passed over, a host that has stopped answering would be asked once
+                // more for every pull request left, each request waiting out its timeout, long past the time
+                // a command may spend on failures, and the host would then be recorded as read.
                 var failedBefore = before?.History == PullRequestHistoryStates.Failed;
                 var itsEvents = new List<RawPullRequestEvent>();
                 try
                 {
                     await ForEachThreadAsync(ado, repository, row.Number, thread => itsEvents.AddRange(ReadThread(row, authorId, thread)), cancellationToken);
                 }
-                catch (UserFacingException exception) when (failedBefore || ++unreadInARow < MaxUnreadHistoriesInARow)
+                catch (UserFacingException exception) when (exception is not HostGaveUpException && (failedBefore || ++unreadInARow < MaxUnreadHistoriesInARow))
                 {
                     rows.Add(row with { History = PullRequestHistoryStates.Failed });
                     // The failure's own words end by saying nothing was stored, which is true of a read that
