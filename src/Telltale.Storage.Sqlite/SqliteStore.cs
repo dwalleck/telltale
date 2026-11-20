@@ -588,6 +588,14 @@ public sealed class SqliteStore : ITelltaleStore
         await ExecuteForEachRowAsync(
             connection,
             transaction,
+            "INSERT INTO pr_without_review (sprint_id, host, repository, pr_number, state, activity) VALUES (@sprintId, @host, @repository, @number, @state, @activity);",
+            ["@sprintId", "@host", "@repository", "@number", "@state", "@activity"],
+            derived.PullRequestsWithoutReview.Select(row => new object?[] { row.SprintId, row.Host, row.Repository, row.Number, row.State, row.Activity }),
+            cancellationToken);
+
+        await ExecuteForEachRowAsync(
+            connection,
+            transaction,
             "INSERT INTO brief_visit (issue_id, sprint_id, status_id) VALUES (@issueId, @sprintId, @statusId);",
             ["@issueId", "@sprintId", "@statusId"],
             derived.BriefVisits.Select(visit => new object?[] { visit.IssueId, visit.SprintId, visit.StatusId }),

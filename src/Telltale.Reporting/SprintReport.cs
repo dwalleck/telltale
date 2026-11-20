@@ -114,6 +114,10 @@ public static class SprintReport
                 "SELECT measure, sprint_id IS NULL AS in_no_sprint, sample_count, median_elapsed_days, p85_elapsed_days, median_business_days, p85_business_days FROM pr_timing_per_sprint WHERE sprint_id = @sprintId OR sprint_id IS NULL ORDER BY measure_position;",
                 new { sprintId },
                 cancellationToken), derivedFrom.PullRequestHostsCounted);
+            AppendPullRequestsWithoutReview(report, await store.QueryViewsAsync<PullRequestsWithoutReviewRow>(
+                "SELECT host_scope, waiting, closed_without_review, no_activity, automation_only, ops_only, unclassifiable, history_not_read FROM pr_without_review_per_sprint WHERE sprint_id = @sprintId;",
+                new { sprintId },
+                cancellationToken), derivedFrom.PullRequestHostsCounted);
         }
 
         var quality = await ReadDataQualityAsync(store, cancellationToken);
@@ -475,6 +479,60 @@ public static class SprintReport
             .Append(!hosts.Contains(PullRequestHosts.Ado) ? "" : AzureDevOpsExplained)
             .Append("- Pull request figures are not subject to the minimum group size: none is withheld for the number of people behind it, and none is reported per person.\n");
     }
+
+    /// <summary>How the table of pull requests without a first code review names each host scope of <c>pr_without_review_per_sprint</c>, in the order of its rows.</summary>
+    private static readonly IReadOnlyList<(string Scope, string Label)> PullRequestHostScopeLabels =
+    [
+        (PullRequestHosts.GitHub, "GitHub"),
+        (PullRequestHosts.Ado, "Azure DevOps"),
+        ("combined", "Both hosts"),
+    ];
+
+    /// <summary>
+    /// The pull requests that give the sprint no first code review, under the pull request section: one row
+    /// for each host counted, and one for both together when there are two, then what each column counts.
+    /// These explain the number of pull requests in the first code review row and are apart from it: a count
+    /// here is never a wait. Like the figures above they are not withheld for group size (owner decision D114).
+    /// </summary>
+    private static void AppendPullRequestsWithoutReview(StringBuilder report, IReadOnlyList<PullRequestsWithoutReviewRow> rows, IReadOnlyList<string> hosts)
+    {
+        report.Append("\n### Without a first code review\n\n")
+            .Append("Pull requests of the configured repositories that had no first code review when the sprint closed, or at the as-of time for a sprint that is still running. ")
+            .Append("These are numbers of pull requests, not waits: none of them is in the first code review row above, and none is counted as a wait of zero.\n\n");
+        AppendTableHead(report, "Host", "Still waiting", "Closed without one", "No activity", "Automation only", "Ops only", "Cannot be classified", "History not read");
+        foreach (var (scope, label) in PullRequestHostScopeLabels)
+        {
+            // Both hosts together are a row of their own only when there are two: with one it would repeat that host's.
+            if (rows.FirstOrDefault(row => row.HostScope == scope) is not { } row || (scope == "combined" && hosts.Count < 2))
+            {
+                continue;
+            }
+
+            AppendTableRow(
+                report,
+                label,
+                Number(row.Waiting),
+                Number(row.ClosedWithoutReview),
+                Number(row.NoActivity),
+                Number(row.AutomationOnly),
+                row.OpsOnly is { } opsOnly ? Number(opsOnly) : "no Ops group",
+                Number(row.Unclassifiable),
+                Number(row.HistoryNotRead));
+        }
+
+        report
+            .Append("\n- Still waiting: open at that moment with no first code review yet. A review made later does not take a pull request out of this sprint's number: it was waiting when the sprint closed, and its wait is counted in the sprint of the review.\n")
+            .Append("- Closed without one: closed during the sprint, merged or not, with no first code review before it closed. A merge is still counted in the Merge row.\n")
+            .Append("- No activity, Automation only and Ops only split the pull requests of the first two columns by what had been submitted on each before it closed. Each of those pull requests is in exactly one of the three, so the three add up to the first two columns and are not further pull requests. ")
+            .Append("Ops only: something by the Ops group, whatever automation did besides").Append(hosts.Contains(PullRequestHosts.Ado) ? "; Azure DevOps has no Ops group set apart" : "")
+            .Append(". Automation only: something by automation and nothing by the Ops group. No activity: nothing, or only the author's own; the pull request's history was read and holds nothing else.\n")
+            .Append("- Cannot be classified: something that could have been the first code review cannot be told to be one or not, so the pull request has no first code review that can be relied on. It is in none of the columns before.\n")
+            .Append("- History not read: the pull request's reviews could not be read when it was last collected, so whether it was reviewed is not known. That is not a history that was read and found empty, and the pull request is in none of the columns before.\n")
+            .Append("- Like the figures above, these numbers are not subject to the minimum group size, and none is of a person.\n");
+    }
+
+    /// <summary>A number of pull requests: always shown, zero too.</summary>
+    private static string Number(long pullRequests) => pullRequests.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>
     /// Writes the one line that stands for a table its view withholds as a whole: no row, and no sentence about
@@ -942,6 +1000,19 @@ public static class SprintReport
         public double? BaselineMedianBusinessDays { get; init; }
         /// <summary>Null when the baseline has no row for the status.</summary>
         public long? BaselineSuppressed { get; init; }
+    }
+
+    private sealed class PullRequestsWithoutReviewRow
+    {
+        public string HostScope { get; init; } = "";
+        public long Waiting { get; init; }
+        public long ClosedWithoutReview { get; init; }
+        public long NoActivity { get; init; }
+        public long AutomationOnly { get; init; }
+        /// <summary>Null for a host that has no Ops group set apart.</summary>
+        public long? OpsOnly { get; init; }
+        public long Unclassifiable { get; init; }
+        public long HistoryNotRead { get; init; }
     }
 
     private sealed class PullRequestTimingRow

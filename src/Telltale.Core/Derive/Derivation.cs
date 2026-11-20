@@ -177,6 +177,7 @@ public static class Derivation
             // nothing there reads an issue.
             PullRequestWaits = PullRequestTiming.Waits(raw, settings.PullRequestRepositories, windows, calendar, asOf),
             PullRequestMeasures = PullRequestTiming.MeasuresGiven(raw, settings.PullRequestRepositories),
+            PullRequestsWithoutReview = PullRequestsWithoutReview.Of(raw, settings.PullRequestRepositories, windows, asOf),
         };
     }
 

@@ -143,6 +143,13 @@ public static class PullRequestTiming
             .Where(repositoriesByHost.ContainsKey)
             .ToHashSet(StringComparer.Ordinal);
 
+    /// <summary>
+    /// The moment of the pull request's first code review by its host's rule, or null when it has none that
+    /// can be relied on. <paramref name="events"/> are the pull request's, earliest first.
+    /// </summary>
+    public static DateTimeOffset? FirstCodeReviewOf(RawPullRequest pullRequest, IReadOnlyList<RawPullRequestEvent> events) =>
+        EndOf(FirstCodeReview, pullRequest, events) is { } ended && ended >= pullRequest.Opened ? ended : null;
+
     /// <summary>Whether a measure's end is a review, and so needs the host's reviews to have been read and classified.</summary>
     private static bool RestsOnReviews(string measure) => measure is FirstCodeReview or FirstCodeApproval;
 
