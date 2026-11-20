@@ -68,6 +68,7 @@ public static class PullRequestTiming
         var events = raw.PullRequestEvents
             .Where(happened => happened.At < asOf)
             .ToLookup(happened => (happened.Host, happened.Repository, happened.Number));
+        var pastClosures = raw.PullRequestPastClosures.ToLookup(closure => (closure.Host, closure.Repository, closure.Number));
         var withoutReviews = HostsWithoutTheirReviews(raw, repositoriesByHost);
         var waits = new List<PullRequestWait>();
         foreach (var pullRequest in raw.PullRequests)
@@ -85,10 +86,11 @@ public static class PullRequestTiming
                 Merged = pullRequest.Merged < asOf ? pullRequest.Merged : null,
                 Closed = pullRequest.Closed < asOf ? pullRequest.Closed : null,
             };
-            var itsEvents = events[(pullRequest.Host, pullRequest.Repository, pullRequest.Number)]
-                .OrderBy(happened => happened.At)
-                .ThenBy(happened => happened.EventId, StringComparer.Ordinal)
-                .ToList();
+            var itsEvents = MadeWhileOpen(
+                events[(pullRequest.Host, pullRequest.Repository, pullRequest.Number)]
+                    .OrderBy(happened => happened.At)
+                    .ThenBy(happened => happened.EventId, StringComparer.Ordinal),
+                pastClosures[(pullRequest.Host, pullRequest.Repository, pullRequest.Number)]);
             foreach (var measure in Measures)
             {
                 // A host that is without its reviews has no wait that rests on them, for any pull request. Its merges are still counted.
@@ -194,6 +196,27 @@ public static class PullRequestTiming
     /// </summary>
     public static DateTimeOffset? FirstCodeReviewOf(RawPullRequest pullRequest, IReadOnlyList<RawPullRequestEvent> events) =>
         EndOf(FirstCodeReview, pullRequest, events) is { } ended && ended >= pullRequest.Opened ? ended : null;
+
+    /// <summary>
+    /// The events of a pull request without those made while it was closed under a closing that has ended
+    /// since (<see cref="RawPullRequestPastClosure"/>), in the order given. An event ends a wait only if the
+    /// pull request was open when it was made, and the host's rules look only at the closing that stands now:
+    /// a review submitted while the pull request was closed would otherwise become its first code review the
+    /// moment it is reopened, dated in a sprint that may already be reported. Such an event is not a review of
+    /// the pull request and is passed over, so a review after the reopening can be the first.
+    /// </summary>
+    /// <remarks>
+    /// Only a closing whose reopening the host gave takes events out
+    /// (<see cref="RawPullRequestPastClosure.KnownToHold"/>). Where the reopening is known only as before the
+    /// collection that saw it (Azure DevOps always; GitHub when the issue events could not be read), an event
+    /// in that time is kept: the pull request was open for part of it, and an event there is most likely a
+    /// review made after the reopening, which must not be lost.
+    /// </remarks>
+    public static IReadOnlyList<RawPullRequestEvent> MadeWhileOpen(IEnumerable<RawPullRequestEvent> events, IEnumerable<RawPullRequestPastClosure> pastClosures)
+    {
+        var closures = pastClosures.Where(closure => closure.Reopened is not null).ToList();
+        return [.. events.Where(happened => !closures.Any(closure => closure.KnownToHold(happened.At)))];
+    }
 
     /// <summary>Whether a measure's end is a review, and so needs the host's reviews to have been read and classified.</summary>
     private static bool RestsOnReviews(string measure) => measure is FirstCodeReview or FirstCodeApproval;

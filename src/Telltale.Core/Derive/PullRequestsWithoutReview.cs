@@ -53,7 +53,8 @@ public static class PullRequestsWithoutReview
                 // The closing the pull request was under at that moment, if it was closed then: the one that
                 // stands now, or one it was reopened from since. One closed before the sprint started, and
                 // not open again by that moment, is not the sprint's to explain.
-                var closed = ClosedAt(at, pullRequest, pastClosures[(pullRequest.Host, pullRequest.Repository, pullRequest.Number)]);
+                var itsPastClosures = pastClosures[(pullRequest.Host, pullRequest.Repository, pullRequest.Number)];
+                var closed = ClosedAt(at, pullRequest, itsPastClosures);
                 if (pullRequest.Opened >= at || closed < window.Start)
                 {
                     continue;
@@ -66,11 +67,15 @@ public static class PullRequestsWithoutReview
                     Merged = pullRequest.Merged < at ? pullRequest.Merged : null,
                     Closed = closed,
                 };
-                var itsEvents = events[(pullRequest.Host, pullRequest.Repository, pullRequest.Number)]
-                    .Where(happened => happened.At < at)
-                    .OrderBy(happened => happened.At)
-                    .ThenBy(happened => happened.EventId, StringComparer.Ordinal)
-                    .ToList();
+                // Without what was made while it was closed under a closing that has ended since: that is no
+                // review of it, here as for the waits, so a pull request cannot be closed without a review
+                // in one sprint and have its first code review there too.
+                var itsEvents = PullRequestTiming.MadeWhileOpen(
+                    events[(pullRequest.Host, pullRequest.Repository, pullRequest.Number)]
+                        .Where(happened => happened.At < at)
+                        .OrderBy(happened => happened.At)
+                        .ThenBy(happened => happened.EventId, StringComparer.Ordinal),
+                    itsPastClosures);
                 if (StateOf(seen, itsEvents) is var (state, activity))
                 {
                     rows.Add(new PullRequestWithoutReview(window.SprintId, seen.Host, seen.Repository, seen.Number, state, activity));
@@ -84,15 +89,16 @@ public static class PullRequestsWithoutReview
     /// <summary>
     /// When the pull request was closed, if it was closed at the moment <paramref name="at"/>; null if it was
     /// open then. It was closed then under the closing that stands now, when that is before the moment, or
-    /// under a past one (<see cref="RawPullRequestPastClosure"/>) from its closing until the collection that
-    /// saw the pull request open again. The store does not know when in that time it was reopened, so a
-    /// moment after the reopening and before that collection still finds it closed: the sprint is told as the
-    /// store saw it then. Where two closings hold the moment (a pull request closed again between two
-    /// collections), the later one is the one it was under.
+    /// under a past one (<see cref="RawPullRequestPastClosure"/>) from its closing until its reopening, where
+    /// the host gave that time, and otherwise until the collection that saw the pull request open again. In
+    /// the second case the store does not know when in that time it was reopened, so a moment after the
+    /// reopening and before that collection still finds it closed: the sprint is told as the store saw it
+    /// then. Where two closings hold the moment (a pull request closed again between two collections), the
+    /// later one is the one it was under.
     /// </summary>
     private static DateTimeOffset? ClosedAt(DateTimeOffset at, RawPullRequest pullRequest, IEnumerable<RawPullRequestPastClosure> pastClosures)
     {
-        var closings = pastClosures.Where(closure => closure.Closed < at && at < closure.ReopenedBy).Select(closure => closure.Closed);
+        var closings = pastClosures.Where(closure => closure.Closed < at && at < closure.Until).Select(closure => closure.Closed);
         if (pullRequest.Closed is { } standing && standing < at)
         {
             closings = closings.Append(standing);

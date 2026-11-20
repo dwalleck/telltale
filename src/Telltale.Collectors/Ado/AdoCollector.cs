@@ -95,9 +95,14 @@ public sealed class AdoCollector : IPullRequestCollector
 
             foreach (var (row, authorId) in listed.Values.OrderBy(pullRequest => pullRequest.Row.Number))
             {
-                // Out of what is collected: closed before the start date. An open one cannot be shown to have
-                // been without activity since then, and is collected.
-                if (row.Closed < _settings.CollectFrom)
+                // Out of what is collected: closed before the start date, and not in the store. An open one
+                // cannot be shown to have been without activity since then, and is collected. The date says
+                // only what is brought into the store: a pull request that is in it is compared and written
+                // like any other, whatever the date, because derive counts every stored pull request. One
+                // stored as open that closed before a start date moved forward since would otherwise be
+                // counted as still waiting for good, and one stored without its threads never asked for again.
+                known.TryGetValue((row.Repository, row.Number), out var before);
+                if (before is null && row.Closed < _settings.CollectFrom)
                 {
                     continue;
                 }
@@ -108,7 +113,6 @@ public sealed class AdoCollector : IPullRequestCollector
                 // as closed was read after it closed, since a batch is written whole or not at all: what comes
                 // after the closing ends no wait, and it costs no request again. The exception is a row that says its
                 // threads were not read: they are asked for until they are.
-                known.TryGetValue((row.Repository, row.Number), out var before);
                 var readThreads = before is null || before.Merged != row.Merged || before.Closed != row.Closed || row.Closed is null
                     || before.History != PullRequestHistoryStates.Read;
                 if (!readThreads && before == row)
@@ -130,13 +134,21 @@ public sealed class AdoCollector : IPullRequestCollector
                 // failed at an earlier sync too, so its failing again says nothing new about the host, and a
                 // few such pull requests would otherwise fail every later read of the host, where those
                 // between them are closed and no longer asked for.
+                //
+                // Only a failure that is about the pull request counts here: Azure DevOps refused its threads
+                // (403, 404), or they could not be understood or read to an end. A client that gave up
+                // (HostGaveUpException: retries used up, the time allowed for failures spent, a throttle, the
+                // proxy, a token the host does not take) is never about one pull request, and stops the read
+                // at once, as on GitHub. Passed over, a host that has stopped answering would be asked once
+                // more for every pull request left, each request waiting out its timeout, long past the time
+                // a command may spend on failures, and the host would then be recorded as read.
                 var failedBefore = before?.History == PullRequestHistoryStates.Failed;
                 var itsEvents = new List<RawPullRequestEvent>();
                 try
                 {
                     await ForEachThreadAsync(ado, repository, row.Number, thread => itsEvents.AddRange(ReadThread(row, authorId, thread)), cancellationToken);
                 }
-                catch (UserFacingException exception) when (failedBefore || ++unreadInARow < MaxUnreadHistoriesInARow)
+                catch (UserFacingException exception) when (exception is not HostGaveUpException && (failedBefore || ++unreadInARow < MaxUnreadHistoriesInARow))
                 {
                     rows.Add(row with { History = PullRequestHistoryStates.Failed });
                     // The failure's own words end by saying nothing was stored, which is true of a read that

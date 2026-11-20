@@ -311,6 +311,24 @@ public sealed class SqliteStore : ITelltaleStore
             }),
             cancellationToken);
 
+        // The closings the host itself told of, with the reopening that ended each. One kept just above, or by
+        // an earlier write, gets its exact end and keeps the collection time it has; one the store never saw
+        // (made and undone between two collections) is added, with this collection as the one that knew of it.
+        await ExecuteForEachRowAsync(
+            connection,
+            transaction,
+            """
+            INSERT INTO pull_request_past_closure (host, repository, pr_number, closed, reopened_by, reopened)
+            VALUES (@host, @repository, @number, @closed, @reopenedBy, @reopened)
+            ON CONFLICT (host, repository, pr_number, closed) DO UPDATE SET reopened = excluded.reopened;
+            """,
+            ["@host", "@repository", "@number", "@closed", "@reopenedBy", "@reopened"],
+            batch.PastClosures.Select(closure => new object?[]
+            {
+                closure.Host, closure.Repository, closure.Number, StoredTime.ToStored(closure.Closed), StoredTime.ToStored(batch.CollectedAt), StoredTime.ToStored(closure.Reopened),
+            }),
+            cancellationToken);
+
         // What a pull request is now replaces what it was: it can be merged, closed or reopened since.
         await ExecuteForEachRowAsync(
             connection,
@@ -496,7 +514,10 @@ public sealed class SqliteStore : ITelltaleStore
                 Actor = row.Actor,
                 At = StoredTime.FromStored(row.At),
             })],
-            PullRequestPastClosures = [.. pullRequestPastClosures.Select(row => new RawPullRequestPastClosure(row.Host, row.Repository, row.PrNumber, StoredTime.FromStored(row.Closed), StoredTime.FromStored(row.ReopenedBy)))],
+            PullRequestPastClosures = [.. pullRequestPastClosures.Select(row => new RawPullRequestPastClosure(row.Host, row.Repository, row.PrNumber, StoredTime.FromStored(row.Closed), StoredTime.FromStored(row.ReopenedBy))
+            {
+                Reopened = row.Reopened is { } reopened ? StoredTime.FromStored(reopened) : null,
+            })],
             PullRequestHosts = pullRequestHosts,
         };
     }
@@ -1087,6 +1108,7 @@ public sealed class SqliteStore : ITelltaleStore
         public long PrNumber { get; init; }
         public string Closed { get; init; } = "";
         public string ReopenedBy { get; init; } = "";
+        public string? Reopened { get; init; }
     }
 
     private sealed class PullRequestHostRow

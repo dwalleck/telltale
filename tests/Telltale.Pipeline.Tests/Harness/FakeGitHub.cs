@@ -48,6 +48,12 @@ public sealed class FakePullRequest(FakeGitHub github, int number, FakeAccount? 
 
     public List<FakeReview> Reviews { get; } = [];
 
+    /// <summary>
+    /// What the issue events of the pull request say of its closings: <c>closed</c>, <c>reopened</c> and
+    /// <c>merged</c>, each with its time, in the order they happened. The list of pull requests says none of this.
+    /// </summary>
+    public List<(string Event, DateTimeOffset At)> IssueEvents { get; } = [];
+
     /// <summary>Whether the list says the pull request is a draft now.</summary>
     public bool IsDraft { get; private set; }
 
@@ -87,12 +93,15 @@ public sealed class FakePullRequest(FakeGitHub github, int number, FakeAccount? 
     public FakePullRequest Reopened(DateTimeOffset at)
     {
         (ClosedAt, Touched) = (null, at);
+        IssueEvents.Add(("reopened", at));
         return this;
     }
 
     public FakePullRequest Merged(DateTimeOffset at)
     {
         (MergedAt, ClosedAt) = (at, at);
+        IssueEvents.Add(("merged", at));
+        IssueEvents.Add(("closed", at));
         return this;
     }
 
@@ -100,6 +109,7 @@ public sealed class FakePullRequest(FakeGitHub github, int number, FakeAccount? 
     public FakePullRequest Closed(DateTimeOffset at)
     {
         ClosedAt = at;
+        IssueEvents.Add(("closed", at));
         return this;
     }
 
@@ -194,10 +204,35 @@ public sealed class FakeGitHub
         // The reviews are those of the pull request that has the number when they are asked for: a test that
         // empties PullRequests and adds the number again is another server's pull request with that number.
         _handler.On(HttpMethod.Get, $"{PullsPath}/{number}/reviews", request => Page(request, PullRequests.Last(listed => listed.Number == number).Reviews.Select(ReviewJson)));
+
+        // The issue events, as GitHub's REST documentation gives them: besides the closings, a label event,
+        // which the tool has no use for, and with each event the account that caused it.
+        _handler.On(HttpMethod.Get, IssueEventsPath(number), request =>
+        {
+            var current = PullRequests.Last(listed => listed.Number == number);
+            return Page(request, current.IssueEvents.Select((happened, index) => IssueEventJson(happened.Event, happened.At, 990000 + (number * 100) + index, current.Author))
+                .Prepend(IssueEventJson("labeled", current.Opened, 990000 + (number * 100) + 99, current.Author)));
+        });
         return pullRequest;
     }
 
+    /// <summary>The path of the issue events of the pull request with this number: what a test overrides to make them unreadable.</summary>
+    public static string IssueEventsPath(int number) => $"{Prefix}/repos/{Repository}/issues/{number}/events";
+
+    /// <summary>The numbers of the pull requests whose issue events were asked for, in the order asked, once for each request.</summary>
+    public IReadOnlyList<int> IssueEventsAskedFor =>
+        [.. Requests.Where(request => request.Path.EndsWith("/events", StringComparison.Ordinal)).Select(request => int.Parse(request.Path.Split('/')[^2], CultureInfo.InvariantCulture))];
+
     internal long NextReviewId() => ++_reviewId;
+
+    private static JsonObject IssueEventJson(string happened, DateTimeOffset at, long id, FakeAccount? actor) => new()
+    {
+        ["id"] = id,
+        ["event"] = happened,
+        ["actor"] = actor is null ? null : AccountJson(actor),
+        ["commit_id"] = null,
+        ["created_at"] = Time(at),
+    };
 
     /// <summary>The pull requests in the order the request asks for: by last update when it says <c>sort=updated</c>, by number otherwise, in its direction.</summary>
     private IEnumerable<FakePullRequest> Sorted(StubRequest request)

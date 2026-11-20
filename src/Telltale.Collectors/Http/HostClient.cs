@@ -49,6 +49,7 @@ internal sealed class HostClient : IDisposable
     private readonly string _host;
     private readonly TimeProvider _clock;
     private readonly TextWriter _notices;
+    private readonly bool _namesTheResetOfAUsedUpLimit;
     private TimeSpan _spentOnFailures;
 
     // Whether Jira has answered any request of this client. Until it has, a failure on the way to Jira (no
@@ -64,9 +65,16 @@ internal sealed class HostClient : IDisposable
     /// <param name="host">The host's name as messages say it: "Jira", "GitHub".</param>
     /// <param name="baseUrl">What every request's path is relative to. It ends in a slash.</param>
     /// <param name="authorization">Sent on every request: no host here sends an authentication challenge.</param>
-    public HostClient(HttpMessageHandler handler, string host, Uri baseUrl, AuthenticationHeaderValue authorization, TimeProvider clock, TextWriter notices)
+    /// <param name="namesTheResetOfAUsedUpLimit">
+    /// Whether the host says a used-up rate limit the way GitHub does (see <see cref="RateLimitReset"/>). Only
+    /// GitHub's client says so: Azure DevOps sends headers of the same names with another meaning (its reset
+    /// is when the usage it tracks is back to nothing, not when requests are taken again) and asks its
+    /// clients to wait what <c>Retry-After</c> says, which is what every other host's answers are read by.
+    /// </param>
+    public HostClient(HttpMessageHandler handler, string host, Uri baseUrl, AuthenticationHeaderValue authorization, TimeProvider clock, TextWriter notices, bool namesTheResetOfAUsedUpLimit = false)
     {
         _host = host;
+        _namesTheResetOfAUsedUpLimit = namesTheResetOfAUsedUpLimit;
         _clock = clock;
         _notices = notices;
         _http = new HttpClient(handler, disposeHandler: false) { BaseAddress = baseUrl };
@@ -283,14 +291,22 @@ internal sealed class HostClient : IDisposable
             // An answer came back through the proxy, so the route to Jira works.
             _hostHasAnswered = true;
 
-            if (RateLimitReset(response) is { } reset)
+            if (_namesTheResetOfAUsedUpLimit && RateLimitReset(response) is { } reset)
             {
                 // The host says its limit is used up and when it takes requests again (GitHub). A reset within
                 // the longest wait is waited out like any rate-limited answer. A later one ends the run at
-                // once, naming the time: the tool does not sit silent for the rest of an hour.
+                // once, naming the time: the tool does not sit silent for the rest of an hour. An answer that
+                // also asks for a wait of its own (a readable Retry-After) is taken at that word: the wait is
+                // what the host asked for, and the time named is the end of it.
                 LastRefusal = response.StatusCode;
                 var usedUp = $"{_host}'s rate limit is used up: it answered {(int)response.StatusCode} ({response.StatusCode}) to {call}";
-                var wait = reset - _clock.GetUtcNow();
+                var now = _clock.GetUtcNow();
+                if (RetryAfter(response) is { } asked)
+                {
+                    reset = now + asked;
+                }
+
+                var wait = reset - now;
                 if (wait > LongestWait)
                 {
                     throw new HostGaveUpException(
@@ -364,7 +380,7 @@ internal sealed class HostClient : IDisposable
 
     /// <summary>
     /// When the host takes requests again, for an answer that says its rate limit is used up the way GitHub
-    /// says it: 403 or 429 with <c>x-ratelimit-remaining: 0</c> and the time in <c>x-ratelimit-reset</c>, in
+    /// says it (asked only of a client made for such a host): 403 or 429 with <c>x-ratelimit-remaining: 0</c> and the time in <c>x-ratelimit-reset</c>, in
     /// seconds since the Unix epoch. Null for every other answer, a 403 with requests left among them: that
     /// one is a refusal, and waiting does not change it. Null too when the time cannot be read.
     /// </summary>
@@ -449,11 +465,7 @@ internal sealed class HostClient : IDisposable
     /// </summary>
     private TimeSpan RetryWait(HttpResponseMessage response, string failed, TimeSpan withoutHeader)
     {
-        TimeSpan? wait = !response.Headers.TryGetValues("Retry-After", out var values)
-            ? withoutHeader
-            : RetryConditionHeaderValue.TryParse(string.Join(",", values), out var asked)
-                ? asked.Delta ?? asked.Date - _clock.GetUtcNow()
-                : null;
+        TimeSpan? wait = response.Headers.Contains("Retry-After") ? RetryAfter(response) : withoutHeader;
 
         // The message does not quote the header.
         if (wait is not { } readable || readable > LongestWait)
@@ -464,6 +476,12 @@ internal sealed class HostClient : IDisposable
 
         return readable > ShortestWait ? readable : ShortestWait;
     }
+
+    /// <summary>The wait an answer's <c>Retry-After</c> header asks for, as a number of seconds or as a time to come back at; null without the header, and for one that cannot be read.</summary>
+    private TimeSpan? RetryAfter(HttpResponseMessage response) =>
+        response.Headers.TryGetValues("Retry-After", out var values) && RetryConditionHeaderValue.TryParse(string.Join(",", values), out var asked)
+            ? asked.Delta ?? asked.Date - _clock.GetUtcNow()
+            : null;
 
     private string RateLimited(string call) =>
         $"{_host} is limiting how often it can be asked: it answered 429 (too many requests) to {call}";

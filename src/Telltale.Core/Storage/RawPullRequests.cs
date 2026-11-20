@@ -161,7 +161,27 @@ public static class PullRequestEventActors
 /// host's list does not say when a pull request was opened again: it was before this moment, and how long
 /// before is not known. A closing that was made and undone between two collections was never seen at all.
 /// </param>
-public sealed record RawPullRequestPastClosure(string Host, string Repository, long Number, DateTimeOffset Closed, DateTimeOffset ReopenedBy);
+public sealed record RawPullRequestPastClosure(string Host, string Repository, long Number, DateTimeOffset Closed, DateTimeOffset ReopenedBy)
+{
+    /// <summary>
+    /// When the pull request was opened again, as the host says it (GitHub: the <c>reopened</c> issue event
+    /// that followed the closing); null when no such time was read, which is always so on Azure DevOps. With
+    /// it the closing has an exact end: an event made between <see cref="Closed"/> and this moment was made
+    /// while the pull request was closed. Without it only <see cref="ReopenedBy"/> is known, and an event
+    /// before that moment may as well have been made after the reopening.
+    /// </summary>
+    public DateTimeOffset? Reopened { get; init; }
+
+    /// <summary>The moment up to which the pull request counts as closed under this closing: the reopening where the host gave it, and otherwise the collection that saw the closing gone.</summary>
+    public DateTimeOffset Until => Reopened ?? ReopenedBy;
+
+    /// <summary>
+    /// Whether <paramref name="at"/> is a moment at which the pull request is known to have been closed under
+    /// this closing: after it, and before the reopening the host gave. A closing whose reopening is known
+    /// only as a bound holds no such moment, since the pull request may have been open again by any of them.
+    /// </summary>
+    public bool KnownToHold(DateTimeOffset at) => Reopened is { } reopened && Closed < at && at < reopened;
+}
 
 /// <summary>
 /// What the last collection from a pull request host came to. A host with no row was never read. Whether a
@@ -285,4 +305,13 @@ public sealed record PullRequestBatch(
     /// source writes such a batch; the rows of other hosts are not touched.
     /// </summary>
     public bool ReplacesHost { get; init; }
+
+    /// <summary>
+    /// Closings that no longer stand, as the host itself tells them, each with the reopening that ended it
+    /// (<see cref="RawPullRequestPastClosure.Reopened"/>). A collector gives them for a pull request of this
+    /// batch that it found open again. One the store already keeps (the same closing time) gets its exact
+    /// end; one the store never saw is added. <see cref="RawPullRequestPastClosure.ReopenedBy"/> is not taken
+    /// from here: it is this batch's <see cref="CollectedAt"/>.
+    /// </summary>
+    public IReadOnlyList<RawPullRequestPastClosure> PastClosures { get; init; } = [];
 }
