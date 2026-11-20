@@ -20,6 +20,13 @@ public interface ITelltaleStore
     /// </summary>
     Task WriteRawAsync(RawBatch batch, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Writes a pull request host's batch in one transaction: its pull requests and events, what the read came
+    /// to, the salt's fingerprint and the raw data's digest. It never deletes, and a batch under another salt
+    /// than the stored people were hashed with throws <see cref="UserFacingException"/> and writes nothing.
+    /// </summary>
+    Task WritePullRequestsAsync(PullRequestBatch batch, CancellationToken cancellationToken = default);
+
     /// <summary>How many issues, sprints and changes the raw tables hold.</summary>
     Task<RawCounts> CountRawAsync(CancellationToken cancellationToken = default);
 

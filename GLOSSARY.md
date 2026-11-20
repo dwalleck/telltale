@@ -57,8 +57,15 @@ _Avoid_: Completed, closed, resolved
 A group of issues with the same story point estimate at the moment their cycle started, used to compare like with like. Later re-estimates are ignored; issues with no estimate at that moment are unestimated. A delivered issue that has no cycle time because its cycle starts with a brief visit keeps the bucket of its cycle's start (owner decision D102; see cycle time).
 _Avoid_: Size class, issue type
 
+**Pull request wait**:
+The time from a pull request's first opening to one event that ends the wait: its first code review, or its merge. The pull requests are those of the configured repositories, whether or not they are linked to an issue and whoever opened them; they are not assumed to be the team's. The start is the original opening, also for a pull request opened as a draft or reopened later. A wait is counted once, at its full length, in the sprint window that contains the event that ended it, start included and end excluded. An event between sprint windows, or in more than one, is counted in no sprint; this differs from a delivery, which goes to the earliest-started of overlapping sprints. Nothing dated at or after a run's as-of time is counted in that run. A wait is stated in elapsed days (the wait divided by 24 hours) and in business days. A pull request without the event has no wait, not a wait of zero. It measures recorded waiting, not the effort of a review.
+_Avoid_: Review time, PR cycle time
+
+**Time to merge**:
+The pull request wait from opening to merge. A pull request closed without a merge has none.
+
 **Time to first code review**:
-The full wait from a pull request opening to its first submitted human code review. Count it once, in the sprint window containing that review, even if the pull request opened earlier or has not closed. A comment-only review, request for changes or approval qualifies, even if later dismissed. Ordinary conversation comments, the author's own activity, automation and Ops reviews do not qualify. A pull request still waiting at sprint close has no observed duration, not a duration of zero.
+The full wait from a pull request opening to its first submitted human code review. Count it once, in the sprint window containing that review, even if the pull request opened earlier or has not closed. A comment-only review, request for changes or approval qualifies, even if later dismissed. Ordinary conversation comments, the author's own activity, automation and Ops reviews do not qualify. A pull request still waiting at sprint close has no observed duration, not a duration of zero. Only a review made before the pull request closed counts. Whether a reviewer is in the Ops group is decided once, by the group's members at the sync that first collects the review, because nothing is stored of who reviewed. When an earlier review cannot be classified, the pull request has no first code review that can be relied on, and none is counted. See pull request wait for where the wait starts, the sprint it is counted in and its units.
 
 ### AI use
 

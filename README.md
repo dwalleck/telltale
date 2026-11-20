@@ -6,7 +6,7 @@ It reports on the team's work, never on individuals. Person fields are hashed be
 
 ## Status
 
-The Jira path works end to end: collect a Scrum board, derive the metrics, write a sprint report. GitHub review metrics, AI agent session logs, quality measures and Confluence publishing are planned and not built.
+The Jira path works end to end: collect a Scrum board, derive the metrics, write a sprint report. Pull request timing from GitHub (the wait for a first code review and for merge) is built and has run against synthetic data only. Other GitHub review metrics, Azure DevOps, AI agent session logs, quality measures and Confluence publishing are planned and not built.
 
 The first owner-assisted run on the managed Windows laptop produced a real Jira sprint report. The Windows test suite passes; detailed real-site edge-case checks remain open in [ticket 13](.scratch/jira-flow-report/issues/13-first-real-run-on-work-laptop.md).
 
@@ -18,6 +18,7 @@ One markdown file per sprint, with:
 - **Cycle time by point bucket:** median and 85th percentile, in business days, for issues grouped by story points.
 - **Time in status:** how many issues spent time in each workflow status, their median time and total business days. Totals sum issue time within the sprint and membership windows, not effort.
 - **Baseline columns:** cycle-time medians and P85s and time-in-status medians pooled over a fixed list of earlier sprints, for comparison.
+- **Pull request timing:** when the configuration has the `github` setting, how many pull requests of the listed repositories got their first code review in the sprint and how many were merged in it, each with the median wait since the pull request was opened, in elapsed days. See [Pull requests](#pull-requests).
 - **Method note and data quality footer:** how the figures were computed and what was left out.
 - **Brief visit lines in the footer:** when the configuration lists statuses under `briefVisitThresholds`, one line for each listed status that has a row in the sprint's time in status table, or had one before any brief visit was left out, says how many of the issues in the row before anything was left out had a visit shorter than the status's threshold, or reads `suppressed`. A listed status that had no such row has no line, and a sprint whose tables are withheld has none. No figure is changed because of a brief visit unless `briefVisitTreatment` says so. See [Brief visit thresholds](#brief-visit-thresholds).
 - **A cycle time line in the footer:** when a listed status has the role `work`, the footer's last line says how many of the sprint's delivered issues have a cycle that starts with a brief visit, or reads `suppressed`.
@@ -29,7 +30,7 @@ Time is counted in business days in the team's time zone, skipping weekends and 
 
 Reporting no per-person results is a hard constraint of the design. Withholding small groups is a default that the configuration file can change (see [ADR-0003](docs/adr/0003-pseudonymized-aggregates-only.md), and [ADR-0008](docs/adr/0008-minimum-group-size-is-a-configurable-default.md), which amends it):
 
-- **No per-person results.** Jira account IDs are hashed with a secret salt before storage. Names, emails and issue keys are not stored. No setting changes this.
+- **No per-person results.** Jira account IDs, and the account IDs of pull request authors, are hashed with a secret salt before storage. Names, emails, logins and issue keys are not stored, and nothing is stored of who reviewed a pull request. No setting changes this.
 - **Small groups are withheld by default.** A sprint needs a team of at least five, and a figure needs at least three distinct assignees behind it. Anything short of that reads `suppressed`.
 - **The two numbers are a setting.** `minimumGroupSize` in the configuration file sets other numbers. A number of zero turns its check off, and with both at zero nothing is withheld. See [Minimum group size](#minimum-group-size).
 - **With `assigneesBehindAFigure` at zero or one, a figure in a report can be the work of a single person.** The people are still not named, but anyone who knows who did the work can tell whose figure it is.
@@ -140,20 +141,24 @@ A new file gets `minimumGroupSize` with five and three. A rerun never changes th
 
 `discover` never writes `briefVisitTreatment` either. A rerun keeps the setting as a value and in its place in the file, and never changes or removes it. It does not keep the file byte for byte: a rerun that changes anything else rewrites the file in the tool's layout and drops comments, and says so. A rerun on a file whose `briefVisitTreatment` would be refused writes nothing, leaves the file untouched and prints the same line, followed by the message `run` would give. It prints no part of a key written under the setting, and no part of a key written twice anywhere in the file: what was typed as a key could be a secret pasted into the wrong place. The one name it gives is the tool's own: a part of the setting written twice is refused as `run` refuses it, by the part's name. When a file has more than one fault, `discover` and `run` may each report a different one: each checks in its own order and stops at the first. Each message is true of the file, and correcting one fault brings the next.
 
-### `secrets set <jira-email|jira-api-token|hashing-salt>`
+### `secrets set <jira-email|jira-api-token|hashing-salt|github-token>`
 
 Stores one secret in Windows Credential Manager. The value is asked for at a prompt, or piped in with `--stdin`; it is never taken as an argument.
+
+`github-token` is needed only when the configuration file has the `github` setting. It is a token that can read the pull requests of the listed repositories and the members of the Ops team; the tool only reads. Without the setting no command asks for it.
 
 - `--generate` stores a new random hashing salt.
 - `--replace` is required to change a salt once people have been hashed with it. Every stored person hash stops matching, so run `backfill` afterwards.
 
-Off Windows, `secrets set` cannot store anything. Set `TELLTALE_JIRA_EMAIL`, `TELLTALE_JIRA_API_TOKEN` and `TELLTALE_HASHING_SALT` in the environment.
+Off Windows, `secrets set` cannot store anything. Set `TELLTALE_JIRA_EMAIL`, `TELLTALE_JIRA_API_TOKEN` and `TELLTALE_HASHING_SALT` in the environment, and `TELLTALE_GITHUB_TOKEN` when the `github` setting is there.
 
 ### `backfill`
 
 Fetches every issue in the board's projects updated on or after `backfillStart`, plus the board's sprints, and replaces the stored raw data with the result. Use it for the first fetch, after changing a collection setting, or to drop issues that were deleted or moved in Jira.
 
 It refuses to replace a non-empty store with an empty fetch, because that usually means a wrong setting or lost access. `--allow-empty` overrides this.
+
+With the `github` setting, `backfill` and `sync` then read pull requests: the list of each listed repository's pull requests, open, merged or closed, most recently updated first, and the submitted reviews of each pull request that is new to the store or whose list entry changed (its merge, its close or its last update). A pull request listed exactly as it is stored costs no request of its own. `sync` stops reading the list at the first page on which nothing is new; `backfill` reads the list to its end. So the first read costs one request per pull request, bounded by `github.collectFrom`, and a later `sync` costs one per pull request that changed. Stored pull requests are updated and never removed, by `backfill` either. If GitHub cannot be read the command fails after the Jira data is stored, and the pull requests already in the store stay as they were. See [Pull requests](#pull-requests).
 
 ### `sync`
 
@@ -231,6 +236,13 @@ The view has two more columns, `left_out_issue_count` and `left_out_suppressed`:
   "briefVisitTreatment": {
     "timeInStatus": "exclude",
     "cycleTime": "count"
+  },
+  // Where pull requests are read from. Optional; without it nothing is asked of GitHub.
+  "github": {
+    "repositories": ["example-org/payments"],
+    "opsTeam": "example-org/ops",
+    "apiUrl": "https://github.example.com/api/v3/",
+    "collectFrom": "2026-07-01"
   }
 }
 ```
@@ -252,6 +264,7 @@ The view has two more columns, `left_out_issue_count` and `left_out_suppressed`:
 | `minimumGroupSize` | An object with the two numbers `team` and `assigneesBehindAFigure`. Each is a whole number of zero or more, written in plain digits, not quoted, with no fraction and no exponent, and no greater than 2,147,483,647. Optional; when it is present both numbers are required. | `{ "team": 5, "assigneesBehindAFigure": 3 }` |
 | `briefVisitThresholds` | An object of status ID (a string of digits, as in `statusRoles`) to threshold: a number of minutes greater than zero, not quoted. A fraction is allowed. Each status must be in `statusRoles` with a role other than `done`, and may be listed once. Optional; may be empty. | `{ "10001": 5, "10002": 0.5 }` |
 | `briefVisitTreatment` | An object with the parts `timeInStatus` and `cycleTime`, each `"count"` or `"exclude"`. Optional, and so is each part: a part left out is `"count"`. `"count"` changes no figure. `"exclude"` for `timeInStatus` leaves the time of every brief visit to a listed status out of time in status. `"exclude"` for `cycleTime` gives a delivered issue whose cycle starts with a brief visit no cycle time. `"exclude"` needs a status listed in `briefVisitThresholds`, and for `cycleTime` one with the role `work`. | `{ "timeInStatus": "exclude", "cycleTime": "count" }` |
+| `github` | An object. Optional. `repositories` is required: a list of repositories, each as `"owner/name"`, and only these are read. `opsTeam` is optional: the team whose reviews are not code reviews, as `"organization/team-slug"`. `apiUrl` is optional: the absolute `https://` address of the REST API, for GitHub Enterprise Server the host's address followed by `/api/v3/`; without it the address is `https://api.github.com/`. `collectFrom` is optional: a date as `"yyyy-MM-dd"`; a pull request last updated before the start of that day (UTC) is not collected. It bounds last activity, not opening, so a pull request opened earlier and reviewed or merged since is still read. Without it there is no bound. After moving the date back, run `backfill`: a `sync` stops at the first page of unchanged pull requests and would not reach the older ones. The token is a secret and has no place here. | `{ "repositories": ["example-org/payments"] }` |
 
 Things that are refused when the file is loaded, with a message that names the file:
 
@@ -314,6 +327,18 @@ What a report then shows:
 - **In every case:** the method note describes the rule with the numbers in force, or says that small-group suppression is off.
 
 The setting changes only this rule. Person fields are still hashed before they are stored, and no report or view is grouped by person.
+
+### Pull requests
+
+With the `github` setting, each sprint report has a **Pull request timing** section, and the metric view `pr_timing_per_sprint` has one row per sprint and measure: `sample_count` and `median_elapsed_days`. Without the setting the report has no such section and the view has no rows.
+
+- **What is counted.** Every pull request of the listed repositories, whether or not it is linked to a Jira issue and whoever opened it. In a shared repository that includes other teams' pull requests; the tool does not guess which are the team's.
+- **The waits.** `first_code_review` is the wait from the pull request's first opening to its first code review, and `merge` the wait from opening to merge. Each is counted once, at its full length, in the sprint whose window holds the review or the merge, so a pull request can be counted for its review in one sprint and for its merge in a later one. An event that falls between sprint windows, or in more than one, is counted in no sprint. A pull request that has not been reviewed or merged has no wait: it is not counted as zero.
+- **What a code review is.** A submitted review by someone other than the author, made before the pull request closed: a comment-only review, a request for changes or an approval, also one dismissed later. Reviews by the author, by an account GitHub marks as a bot and by a member of `opsTeam` are not code reviews, and neither are ordinary comments.
+- **The Ops team is read at each sync.** A review is classified once, by the team's members at the sync that first stores it, and keeps that class. The store keeps no reviewer, so a review cannot be classified again later. Reviews collected long after they were made are therefore judged by the team as it is at that first collection.
+- **Elapsed days.** The figure is the wait divided by 24 hours, weekends and holidays included.
+- **Privacy.** The store keeps when a pull request was opened, merged and closed, its author as a salted hash, and for each review its time and its class. It keeps no title, branch name, login or comment text, and nothing of who reviewed. Pull request figures are not subject to the minimum group size: `minimumGroupSize` withholds none of them, and they are never grouped by person.
+- **A changed list.** After changing `repositories`, run `sync` to read a newly listed repository and `derive` to recount. Pull requests of a repository taken off the list stay in the store and are in no figure.
 
 ### Brief visit thresholds
 

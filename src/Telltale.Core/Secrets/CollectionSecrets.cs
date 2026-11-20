@@ -8,6 +8,19 @@ namespace Telltale.Core.Secrets;
 public sealed record CollectionSecrets(string JiraEmail, string JiraApiToken, string HashingSalt)
 {
     /// <summary>
+    /// The token of each pull request host that is configured. A host that is not configured has none and is
+    /// asked for none (<see cref="WithGitHubToken"/>), so a Jira-only configuration needs no host's credentials.
+    /// </summary>
+    public string? GitHubToken { get; init; }
+
+    /// <summary>
+    /// These secrets with the GitHub token, read now and required: for a command that will read GitHub. A token
+    /// that is not set stops the command before anything is fetched, naming the secret and how to set it, so
+    /// missing access is never taken for a host without pull requests.
+    /// </summary>
+    public CollectionSecrets WithGitHubToken(ISecretStore secrets) => this with { GitHubToken = secrets.Require(SecretName.GitHubToken) };
+
+    /// <summary>
     /// Reads the secrets in the order they are listed (<see cref="SecretInfo.All"/>) and stops with a message
     /// naming the first that is not set and how to set it. A missing hashing salt is two different situations:
     /// on a store that holds nobody yet, any salt will do and one can be generated; once people are stored

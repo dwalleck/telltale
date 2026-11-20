@@ -167,10 +167,10 @@ public class SecretsSetTests
         pipeline.Secrets.Clear();
         pipeline.Console.TypeLine("synthetic-api-token-0002");
 
-        var exit = await pipeline.RunAsync("secrets", "set", "github-token");
+        var exit = await pipeline.RunAsync("secrets", "set", "confluence-token");
 
         await Assert.That(exit).IsEqualTo(1);
-        await Assert.That(pipeline.Error.ToString()).Contains("github-token");
+        await Assert.That(pipeline.Error.ToString()).Contains("confluence-token");
         await Assert.That(pipeline.Secrets).IsEmpty();
         await Assert.That(pipeline.Console.KeysRead).IsEqualTo(0);
         await Assert.That(pipeline.Error.ToString()).DoesNotContain("Value for the secret");

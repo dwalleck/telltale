@@ -164,6 +164,7 @@ public sealed record IssueAnomaly(string IssueId, ChangelogAnomalyKind Kind)
 /// <param name="MinimumTeam">The minimum group size's team number (GLOSSARY: Minimum group size): the metric views read it from the rebuild's record and never from the configuration.</param>
 /// <param name="MinimumAssigneesBehindAFigure">The minimum group size's number of assignees behind a figure, read by the views in the same way.</param>
 /// <param name="BriefVisitThresholds">The brief visit thresholds (GLOSSARY: Brief visit) as a JSON object of status ID to minutes, the IDs in order, e.g. <c>{"10001":5,"10005":0.5}</c>; <c>{}</c> when no status is checked. The metric view <c>brief_visits_per_sprint</c> reads the listed statuses and their thresholds from the rebuild's record.</param>
+/// <param name="PullRequestRepositories">The repositories whose pull requests the rebuild counted, as a JSON object of host to repository names, both in order, e.g. <c>{"github":["owner/name"]}</c>; <see cref="NoPullRequestRepositories"/> when no pull request host is configured. Left out, it is that.</param>
 /// <param name="BriefVisitTreatment">The treatment of brief visits (GLOSSARY: Treatment) as a JSON object of each part and its label, the parts in order, e.g. <c>{"cycleTime":"count","timeInStatus":"exclude"}</c>. Left out, it is <see cref="BriefVisitsCounted"/>: a record made without it is of a rebuild that counted brief visits and changed nothing.</param>
 public sealed record DerivedSource(
     string RawDigest,
@@ -175,8 +176,30 @@ public sealed record DerivedSource(
     long MinimumTeam,
     long MinimumAssigneesBehindAFigure,
     string BriefVisitThresholds,
-    string BriefVisitTreatment = DerivedSource.BriefVisitsCounted)
+    string BriefVisitTreatment = DerivedSource.BriefVisitsCounted,
+    string PullRequestRepositories = DerivedSource.NoPullRequestRepositories)
 {
+    /// <summary><see cref="PullRequestRepositories"/> when no pull request host is configured. The one place that spells it.</summary>
+    public const string NoPullRequestRepositories = "{}";
+
+    /// <summary>Whether the rebuild counted pull requests at all: a pull request host was configured. A report has its pull request section only then.</summary>
+    public bool PullRequestsCounted => PullRequestRepositories != NoPullRequestRepositories;
+
+    /// <summary>
+    /// <see cref="PullRequestRepositories"/> for the configured repositories by host: the form the store keeps,
+    /// hosts and repositories in order, e.g. <c>{"github":["owner/name"]}</c>.
+    /// </summary>
+    public static string PullRequestRepositoriesOf(IReadOnlyDictionary<string, IReadOnlyList<string>> repositoriesByHost)
+    {
+        var ordered = new SortedDictionary<string, string[]>(StringComparer.Ordinal);
+        foreach (var (host, repositories) in repositoriesByHost)
+        {
+            ordered.Add(host, [.. repositories.Order(StringComparer.Ordinal)]);
+        }
+
+        return System.Text.Json.JsonSerializer.Serialize(ordered);
+    }
+
     /// <summary><see cref="BriefVisitThresholds"/> when no status is checked. The one place that spells it.</summary>
     public const string NoBriefVisitThresholds = "{}";
 
@@ -274,4 +297,28 @@ public sealed record DerivedData(
 
     /// <summary>The brief visits counted toward a sprint: at most one per issue, sprint and status. Empty when no status is checked.</summary>
     public IReadOnlyList<SprintBriefVisit> BriefVisits { get; init; } = [];
+
+    /// <summary>The waits of the pull requests of the configured repositories: at most one per pull request and measure. Empty when no pull request host is configured.</summary>
+    public IReadOnlyList<PullRequestWait> PullRequestWaits { get; init; } = [];
+
+    /// <summary>The measures a pull request can have a wait for, in the order a report lists them.</summary>
+    public IReadOnlyList<string> PullRequestMeasures { get; init; } = [];
 }
+
+/// <summary>
+/// One wait of one pull request: from its opening to the event that ended the wait for <see cref="Measure"/>
+/// (see <c>PullRequestTiming</c>). <see cref="SprintId"/> is the sprint whose window holds <see cref="Ended"/>;
+/// null when no window or more than one holds it. <see cref="ElapsedDays"/> is the whole wait divided by 24
+/// hours, and <see cref="BusinessDays"/> the same wait in business days; neither is clipped to a sprint.
+/// It carries no author: pull request figures are not grouped or counted by person.
+/// </summary>
+public sealed record PullRequestWait(
+    string Host,
+    string Repository,
+    long Number,
+    string Measure,
+    DateTimeOffset Opened,
+    DateTimeOffset Ended,
+    double ElapsedDays,
+    double BusinessDays,
+    string? SprintId);

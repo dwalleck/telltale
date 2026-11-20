@@ -1,5 +1,7 @@
 using System.Globalization;
+using Telltale.Collectors.GitHub;
 using Telltale.Collectors.Jira;
+using Telltale.Collectors.PullRequests;
 using Telltale.Core;
 using Telltale.Core.Configuration;
 using Telltale.Core.Derive;
@@ -85,9 +87,33 @@ public sealed class PipelineSteps
     /// <summary>Brings the raw tables up to date with what changed in Jira since the last sync or backfill.</summary>
     public Task SyncAsync(CancellationToken cancellationToken) => CollectAsync(CollectionMode.Incremental, allowEmpty: false, cancellationToken);
 
-    private Task CollectAsync(CollectionMode mode, bool allowEmpty, CancellationToken cancellationToken) =>
-        new JiraCollector(_environment.HttpHandler, _settings.Jira, _secrets ?? throw new InvalidOperationException("This command was started without the secrets a collection needs."), _environment.Clock, _environment.Notices)
+    /// <summary>
+    /// Jira first: the sprints come from its board, and its batch settles which salt the store's people are
+    /// hashed with. Then each configured pull request host. A backfill removes no pull request; it reads each
+    /// host's whole list, where a sync stops once it reaches pull requests that have not changed.
+    /// </summary>
+    private async Task CollectAsync(CollectionMode mode, bool allowEmpty, CancellationToken cancellationToken)
+    {
+        var secrets = _secrets ?? throw new InvalidOperationException("This command was started without the secrets a collection needs.");
+        await new JiraCollector(_environment.HttpHandler, _settings.Jira, secrets, _environment.Clock, _environment.Notices)
             .BringUpToDateAsync(_store, mode, allowEmpty, cancellationToken);
+        await PullRequestCollection.BringUpToDateAsync(PullRequestCollectors(secrets), _store, everything: mode == CollectionMode.Backfill, IdentityHash.SaltFingerprint(secrets.HashingSalt), cancellationToken);
+    }
+
+    /// <summary>
+    /// The collector of each pull request host that is configured, in the order they are read; none for a
+    /// Jira-only configuration, which then makes no pull request call at all. Another host is another entry.
+    /// </summary>
+    private IEnumerable<IPullRequestCollector> PullRequestCollectors(CollectionSecrets secrets)
+    {
+        if (_settings.GitHub is { } github)
+        {
+            yield return new GitHubCollector(
+                _environment.HttpHandler, github,
+                secrets.GitHubToken ?? throw new InvalidOperationException("This command was started without the GitHub token a collection from GitHub needs."),
+                secrets.HashingSalt, _environment.Clock, _environment.Notices);
+        }
+    }
 
     /// <summary>
     /// Rebuilds every derived table and metric view from the raw tables, and logs the changelog anomalies it
@@ -353,6 +379,13 @@ public sealed class PipelineSteps
         if (derivedFrom.BriefVisitTreatment != current.BriefVisitTreatment)
         {
             throw new UserFacingException("briefVisitTreatment in the configuration file changed since the derived data was built. Run derive first.");
+        }
+
+        // Which pull requests have a wait was decided by the repositories listed at the last derive. Deriving
+        // again is all it takes for the figures; a repository that was never read is the next sync's to read.
+        if (derivedFrom.PullRequestRepositories != current.PullRequestRepositories)
+        {
+            throw new UserFacingException("The pull request repositories in the configuration file changed since the derived data was built. Run derive first.");
         }
 
         // Each check above compares the fields it knows and says which setting changed. This one compares the

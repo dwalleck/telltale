@@ -3,6 +3,7 @@ using System.Net;
 using System.Text.Json;
 using Telltale.Core;
 using Telltale.Core.Secrets;
+using Telltale.Collectors.Http;
 using static Telltale.Collectors.Jira.JiraJson;
 
 namespace Telltale.Collectors.Jira;
@@ -58,7 +59,7 @@ public sealed class JiraDiscovery
     private readonly TimeProvider _clock;
     private readonly TextWriter _notices;
 
-    /// <param name="clock">Times the waits before a failed request is sent again, and how long a failed request took (see <see cref="JiraClient"/>).</param>
+    /// <param name="clock">Times the waits before a failed request is sent again, and how long a failed request took (see <see cref="HostClient"/>).</param>
     /// <param name="notices">Where each such wait is announced: standard error.</param>
     public JiraDiscovery(HttpMessageHandler handler, Uri siteUrl, long boardId, ISecretStore secrets, TimeProvider clock, TextWriter notices)
     {
@@ -72,11 +73,11 @@ public sealed class JiraDiscovery
 
     /// <summary>
     /// Reads the site. The status list is asked for first and alone: it is the check that the proxy lets the
-    /// request through and that the certificate is trusted, and a failure there says so (see <see cref="JiraClient"/>).
+    /// request through and that the certificate is trusted, and a failure there says so (see <see cref="HostClient"/>).
     /// </summary>
     public async Task<JiraSiteFacts> ReadAsync(CancellationToken cancellationToken = default)
     {
-        using var jira = new JiraClient(_handler, _siteUrl, _secrets.Require(SecretName.JiraEmail), _secrets.Require(SecretName.JiraApiToken), _clock, _notices);
+        using var jira = HostClient.ForJira(_handler, _siteUrl, _secrets.Require(SecretName.JiraEmail), _secrets.Require(SecretName.JiraApiToken), _clock, _notices);
 
         var statuses = await ReadStatusesAsync(jira, cancellationToken);
         var boardStatusIds = await ReadBoardStatusIdsAsync(jira, cancellationToken);
@@ -87,7 +88,7 @@ public sealed class JiraDiscovery
         return new JiraSiteFacts(statuses, boardStatusIds, resolutions, fields, sprintFields, storyPointFields, projectKeys);
     }
 
-    private async Task<List<DiscoveredStatus>> ReadStatusesAsync(JiraClient jira, CancellationToken cancellationToken)
+    private async Task<List<DiscoveredStatus>> ReadStatusesAsync(HostClient jira, CancellationToken cancellationToken)
     {
         using var document = await FirstCallAsync(jira, "rest/api/3/status", cancellationToken);
         return Read<List<DiscoveredStatus>>("status list", () => [.. Statuses(document.RootElement).Select(status => new DiscoveredStatus(status.Id, status.Name, status.CategoryKey))]);
@@ -100,7 +101,7 @@ public sealed class JiraDiscovery
     /// a page served in place of JSON), the proxy or the trust in the corporate root certificate is. Any
     /// other error from Jira is reported as it is.
     /// </summary>
-    private async Task<JsonDocument> FirstCallAsync(JiraClient jira, string path, CancellationToken cancellationToken)
+    private async Task<JsonDocument> FirstCallAsync(HostClient jira, string path, CancellationToken cancellationToken)
     {
         try
         {
@@ -127,7 +128,7 @@ public sealed class JiraDiscovery
     /// maps to no column is not on the board. The shape is from Atlassian's documentation and has not been
     /// seen from a real site, so anything else stops the command.
     /// </summary>
-    private async Task<List<string>> ReadBoardStatusIdsAsync(JiraClient jira, CancellationToken cancellationToken)
+    private async Task<List<string>> ReadBoardStatusIdsAsync(HostClient jira, CancellationToken cancellationToken)
     {
         using var document = await jira.GetAsync($"rest/agile/1.0/board/{_boardId.ToString(CultureInfo.InvariantCulture)}/configuration", cancellationToken);
         return Read<List<string>>("board configuration", () => [.. document.RootElement.GetProperty("columnConfig").GetProperty("columns").EnumerateArray()
@@ -136,11 +137,11 @@ public sealed class JiraDiscovery
             .Distinct(StringComparer.Ordinal)]);
     }
 
-    private static Task<List<DiscoveredResolution>> ReadResolutionsAsync(JiraClient jira, CancellationToken cancellationToken) =>
+    private static Task<List<DiscoveredResolution>> ReadResolutionsAsync(HostClient jira, CancellationToken cancellationToken) =>
         ReadAllPagesAsync(jira, "rest/api/3/resolution/search", "resolution list",
             resolution => new DiscoveredResolution(Text(resolution, "id"), Text(resolution, "name")), resolution => resolution.Id, cancellationToken);
 
-    private static async Task<(List<DiscoveredField> All, List<DiscoveredField> Sprint, List<DiscoveredField> StoryPoints)> ReadFieldsAsync(JiraClient jira, CancellationToken cancellationToken)
+    private static async Task<(List<DiscoveredField> All, List<DiscoveredField> Sprint, List<DiscoveredField> StoryPoints)> ReadFieldsAsync(HostClient jira, CancellationToken cancellationToken)
     {
         using var document = await jira.GetAsync("rest/api/3/field", cancellationToken);
         return Read("field list", () =>
@@ -172,13 +173,13 @@ public sealed class JiraDiscovery
         });
     }
 
-    private Task<List<string>> ReadProjectKeysAsync(JiraClient jira, CancellationToken cancellationToken) =>
+    private Task<List<string>> ReadProjectKeysAsync(HostClient jira, CancellationToken cancellationToken) =>
         ReadAllPagesAsync(jira, $"rest/agile/1.0/board/{_boardId.ToString(CultureInfo.InvariantCulture)}/project", "list of the board's projects",
             project => Text(project, "key"), key => key, cancellationToken);
 
     /// <summary>Reads every page of a list paged by offset, ending at the first page that brings nothing new (see <see cref="OffsetPages"/>).</summary>
     private static Task<List<T>> ReadAllPagesAsync<T>(
-        JiraClient jira, string path, string what, Func<JsonElement, T> parse, Func<T, string> keyOf, CancellationToken cancellationToken) =>
+        HostClient jira, string path, string what, Func<JsonElement, T> parse, Func<T, string> keyOf, CancellationToken cancellationToken) =>
         OffsetPages.ReadAllAsync(jira, path, PageSize, OffsetPaging.EndsWhenNothingNew, what, "Nothing was written.", page => Read(what, page), parse, keyOf, cancellationToken);
 
     /// <summary>Reads Jira's answer (<see cref="JiraJson.Read"/>); when its shape is not known, nothing was written.</summary>
