@@ -323,7 +323,7 @@ public sealed class FakeAdo
 
     private static JsonObject Property(string value) => new() { ["$type"] = "System.String", ["$value"] = value };
 
-    /// <summary>A time as Azure DevOps writes it: UTC, with a fraction of a second.</summary>
+    /// <summary>A time as Azure DevOps writes it: UTC, with seven digits of a fraction of a second, which is finer than the store keeps.</summary>
     private static JsonNode Time(DateTimeOffset value) =>
-        JsonValue.Create(value.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture));
+        JsonValue.Create(value.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture));
 }

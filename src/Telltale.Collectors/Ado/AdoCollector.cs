@@ -154,9 +154,11 @@ public sealed class AdoCollector : IPullRequestCollector
 
         // The closing time is taken only from a pull request that says it is closed: completed or abandoned.
         // One of those without a closing time is an answer in a shape the tool does not know.
+        // Times are cut to what the store keeps (StoredTime): Azure DevOps gives seven digits of a second, and a
+        // row is compared with the stored one to tell whether anything changed.
         DateTimeOffset? closed = status == "active" ? null
-            : (status is "completed" or "abandoned") ? JiraTime.Parse(pullRequest.GetProperty("closedDate"))
-            : JiraJson.Optional(pullRequest, "closedDate") is { } closedDate ? JiraTime.Parse(closedDate)
+            : (status is "completed" or "abandoned") ? StoredTime.AsStored(JiraTime.Parse(pullRequest.GetProperty("closedDate")))
+            : JiraJson.Optional(pullRequest, "closedDate") is { } closedDate ? StoredTime.AsStored(JiraTime.Parse(closedDate))
             : null;
         return (new RawPullRequest
         {
@@ -165,7 +167,7 @@ public sealed class AdoCollector : IPullRequestCollector
             Number = pullRequest.GetProperty("pullRequestId").GetInt64(),
 
             // creationDate is the first opening: it does not move when a draft is published or a pull request is reactivated.
-            Opened = JiraTime.Parse(pullRequest.GetProperty("creationDate")),
+            Opened = StoredTime.AsStored(JiraTime.Parse(pullRequest.GetProperty("creationDate"))),
 
             // Only completion is a merge: an abandoned pull request has a closing time too, and no merge time.
             Merged = status == "completed" ? closed : null,

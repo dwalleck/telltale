@@ -161,6 +161,25 @@ public class AdoPullRequestCollectionTests
     }
 
     [Test]
+    public async Task A_closed_pull_request_whose_times_are_finer_than_the_store_keeps_is_not_read_again()
+    {
+        // Azure DevOps gives times to seven digits of a second and the store keeps three. A closing time such
+        // as 12:00:00.3456789 is stored as 12:00:00.345, and the next list entry must not differ from it for that.
+        var (pipeline, ado) = AdoOnly();
+        await using var _ = pipeline;
+        var fraction = TimeSpan.FromTicks(3_456_789);
+        ado.AddPullRequest(1, AdoIdentities.AuthorOne, Local(2026, 1, 20, 12) + fraction).Voted(AdoIdentities.Reviewer, 10, Local(2026, 1, 21, 12) + fraction).Completed(Local(2026, 1, 22, 12) + fraction);
+        ado.AddPullRequest(2, AdoIdentities.AuthorTwo, Local(2026, 1, 20, 12) + fraction).Abandoned(Local(2026, 1, 22, 12) + fraction);
+
+        await pipeline.RunAllAsync(["sync"]);
+        var store = await pipeline.ReadStoreContentAsync(withoutAsOf: true);
+        await pipeline.RunAllAsync(["sync"], ["sync"]);
+
+        await Assert.That(ado.ThreadsAskedFor).IsEquivalentTo(new[] { 1, 2 });
+        await Assert.That(await pipeline.ReadStoreContentAsync(withoutAsOf: true)).IsEqualTo(store);
+    }
+
+    [Test]
     public async Task A_pull_request_closed_before_the_start_date_is_never_asked_for_and_one_opened_before_it_and_still_open_or_closed_after_it_is_read()
     {
         var (pipeline, ado) = AdoOnly();

@@ -164,8 +164,11 @@ public sealed class GitHubCollector : IPullRequestCollector
     private (RawPullRequest Row, long? AuthorId) Read(GitHubRepository repository, JsonElement pullRequest)
     {
         var authorId = JiraJson.Optional(pullRequest, "user")?.GetProperty("id").GetInt64();
-        var merged = JiraJson.Optional(pullRequest, "merged_at") is { } mergedAt ? JiraTime.Parse(mergedAt) : (DateTimeOffset?)null;
-        var closed = JiraJson.Optional(pullRequest, "closed_at") is { } closedAt ? JiraTime.Parse(closedAt) : (DateTimeOffset?)null;
+
+        // Times are in the form the store keeps (StoredTime), since a row is compared with the stored one.
+        // GitHub gives times to the second today, so this changes nothing unless a host gives more.
+        var merged = JiraJson.Optional(pullRequest, "merged_at") is { } mergedAt ? StoredTime.AsStored(JiraTime.Parse(mergedAt)) : (DateTimeOffset?)null;
+        var closed = JiraJson.Optional(pullRequest, "closed_at") is { } closedAt ? StoredTime.AsStored(JiraTime.Parse(closedAt)) : (DateTimeOffset?)null;
         return (new RawPullRequest
         {
             Host = Host,
@@ -173,12 +176,12 @@ public sealed class GitHubCollector : IPullRequestCollector
             Number = pullRequest.GetProperty("number").GetInt64(),
 
             // created_at is the first opening: it does not move when a draft is marked ready or a pull request is reopened.
-            Opened = JiraTime.Parse(pullRequest.GetProperty("created_at")),
+            Opened = StoredTime.AsStored(JiraTime.Parse(pullRequest.GetProperty("created_at"))),
 
             // merged_at and never closed_at: a pull request closed without a merge has no merge time.
             Merged = merged,
             Closed = closed ?? merged,
-            Updated = JiraJson.Optional(pullRequest, "updated_at") is { } updatedAt ? JiraTime.Parse(updatedAt) : null,
+            Updated = JiraJson.Optional(pullRequest, "updated_at") is { } updatedAt ? StoredTime.AsStored(JiraTime.Parse(updatedAt)) : null,
             AuthorHash = authorId is { } id ? AuthorHash(id) : null,
         }, authorId);
     }

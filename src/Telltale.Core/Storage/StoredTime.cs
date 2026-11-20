@@ -14,6 +14,14 @@ public static class StoredTime
 
     public static string ToStored(DateTimeOffset value) => value.UtcDateTime.ToString(Format, CultureInfo.InvariantCulture);
 
+    /// <summary>
+    /// A time as the store gives it back: in UTC, cut to the millisecond. A collector compares what a host says
+    /// with what is stored, and a host can say more of a second than is kept: the two are compared in this form.
+    /// </summary>
+    public static DateTimeOffset AsStored(DateTimeOffset value) => FromStored(ToStored(value));
+
+    public static DateTimeOffset? AsStored(DateTimeOffset? value) => value is { } time ? AsStored(time) : null;
+
     public static string? ToStored(DateTimeOffset? value) => value is { } time ? ToStored(time) : null;
 
     public static DateTimeOffset FromStored(string value) =>
