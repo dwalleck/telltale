@@ -18,7 +18,8 @@ If eligible pull requests tie for earliest opening, use their shared earliest au
 Otherwise retain the evidence and report “first PR ambiguous,” without choosing by PR number.
 If the first pull request’s commit history is unreadable or incomplete, its earliest author date is unknown.
 A later attributed pull request can still show that work had started by a known date, but cannot supply the missing first timestamp.
-If the selected commit predates Jira issue creation, keep its author timestamp in the comparison and flag it as “commit predates issue creation.” If the selected commit author timestamp is after Jira delivery, retain it as evidence, flag it as “commit after delivery,” and exclude it from the comparison.
+If the selected commit predates Jira issue creation, keep its author timestamp in the comparison and flag it as “commit predates issue creation.”
+If the selected commit author timestamp is after Jira delivery, retain it as evidence, flag it as “commit after delivery,” and exclude it from the comparison.
 This is evidence alongside Jira cycle time, not a replacement for its start.
 
 **Status interval**:

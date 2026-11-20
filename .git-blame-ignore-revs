@@ -1,0 +1,7 @@
+# Commits that change layout and no wording. `git blame` skips them when run with
+# `--ignore-revs-file .git-blame-ignore-revs`, or always after
+# `git config blame.ignoreRevsFile .git-blame-ignore-revs`. GitHub's blame view reads this file by itself.
+# The history must keep showing when each metric definition was set, so a layout commit goes here.
+
+# Glossary: one sentence per line in the nine longest entries (wording unchanged).
+4135a4268c4b46c2b27eea4a1e29bc5ad9dd10be

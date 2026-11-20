@@ -30,4 +30,4 @@ A fake host emits the formats the real host emits: timestamp precision, optional
 
 A test for a rule fails when the rule is removed. For a test added with a fix, the review asks for the failing run. For a test of a guard that already existed, the review asks which line, when deleted, turns the test red.
 
-*Case:* several tests in the PR timing fix passes passed before their fix was written, among them the test for the guard that keeps a token from following a link to another host.
+*Cases:* in the PR timing fix passes, several tests added with a fix passed before their fix was written, so no failing run could be shown for them. The test of the guard that keeps a token from following a link to another host is the second kind: the guard was already in the code, so the only proof the test reaches it is to delete the guard and watch the test turn red.

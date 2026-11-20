@@ -24,10 +24,10 @@ After every merge into the integration branch, run the full suite there before t
 
 ## Review
 
-Run the review of the integration branch at `high`. A review at a lower level found ten defects in the PR timing branch; a later one at `max` found twenty-three more. The reviewer reads `CODING_STANDARDS.md`.
+Run the review of the integration branch at `max`. On the PR timing branch, a review at a lower level found ten defects, and a later one at `max` found twenty-three more. No review at `high` has been compared with those two, so `high` is not known to be enough. The reviewer reads `CODING_STANDARDS.md`.
 
 ## Briefs
 
 - **Third-party APIs.** An implementer fetches the host's public documentation for any answer shape it reads and names in its report the shapes no test fixture or research ticket confirms.
-- **Real data.** A brief names the repository only. The owner's work folder and any path a ticket gives for notes or results outside the repository stay out of it (`research-spikes.md`).
-- **Checks.** The owner's local toolkit reads `.repo-toolkit.psd1` and runs the full check (format, line endings, warnings, the SQL line-ending check, mutation specs) as `Invoke-FullCheck`. Where that command exists, an implementer runs it before reporting. Where it does not, it runs `dotnet build`, `dotnet test` and `eng/check-sql-line-endings.ps1 -RepoRoot .`, and says the full check was not run.
+- **Real data.** A brief points into the repository, and may name the exploration notes folder that the skill's exploration step sets up outside it. Those notes are about this repository and public documentation, never real data. The owner's work folder, and any path a ticket gives for notes or results outside the repository, stay out of every brief (`research-spikes.md`).
+- **Checks.** The owner's local toolkit reads `.repo-toolkit.psd1` and runs a full check as `Invoke-FullCheck`. That file sets up the build of `Telltale.slnx` and its two TUnit test projects, the format check, the warnings check against `eng/warnings-baseline.txt`, the SQL line-ending check, mutation specs under `.scratch/{feature}/mutations`, and commit rules. Which of these `Invoke-FullCheck` runs was read from the file only, not checked against the toolkit. Where that command exists, an implementer runs it before reporting and says what it ran. Where it does not, the implementer runs `dotnet build`, `dotnet test` and, from the repository root, `eng/check-sql-line-endings.ps1 -RepoRoot (Get-Location).Path`, and says the full check was not run. The root is given as an absolute path because a relative one is resolved two ways until `.scratch/sql-line-endings-check-paths` is fixed.
