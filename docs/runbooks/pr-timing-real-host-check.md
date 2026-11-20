@@ -159,16 +159,16 @@ Fill this in and bring back only this. A "no" on 3a, 5b or 5d changes the code o
 
 | # | Question | Answer |
 | --- | --- | --- |
-| 2 | Jira-only report unchanged by the upgrade? | |
-| 3a | Does a review move the PR's `updated_at` on the enterprise host? | |
-| 3b | Did the first read fit in the rate limit at the `collectFrom` you want? | |
-| 3c | Can the token read the Ops team? | |
-| 4 | Second GitHub sync clearly faster than the first? | |
-| 4 | Hand-checked PRs counted in the sprints you expected? | |
-| 5a | List fields as expected? API version accepted? | |
-| 5b | Vote thread: which of the four held? Real property names if not. | |
-| 5c | File comment fields as expected? | |
-| 5d | Do old PRs have vote threads? From roughly when? | |
-| 6 | Any threads unreadable or votes unclassifiable? Roughly how common: none, a few, many? | |
-| 6 | Second ADO sync time acceptable? | |
-| 7 | Combined rows add up? | |
+| 2 | Jira-only report unchanged by the upgrade? | Yes. Line-for-line match; no PR timing section. |
+| 3a | Does a review move the PR's `updated_at` on the enterprise host? | Yes on the sampled PR: the review was its latest activity, and `updated_at` matched `submitted_at`. |
+| 3b | Did the first read fit in the rate limit at the `collectFrom` you want? | Yes for the pilot repository and cutoff. Wider backfill not tested. |
+| 3c | Can the token read the Ops team? | Yes, with `opsTeam` in `organization/team-slug` form. |
+| 4 | Second GitHub sync clearly faster than the first? | Yes. Both runs succeeded. |
+| 4 | Hand-checked PRs counted in the sprints you expected? | Yes for same-sprint and cross-sprint waits. An Ops-only approval counted as neither a first code review nor a first code approval. |
+| 5a | List fields as expected? API version accepted? | Yes to both, including `closedDate` on completed PRs. |
+| 5b | Vote thread: which of the four held? Real property names if not. | The sampled `VoteUpdate` threads had a recognized `CodeReviewVoteResult`, a `CodeReviewVotedByIdentity` key resolving to `identities[key].id`, and a `publishedDate`. The vote time was not independently verified against a separate clock. |
+| 5c | File comment fields as expected? | Not always. Some text comments omitted `isDeleted`; the collector already treats an absent flag as not deleted. The sampled comments had `commentType`, `publishedDate`, and `author.id`. |
+| 5d | Do old PRs have vote threads? From roughly when? | Yes on a voted PR closed in early January 2026. |
+| 6 | Any threads unreadable or votes unclassifiable? Roughly how common: none, a few, many? | None observed. Approval with suggestions counted as approval, an abandoned PR retained its review but had no merge, and an automation-first comment did not end the review wait. |
+| 6 | Second ADO sync time acceptable? | The repeat was faster; no absolute acceptance threshold was set. Both runs succeeded. |
+| 7 | Combined rows add up? | Yes in the rendered migration-sprint report. Across stored sprints, combined counts and coverage matched the host rows. |
