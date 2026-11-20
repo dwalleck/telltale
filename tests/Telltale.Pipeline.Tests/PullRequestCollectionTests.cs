@@ -88,6 +88,43 @@ public class PullRequestCollectionTests
 
         // Closed and merged pull requests are asked for too, not only the open ones.
         await Assert.That(github.Requests.Single(request => request.Path.EndsWith("/pulls", StringComparison.Ordinal)).Query["state"]).IsEqualTo("all");
+
+        // The configured address: its scheme and host, and its path prefix (FakeGitHub.Requests are those under it).
+        await Assert.That(github.Requests.Select(request => request.Address).Distinct()).IsEquivalentTo(new[] { GitHubAddress });
+        await Assert.That(AddressesGivenTheGitHubToken(pipeline)).IsEquivalentTo(new[] { GitHubAddress });
+    }
+
+    private const string GitHubAddress = "https://github.example.invalid";
+
+    /// <summary>Every address a request carrying the GitHub token went to, whatever its path.</summary>
+    private static string[] AddressesGivenTheGitHubToken(PipelineHarness pipeline) =>
+        [.. pipeline.Jira.Handler.Requests.Where(request => request.Headers.Authorization?.ToString() == $"Bearer {PipelineHarness.GitHubToken}").Select(request => request.Address).Distinct()];
+
+    [Test]
+    public async Task A_next_page_on_another_host_is_not_followed_and_the_token_does_not_go_there()
+    {
+        // Review 2, finding 23. The list's first page names its next page on another host, under the same
+        // path. Following it would send the token there: the read stops, and nothing is asked of that host.
+        await using var pipeline = SuppressionOff();
+        pipeline.Jira.AddSprints41And42();
+        var github = FakeGitHub.For(pipeline);
+        github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 20, 12));
+        const string pullsPath = "/api/v3/repos/" + FakeGitHub.Repository + "/pulls";
+        pipeline.Jira.Handler.Override(HttpMethod.Get, pullsPath, _ => true, request =>
+        {
+            var response = StubHttpHandler.Json("[]")(request);
+            response.Headers.TryAddWithoutValidation("Link", $"<https://elsewhere.example.invalid{pullsPath}?state=all&page=2>; rel=\"next\"");
+            return response;
+        });
+
+        var exit = await pipeline.RunAsync("sync");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "GitHub answered GET repos/fake-org/fake-sample/pulls?state=all&sort=updated&direction=desc&per_page=100 with a next page that is not under the configured address, so it was not followed. Nothing was stored.\n");
+        await Assert.That(pipeline.Jira.Handler.Requests.Where(request => request.Address.Contains("elsewhere", StringComparison.Ordinal))).IsEmpty();
+        await Assert.That(AddressesGivenTheGitHubToken(pipeline)).IsEquivalentTo(new[] { GitHubAddress });
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM pull_request")).IsEquivalentTo(new[] { 0L });
     }
 
     [Test]
