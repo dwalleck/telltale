@@ -471,6 +471,8 @@ dotnet test
 
 Tests use TUnit and run against a fake Jira, so they need no network and no secrets. The build treats warnings as errors.
 
+At most four tests of each test project run at once, so `dotnet test` leaves the machine usable. The two projects run side by side, so up to eight tests run at once while both are running. Set `TELLTALE_TEST_PARALLELISM` to another whole number on a machine with cores to spare, or to `0` for no limit; any other value stops the run. A test that speaks of every metric view reads the one list in `tests/Telltale.Pipeline.Tests/Harness/MetricViews.cs`. A new view is added there, and a view with a `suppressed` column also gets a row in the flags table of `SuppressionOffTests`.
+
 Report and query assertions normalize both actual output and multiline expected strings to LF. C# raw strings otherwise inherit the checkout's line endings, so normalizing only the actual output makes a CRLF checkout fail despite matching content.
 
 | Project | Role |
