@@ -37,6 +37,14 @@ public class PullRequestFiguresNotWithheldTests
             "\n## Pull request timing\n\n| Wait from opening to | Pull requests | Median (elapsed days) | P85 (elapsed days) | Median (business days) | P85 (business days) |\n| --- | ---: | ---: | ---: | ---: | ---: |\n"
             + "| First code review | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n| First code approval | 0 | none | none | none | none |\n| Merge | 0 | none | none | none | none |\n\n- These are");
         await Assert.That(report).Contains("- Pull request figures are not subject to the minimum group size: none is withheld for the number of people behind it, and none is reported per person.\n");
+
+        // The method note does not contradict that (review 2, finding 18): its rule is said of the Jira
+        // figures, it names the tables it withholds, and it says the pull request figures are the exception.
+        await Assert.That(report).Contains("\n- A figure derived from Jira is shown only where it cannot show one person's work. ");
+        await Assert.That(report).Contains(" When the team is smaller than five, the delivered count, the cycle time table and the time in status table read \"suppressed\", with no rows.");
+        await Assert.That(report).Contains(" The pull request figures and counts are the exception: they are not subject to the minimum group size, and none of them is withheld (see Pull request timing).\n- An assignee is");
+        await Assert.That(report).DoesNotContain("- A figure is shown only");
+        await Assert.That(report).DoesNotContain("both tables");
     }
 
     [Test]

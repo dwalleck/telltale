@@ -132,7 +132,7 @@ public static class SprintReport
                 cancellationToken)
             : [];
         var briefVisits = new BriefVisitsInTheReport(briefVisitsChecked, leftOutOfTimeInStatus, leftOutOfCycleTime, HasCycleTimeLine: cycleStarts.Count > 0);
-        AppendMethodNote(report, quality, numbers, briefVisits, baselineSprintIds, withheldBaselineSprints);
+        AppendMethodNote(report, quality, numbers, briefVisits, baselineSprintIds, withheldBaselineSprints, derivedFrom.PullRequestsCounted);
         AppendFooter(report, quality);
 
         if (briefVisitsChecked)
@@ -657,7 +657,7 @@ public static class SprintReport
     /// built under (<see cref="AppendMinimumGroupSize"/>). The time zone is the one derive stored. The paragraph
     /// on brief visits is its last, and is there only when a status is listed (<see cref="AppendBriefVisitsExplained"/>).
     /// </summary>
-    private static void AppendMethodNote(StringBuilder report, DataQualityRow quality, NumbersInForce numbers, BriefVisitsInTheReport briefVisits, IReadOnlyList<string> baselineSprintIds, IReadOnlyList<string> withheldBaselineSprints)
+    private static void AppendMethodNote(StringBuilder report, DataQualityRow quality, NumbersInForce numbers, BriefVisitsInTheReport briefVisits, IReadOnlyList<string> baselineSprintIds, IReadOnlyList<string> withheldBaselineSprints, bool pullRequestsCounted)
     {
         var (briefVisitsChecked, leftOutOfTimeInStatus, leftOutOfCycleTime, _) = briefVisits;
         report.Append("\n## Method\n\n")
@@ -672,7 +672,7 @@ public static class SprintReport
             // Under exclude a repeated visit that is brief is not in the total, so the sentence says so (owner decision D84).
             .Append(leftOutOfTimeInStatus ? " and leaving out brief visits to a status listed for them (see the paragraph on brief visits below)" : "")
             .Append("; this is accumulated issue time, not effort or the sprint's elapsed duration. Totals and medians use the same privacy rules.\n");
-        AppendMinimumGroupSize(report, numbers, briefVisitsChecked, leftOutOfTimeInStatus);
+        AppendMinimumGroupSize(report, numbers, briefVisitsChecked, leftOutOfTimeInStatus, pullRequestsCounted);
 
         // Said only when there is a baseline: without one the report has no baseline column to explain.
         if (baselineSprintIds.Count > 0)
@@ -868,7 +868,7 @@ public static class SprintReport
     /// after its two counts of the whole store, withheld by their own rule (<see cref="AppendBriefVisitsExplained"/>),
     /// so the sentence on those two says which they are, whether or not this sprint has such a line.
     /// </summary>
-    private static void AppendMinimumGroupSize(StringBuilder report, NumbersInForce numbers, bool briefVisitsChecked, bool leftOutOfTimeInStatus)
+    private static void AppendMinimumGroupSize(StringBuilder report, NumbersInForce numbers, bool briefVisitsChecked, bool leftOutOfTimeInStatus, bool pullRequestsCounted)
     {
         if (!numbers.TeamCheck && !numbers.FigureCheck)
         {
@@ -881,13 +881,19 @@ public static class SprintReport
         var are = numbers.BehindAFigureAre;
 
         // One assignee behind a figure is one person's work, so the opening sentence is said only from two.
+        // With a pull request section in the report, these sentences are about the figures derived from Jira
+        // and say so: the pull request figures are shown whatever the numbers are (owner decision D114), and
+        // "both tables" would no longer say which two.
+        var figure = pullRequestsCounted ? "A figure derived from Jira" : "A figure";
         report.Append(numbers.BehindAFigure >= 2
-            ? "- A figure is shown only where it cannot show one person's work."
-            : "- A figure is shown only for a group of at least the minimum group size.");
+            ? $"- {figure} is shown only where it cannot show one person's work."
+            : $"- {figure} is shown only for a group of at least the minimum group size.");
         if (numbers.TeamCheck)
         {
             report.Append(" The team of a sprint is the distinct assignees of every issue that was a member of the sprint or was delivered in it. When the team is smaller than ").Append(team)
-                .Append(", the delivered count and both tables read \"suppressed\", with no rows.");
+                .Append(pullRequestsCounted
+                    ? ", the delivered count, the cycle time table and the time in status table read \"suppressed\", with no rows."
+                    : ", the delivered count and both tables read \"suppressed\", with no rows.");
         }
 
         if (numbers.FigureCheck)
@@ -906,6 +912,7 @@ public static class SprintReport
             report.Append(" With a team of ").Append(team).Append(" or more, every figure of the sprint itself is shown, whatever the number of assignees behind it.");
         }
 
+
         report.Append(briefVisitsChecked ? " The footer's two counts of the whole store" : " The footer's two counts").Append(" read \"suppressed\" when ");
         if (numbers.TeamCheck)
         {
@@ -915,6 +922,11 @@ public static class SprintReport
         else
         {
             report.Append("fewer than ").Append(behindAFigure).Append(' ').Append(are).Append(" among the issues counted. No figure is withheld for the size of a sprint's team.");
+        }
+
+        if (pullRequestsCounted)
+        {
+            report.Append(" The pull request figures and counts are the exception: they are not subject to the minimum group size, and none of them is withheld (see Pull request timing).");
         }
 
         report.Append("\n- An assignee is a Jira account as of the last sync, so a bot or a person's second account counts as a person. An unassigned issue counts toward nobody.\n");
