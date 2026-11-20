@@ -116,6 +116,10 @@ public sealed class GitHubCollector : IPullRequestCollector
             // pull request after it was updated earlier still, and the store has it as it is. A backfill reads
             // on to the end, which is what brings in older pull requests after the start date is moved back.
             // A pull request repeated on a later page, as happens when one changes while the list is read, is one.
+            //
+            // The stored pull requests of the repository that the list has not come to yet. While there is
+            // one, a page of nothing but pull requests too old to collect does not end the list (see below).
+            var storedNotListedYet = known.Keys.Where(key => key.Repository == repository.Key).ToHashSet();
             await ForEachAsync(
                 github,
                 $"repos/{repository.Owner}/{repository.Name}/pulls?state=all&sort=updated&direction=desc&per_page={PageSize}",
@@ -123,10 +127,16 @@ public sealed class GitHubCollector : IPullRequestCollector
                 pullRequest =>
                 {
                     var (row, authorId) = Read(repository, pullRequest);
+                    storedNotListedYet.Remove((row.Repository, row.Number));
+                    known.TryGetValue((row.Repository, row.Number), out var before);
 
-                    // Out of what is collected: last updated before the start date. One that does not say
-                    // when it was last updated cannot be shown to be that old, and is collected.
-                    if (row.Updated < _settings.CollectFrom)
+                    // Out of what is collected: last updated before the start date, and not in the store. One
+                    // that does not say when it was last updated cannot be shown to be that old, and is
+                    // collected. The date says only what is brought into the store: a pull request that is in
+                    // it is compared and written like any other, whatever the date, because derive counts
+                    // every stored pull request, and one stored as open that closed before a start date moved
+                    // forward since would otherwise be counted as still waiting for good.
+                    if (before is null && row.Updated < _settings.CollectFrom)
                     {
                         return null;
                     }
@@ -137,7 +147,6 @@ public sealed class GitHubCollector : IPullRequestCollector
                     // The store holds a pull request only with the reviews read for the entry it holds, since
                     // a batch is written whole or not at all, so an entry that is as stored needs no request.
                     // The exception is a row written while the roster could not be read: it says so itself.
-                    known.TryGetValue((row.Repository, row.Number), out var before);
                     var readReviews = before is null || before.Merged != row.Merged || before.Closed != row.Closed || before.Updated != row.Updated
                         || (row.Updated is null && row.Closed is null)
                         || before.History != PullRequestHistoryStates.Read;
@@ -153,7 +162,8 @@ public sealed class GitHubCollector : IPullRequestCollector
                     return true;
                 },
                 cancellationToken,
-                stopAtAPageWithNothingNew: !wholeList);
+                stopAtAPageWithNothingNew: !wholeList,
+                rowsToComeTo: () => storedNotListedYet.Count > 0);
         }
 
         // A stored pull request whose reviews were not read is read now, whether or not the list pass came to
@@ -361,12 +371,24 @@ public sealed class GitHubCollector : IPullRequestCollector
     /// <summary>
     /// Reads a list to its end, following the next page each answer names and never asking past the last one
     /// named: a list is over when an answer names no next page, not when a page comes back empty.
-    /// <paramref name="read"/> says of each row whether it brought anything new, or null for a row older than
-    /// what is collected: a page of only such rows ends the reading, since the rows after it are older still. With
-    /// <paramref name="stopAtAPageWithNothingNew"/> the reading ends after the first page that has rows and
-    /// none of them new, which is only right for a list whose order puts everything new first.
+    /// <paramref name="read"/> says of each row whether it brought anything new (false for a row that is as
+    /// the store has it), or null for a row older than what is collected that the store does not hold.
     /// </summary>
-    private static async Task ForEachAsync(HostClient github, string firstPage, string what, Func<JsonElement, bool?> read, CancellationToken cancellationToken, bool stopAtAPageWithNothingNew = false)
+    /// <remarks>
+    /// Two things end the reading before the list does, both for a list that gives the most recently updated first.
+    /// <list type="bullet">
+    /// <item>A page of only rows too old to collect, since the rows after it are older still and would not be
+    /// collected either. That holds only for rows the store does not have: one it has is kept up to date
+    /// whatever its age, and it can lie further down, so such a page ends the reading only when
+    /// <paramref name="rowsToComeTo"/> says that no stored row is left that the list has not given yet.</item>
+    /// <item>With <paramref name="stopAtAPageWithNothingNew"/>, a page with no new row and at least one row
+    /// that is as stored. That row is what makes the stop right: it was last updated before the store read
+    /// it, every row after it was updated earlier still, so the store has those as they are. A page of only
+    /// too-old rows has no such row and says nothing of the stored rows after it; it is the case above.</item>
+    /// </list>
+    /// </remarks>
+    private static async Task ForEachAsync(
+        HostClient github, string firstPage, string what, Func<JsonElement, bool?> read, CancellationToken cancellationToken, bool stopAtAPageWithNothingNew = false, Func<bool>? rowsToComeTo = null)
     {
         var asked = new HashSet<string>(StringComparer.Ordinal);
         for (var next = firstPage; next is not null;)
@@ -394,7 +416,10 @@ public sealed class GitHubCollector : IPullRequestCollector
                 throw new UserFacingException($"GitHub's {what} answered in a shape this tool does not understand ({exception.GetType().Name}). Nothing was stored.", exception);
             }
 
-            next = rows > 0 && (tooOld == rows || (stopAtAPageWithNothingNew && fresh == 0)) ? null : page.Next;
+            var ended = tooOld == rows
+                ? rows > 0 && rowsToComeTo?.Invoke() != true
+                : stopAtAPageWithNothingNew && fresh == 0;
+            next = ended ? null : page.Next;
         }
     }
 }

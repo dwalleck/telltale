@@ -95,9 +95,14 @@ public sealed class AdoCollector : IPullRequestCollector
 
             foreach (var (row, authorId) in listed.Values.OrderBy(pullRequest => pullRequest.Row.Number))
             {
-                // Out of what is collected: closed before the start date. An open one cannot be shown to have
-                // been without activity since then, and is collected.
-                if (row.Closed < _settings.CollectFrom)
+                // Out of what is collected: closed before the start date, and not in the store. An open one
+                // cannot be shown to have been without activity since then, and is collected. The date says
+                // only what is brought into the store: a pull request that is in it is compared and written
+                // like any other, whatever the date, because derive counts every stored pull request. One
+                // stored as open that closed before a start date moved forward since would otherwise be
+                // counted as still waiting for good, and one stored without its threads never asked for again.
+                known.TryGetValue((row.Repository, row.Number), out var before);
+                if (before is null && row.Closed < _settings.CollectFrom)
                 {
                     continue;
                 }
@@ -108,7 +113,6 @@ public sealed class AdoCollector : IPullRequestCollector
                 // as closed was read after it closed, since a batch is written whole or not at all: what comes
                 // after the closing ends no wait, and it costs no request again. The exception is a row that says its
                 // threads were not read: they are asked for until they are.
-                known.TryGetValue((row.Repository, row.Number), out var before);
                 var readThreads = before is null || before.Merged != row.Merged || before.Closed != row.Closed || row.Closed is null
                     || before.History != PullRequestHistoryStates.Read;
                 if (!readThreads && before == row)
