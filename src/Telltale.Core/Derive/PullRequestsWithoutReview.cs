@@ -13,7 +13,9 @@ namespace Telltale.Core.Derive;
 /// what happened later is left out, so a review made after the close does not take the pull request out of
 /// the sprint's count of those that were waiting when it closed. A pull request is looked at for a sprint
 /// when it was opened before that moment and was either still open then or closed during the sprint; one
-/// closed before the sprint started is no longer the sprint's to explain. Of those, one that had its first
+/// closed before the sprint started is no longer the sprint's to explain. Whether it was closed at that
+/// moment is not only what its row says now: a pull request reopened since was closed then, as far as the
+/// store saw it (<see cref="RawPullRequestPastClosure"/>). Of those, one that had its first
 /// code review by then is not here. Every other one is in exactly one <see cref="PullRequestReviewStates"/>.
 /// </remarks>
 public static class PullRequestsWithoutReview
@@ -32,6 +34,7 @@ public static class PullRequestsWithoutReview
             .Where(pullRequest => repositoriesByHost.TryGetValue(pullRequest.Host, out var repositories) && repositories.Contains(pullRequest.Repository, StringComparer.Ordinal))
             .ToList();
         var events = raw.PullRequestEvents.ToLookup(happened => (happened.Host, happened.Repository, happened.Number));
+        var pastClosures = raw.PullRequestPastClosures.ToLookup(closure => (closure.Host, closure.Repository, closure.Number));
         var rows = new List<PullRequestWithoutReview>();
         foreach (var window in windows)
         {
@@ -47,16 +50,21 @@ public static class PullRequestsWithoutReview
 
             foreach (var pullRequest in counted)
             {
-                if (pullRequest.Opened >= at || pullRequest.Closed < window.Start)
+                // The closing the pull request was under at that moment, if it was closed then: the one that
+                // stands now, or one it was reopened from since. One closed before the sprint started, and
+                // not open again by that moment, is not the sprint's to explain.
+                var closed = ClosedAt(at, pullRequest, pastClosures[(pullRequest.Host, pullRequest.Repository, pullRequest.Number)]);
+                if (pullRequest.Opened >= at || closed < window.Start)
                 {
                     continue;
                 }
 
-                // What the pull request was at that moment: a merge or a close dated later had not happened.
+                // What the pull request was at that moment: a merge or a close dated later had not happened,
+                // and a reopening seen later had not either.
                 var seen = pullRequest with
                 {
                     Merged = pullRequest.Merged < at ? pullRequest.Merged : null,
-                    Closed = pullRequest.Closed < at ? pullRequest.Closed : null,
+                    Closed = closed,
                 };
                 var itsEvents = events[(pullRequest.Host, pullRequest.Repository, pullRequest.Number)]
                     .Where(happened => happened.At < at)
@@ -71,6 +79,26 @@ public static class PullRequestsWithoutReview
         }
 
         return rows;
+    }
+
+    /// <summary>
+    /// When the pull request was closed, if it was closed at the moment <paramref name="at"/>; null if it was
+    /// open then. It was closed then under the closing that stands now, when that is before the moment, or
+    /// under a past one (<see cref="RawPullRequestPastClosure"/>) from its closing until the collection that
+    /// saw the pull request open again. The store does not know when in that time it was reopened, so a
+    /// moment after the reopening and before that collection still finds it closed: the sprint is told as the
+    /// store saw it then. Where two closings hold the moment (a pull request closed again between two
+    /// collections), the later one is the one it was under.
+    /// </summary>
+    private static DateTimeOffset? ClosedAt(DateTimeOffset at, RawPullRequest pullRequest, IEnumerable<RawPullRequestPastClosure> pastClosures)
+    {
+        var closings = pastClosures.Where(closure => closure.Closed < at && at < closure.ReopenedBy).Select(closure => closure.Closed);
+        if (pullRequest.Closed is { } standing && standing < at)
+        {
+            closings = closings.Append(standing);
+        }
+
+        return closings.Select(closing => (DateTimeOffset?)closing).Max();
     }
 
     /// <summary>Why the pull request has no first code review, and what had been submitted on it; null when it has one.</summary>

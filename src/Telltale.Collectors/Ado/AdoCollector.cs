@@ -164,7 +164,8 @@ public sealed class AdoCollector : IPullRequestCollector
             rows,
             events,
             new RawPullRequestHost(Host, PullRequestHostStates.Read, PullRequestRosterStates.NotConfigured) { CollectFrom = _settings.CollectFrom, Repositories = [.. _settings.Repositories.Select(repository => repository.Key)] },
-            IdentityHash.SaltFingerprint(_salt));
+            IdentityHash.SaltFingerprint(_salt),
+            _clock.GetUtcNow());
     }
 
     /// <summary>The kept fields of one pull request of the list, and its author's identity ID, which is used to classify its events and goes no further.</summary>

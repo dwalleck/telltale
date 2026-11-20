@@ -22,7 +22,9 @@ public interface ITelltaleStore
 
     /// <summary>
     /// Writes a pull request host's batch in one transaction: its pull requests and events, what the read came
-    /// to, the salt's fingerprint and the raw data's digest. It never deletes, and a batch under another salt
+    /// to, the salt's fingerprint and the raw data's digest. A stored closing time that a pull request of the
+    /// batch no longer has (it was reopened) is kept as a <see cref="RawPullRequestPastClosure"/>, dated with
+    /// <see cref="PullRequestBatch.CollectedAt"/>. It never deletes, and a batch under another salt
     /// than the stored people were hashed with throws <see cref="UserFacingException"/> and writes nothing.
     /// </summary>
     Task WritePullRequestsAsync(PullRequestBatch batch, CancellationToken cancellationToken = default);

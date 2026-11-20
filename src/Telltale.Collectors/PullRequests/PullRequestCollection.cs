@@ -63,7 +63,8 @@ public static class PullRequestCollection
     /// </summary>
     /// <param name="saltFingerprint">The fingerprint of the salt the collectors hash authors with.</param>
     /// <param name="everything">Read each host's whole list (a backfill), not only as far as something changed (a sync).</param>
-    public static async Task BringUpToDateAsync(IEnumerable<IPullRequestCollector> collectors, ITelltaleStore store, bool everything, string saltFingerprint, CancellationToken cancellationToken)
+    /// <param name="clock">The clock the collectors use: it dates a batch that records only that a read failed.</param>
+    public static async Task BringUpToDateAsync(IEnumerable<IPullRequestCollector> collectors, ITelltaleStore store, bool everything, string saltFingerprint, TimeProvider clock, CancellationToken cancellationToken)
     {
         var failures = new List<UserFacingException>();
         foreach (var collector in collectors)
@@ -90,7 +91,8 @@ public static class PullRequestCollection
                         [],
                         [],
                         new RawPullRequestHost(collector.Host, PullRequestHostStates.Failed, PullRequestRosterStates.NotRead) { CollectFrom = CollectedFrom(stored, collector.Host), Repositories = RepositoriesRead(stored, collector.Host) },
-                        saltFingerprint),
+                        saltFingerprint,
+                        clock.GetUtcNow()),
                     cancellationToken);
                 failures.Add(failure);
                 continue;

@@ -150,6 +150,20 @@ public static class PullRequestEventActors
 }
 
 /// <summary>
+/// A closing of a pull request that the store saw and that no longer stands: a collection found the pull
+/// request listed with no closing time (reopened, reactivated) or with another one, where the store held
+/// <see cref="Closed"/>. <see cref="RawPullRequest.Closed"/> is only the closing that stands now, so this is
+/// what lets a sprint that closed while the pull request was closed still be told so.
+/// </summary>
+/// <param name="Closed">The closing time the store held.</param>
+/// <param name="ReopenedBy">
+/// The time of the collection that found that closing gone (<see cref="PullRequestBatch.CollectedAt"/>). A
+/// host's list does not say when a pull request was opened again: it was before this moment, and how long
+/// before is not known. A closing that was made and undone between two collections was never seen at all.
+/// </param>
+public sealed record RawPullRequestPastClosure(string Host, string Repository, long Number, DateTimeOffset Closed, DateTimeOffset ReopenedBy);
+
+/// <summary>
 /// What the last collection from a pull request host came to. A host with no row was never read. Whether a
 /// host is configured is not here: the configuration says that.
 /// </summary>
@@ -205,10 +219,16 @@ public static class PullRequestRosterStates
 /// One write of pull request rows: what a host's collector fetched, and what the read came to, in one
 /// transaction. Rows are added to the stored ones and replace those of the same pull request; an event already
 /// stored is left as it is, so its classification stays the first one. Nothing is ever deleted by a batch.
+/// A stored closing time that a row of the batch no longer has is kept as a <see cref="RawPullRequestPastClosure"/>.
 /// </summary>
 /// <param name="SaltFingerprint">The fingerprint of the salt the authors were hashed with; a batch under another salt than the store's people were hashed with is refused.</param>
+/// <param name="CollectedAt">
+/// When the read that gave the batch ended, by the collectors' clock and not by the machine's: the moment by
+/// which a pull request whose stored closing the batch no longer has was seen open again.
+/// </param>
 public sealed record PullRequestBatch(
     IReadOnlyList<RawPullRequest> PullRequests,
     IReadOnlyList<RawPullRequestEvent> Events,
     RawPullRequestHost HostState,
-    string SaltFingerprint);
+    string SaltFingerprint,
+    DateTimeOffset CollectedAt);

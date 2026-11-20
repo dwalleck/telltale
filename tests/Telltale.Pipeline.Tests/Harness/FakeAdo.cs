@@ -78,6 +78,13 @@ public sealed class FakeAdoPullRequest(FakeAdo ado, int number, FakeAdoIdentity?
         return this;
     }
 
+    /// <summary>An abandoned pull request made active again: the list gives it no closing time any more, and does not say when it was reactivated.</summary>
+    public FakeAdoPullRequest Reactivated()
+    {
+        (Status, ClosedAt) = ("active", null);
+        return this;
+    }
+
     /// <summary>A text comment on a file, in a thread of its own.</summary>
     public FakeAdoPullRequest FileComment(FakeAdoIdentity? by, DateTimeOffset at, bool deleted = false)
     {

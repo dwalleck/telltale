@@ -146,7 +146,7 @@ public sealed class PipelineSteps
     private Task CollectPullRequestsAsync(CollectionMode mode, CancellationToken cancellationToken)
     {
         var secrets = SecretsOfACollection;
-        return PullRequestCollection.BringUpToDateAsync(PullRequestCollectors(secrets), _store, everything: mode == CollectionMode.Backfill, IdentityHash.SaltFingerprint(secrets.HashingSalt), cancellationToken);
+        return PullRequestCollection.BringUpToDateAsync(PullRequestCollectors(secrets), _store, everything: mode == CollectionMode.Backfill, IdentityHash.SaltFingerprint(secrets.HashingSalt), _environment.Clock, cancellationToken);
     }
 
     /// <summary>

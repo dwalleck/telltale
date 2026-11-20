@@ -255,7 +255,8 @@ public sealed class GitHubCollector : IPullRequestCollector
                     [.. pullRequests.Where(pullRequest => !unread.Contains(pullRequest.Key)).Select(pullRequest => pullRequest.Value.Row)],
                     events,
                     new RawPullRequestHost(Host, PullRequestHostStates.Failed, PullRequestRosterStates.NotRead) { CollectFrom = storedFrom, Repositories = PullRequestCollection.RepositoriesRead(stored, Host) },
-                    IdentityHash.SaltFingerprint(_salt)),
+                    IdentityHash.SaltFingerprint(_salt),
+                    _clock.GetUtcNow()),
                 failure);
         }
 
@@ -268,7 +269,8 @@ public sealed class GitHubCollector : IPullRequestCollector
                 PullRequestHostStates.Read,
                 _settings.OpsTeam is null ? PullRequestRosterStates.NotConfigured : rosterRead ? PullRequestRosterStates.Read : PullRequestRosterStates.Failed)
             { CollectFrom = collectedFrom, Repositories = [.. _settings.Repositories.Select(repository => repository.Key)] },
-            IdentityHash.SaltFingerprint(_salt));
+            IdentityHash.SaltFingerprint(_salt),
+            _clock.GetUtcNow());
     }
 
     private async Task SayAsync(IEnumerable<string> notices)

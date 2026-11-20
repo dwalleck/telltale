@@ -277,6 +277,27 @@ public sealed class SqliteStore : ITelltaleStore
         var hashedWithBefore = await ReadSaltFingerprintAsync(connection, transaction, cancellationToken);
         IdentityHash.RequireSameSalt(hashedWithBefore, batch.SaltFingerprint);
 
+        // pull_request keeps only the closing that stands now. A closing the store holds and the batch's row
+        // no longer has (the host lists the pull request as open again, or closed at another time) was
+        // nevertheless seen, and the sprints that closed under it are rebuilt from it: it is kept, with this
+        // collection's time as the moment by which the pull request was open again. Before the rows are
+        // replaced, and for every writer of a batch, so no collector can forget it.
+        await ExecuteForEachRowAsync(
+            connection,
+            transaction,
+            """
+            INSERT INTO pull_request_past_closure (host, repository, pr_number, closed, reopened_by)
+            SELECT host, repository, pr_number, closed, @reopenedBy FROM pull_request
+            WHERE host = @host AND repository = @repository AND pr_number = @number AND closed IS NOT NULL AND closed IS NOT @closed
+            ON CONFLICT (host, repository, pr_number, closed) DO NOTHING;
+            """,
+            ["@host", "@repository", "@number", "@closed", "@reopenedBy"],
+            batch.PullRequests.Select(pullRequest => new object?[]
+            {
+                pullRequest.Host, pullRequest.Repository, pullRequest.Number, StoredTime.ToStored(pullRequest.Closed), StoredTime.ToStored(batch.CollectedAt),
+            }),
+            cancellationToken);
+
         // What a pull request is now replaces what it was: it can be merged, closed or reopened since.
         await ExecuteForEachRowAsync(
             connection,
@@ -418,6 +439,7 @@ public sealed class SqliteStore : ITelltaleStore
         var statuses = await connection.QueryAsync<StatusRow>(Command(cancellationToken, "SELECT * FROM status ORDER BY status_id;", transaction: transaction));
         var pullRequests = await connection.QueryAsync<PullRequestRow>(Command(cancellationToken, "SELECT * FROM pull_request ORDER BY host, repository, pr_number;", transaction: transaction));
         var pullRequestEvents = await connection.QueryAsync<PullRequestEventRow>(Command(cancellationToken, "SELECT * FROM pull_request_event ORDER BY host, repository, pr_number, kind, event_id;", transaction: transaction));
+        var pullRequestPastClosures = await connection.QueryAsync<PullRequestPastClosureRow>(Command(cancellationToken, "SELECT * FROM pull_request_past_closure ORDER BY host, repository, pr_number, closed;", transaction: transaction));
         var pullRequestHosts = await connection.QueryAsync<PullRequestHostRow>(Command(cancellationToken, "SELECT * FROM pull_request_host ORDER BY host;", transaction: transaction));
 
         return new RawData(
@@ -460,6 +482,7 @@ public sealed class SqliteStore : ITelltaleStore
                 Actor = row.Actor,
                 At = StoredTime.FromStored(row.At),
             })],
+            PullRequestPastClosures = [.. pullRequestPastClosures.Select(row => new RawPullRequestPastClosure(row.Host, row.Repository, row.PrNumber, StoredTime.FromStored(row.Closed), StoredTime.FromStored(row.ReopenedBy)))],
             PullRequestHosts = [.. pullRequestHosts.Select(row => new RawPullRequestHost(row.Host, row.State, row.Roster)
             {
                 CollectFrom = StoredTime.FromStoredOrNull(row.CollectFrom),
@@ -1028,6 +1051,15 @@ public sealed class SqliteStore : ITelltaleStore
         public string Outcome { get; init; } = "";
         public string Actor { get; init; } = "";
         public string At { get; init; } = "";
+    }
+
+    private sealed class PullRequestPastClosureRow
+    {
+        public string Host { get; init; } = "";
+        public string Repository { get; init; } = "";
+        public long PrNumber { get; init; }
+        public string Closed { get; init; } = "";
+        public string ReopenedBy { get; init; } = "";
     }
 
     private sealed class PullRequestHostRow
