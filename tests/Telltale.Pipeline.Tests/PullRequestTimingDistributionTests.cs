@@ -60,7 +60,7 @@ public class PullRequestTimingDistributionTests
             | sprint_id | measure | sample_count | median_elapsed_days | p85_elapsed_days | median_business_days | p85_business_days |
             | --- | --- | --- | --- | --- | --- | --- |
             | 42 | first_code_review | 4 | 3.125 | 4.5 | 1.625 | 2.5 |
-            | 42 | first_code_approval | 0 | NULL | NULL | NULL | NULL |
+            | 42 | first_code_approval | 1 | 2.5 | 2.5 | 2.5 | 2.5 |
             | 42 | merge | 1 | 2.5 | 2.5 | 0.5 | 0.5 |
 
             """.ReplaceLineEndings("\n"));
@@ -69,7 +69,7 @@ public class PullRequestTimingDistributionTests
         await Assert.That(await pipeline.ReadReportAsync(42)).Contains(
             TableHead
             + "| First code review | 4 | 3.1 | 4.5 | 1.6 | 2.5 |\n"
-            + "| First code approval | 0 | none | none | none | none |\n"
+            + "| First code approval | 1 | 2.5 | 2.5 | 2.5 | 2.5 |\n"
             + "| Merge | 1 | 2.5 | 2.5 | 0.5 | 0.5 |\n");
     }
 

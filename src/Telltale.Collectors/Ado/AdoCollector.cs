@@ -98,7 +98,8 @@ public sealed class AdoCollector : IPullRequestCollector
                 // as closed was read after it closed, since a batch is written whole or not at all: what comes
                 // after the closing ends no wait, and it costs no request again.
                 known.TryGetValue((row.Repository, row.Number), out var before);
-                var readThreads = before is null || before.Merged != row.Merged || before.Closed != row.Closed || row.Closed is null;
+                var readThreads = before is null || before.Merged != row.Merged || before.Closed != row.Closed || row.Closed is null
+                    || before.History != PullRequestHistoryStates.Read;
                 if (!readThreads && before == row)
                 {
                     continue;

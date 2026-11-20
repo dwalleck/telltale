@@ -176,7 +176,7 @@ public class PullRequestCollectionTests
 
         await Assert.That(github.ReviewsAskedFor).IsEquivalentTo(new[] { 1, 2, 3, 2 });
         await Assert.That((await pipeline.QueryAsync<(string, string, long, double)>(Figures)).ToArray())
-            .IsEquivalentTo(new[] { ("42", "first_code_review", 2L, 4d), ("42", "merge", 2L, 5d) });
+            .IsEquivalentTo(new[] { ("42", "first_code_review", 2L, 4d), ("42", "first_code_approval", 2L, 4d), ("42", "merge", 2L, 5d) });
     }
 
     [Test]

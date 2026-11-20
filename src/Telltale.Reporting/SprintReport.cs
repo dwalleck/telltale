@@ -427,6 +427,8 @@ public static class SprintReport
                 .Append(".\n");
         }
 
+        report.Append('\n');
+        AppendPullRequestMeasuresNotShown(report, rows);
         AppendPullRequestTimingExplained(report, hosts);
     }
 
@@ -437,6 +439,26 @@ public static class SprintReport
     private static string WaitDays(double? days) => days?.ToString("F1", CultureInfo.InvariantCulture) ?? NoWait;
 
     /// <summary>
+    /// The line for the measures the view has no row for. A rebuild leaves a measure out, where it would
+    /// otherwise give a row that counts nothing, only when it cannot be stated at all, and the one case there
+    /// is today is that of the waits that end with a review: the Ops group's members could not be read, so no
+    /// review was collected (<see cref="PullRequestTiming.MeasuresGiven"/>). Nothing is written when every
+    /// measure has its row.
+    /// </summary>
+    private static void AppendPullRequestMeasuresNotShown(StringBuilder report, IReadOnlyList<PullRequestTimingRow> rows)
+    {
+        var notShown = PullRequestTiming.Measures
+            .Where(measure => rows.All(row => row.Measure != measure))
+            .Select(measure => PullRequestMeasureLabels.GetValueOrDefault(measure, measure))
+            .ToList();
+        if (notShown.Count > 0)
+        {
+            report.Append("- Not shown: ").AppendJoin(", ", notShown)
+                .Append(". The members of the Ops group could not be read when the pull requests were last collected, so reviews by the group could not be told apart from code reviews, and no review was collected. These waits are given for no sprint until a collection reads the group; nothing here says that no pull request was reviewed or approved. A merge does not depend on who reviewed, and is shown.\n");
+        }
+    }
+
+    /// <summary>
     /// The pull request section's own notes: what the population is, where a wait starts, ends and is counted,
     /// what is not a code review, and that the minimum group size does not apply here. They stand under the
     /// table and not in the method note, so a report without the section has nothing of them.
@@ -444,11 +466,12 @@ public static class SprintReport
     /// <param name="hosts">The hosts the figures are of: a host's own rules are worded only when it is one of them.</param>
     private static void AppendPullRequestTimingExplained(StringBuilder report, IReadOnlyList<string> hosts)
     {
-        report.Append('\n')
+        report
             .Append("- These are the pull requests of the configured repositories: every one of them, linked to a Jira issue or not, whoever opened it. They are not necessarily this team's pull requests, and no team is inferred from them.\n")
             .Append("- Each wait runs from the moment the pull request was first opened to the event named, and is counted once, at its full length, in the sprint whose window holds that event: a review in this sprint of a pull request opened two sprints ago counts here, with the whole wait. An event between sprint windows, or in more than one, is counted in no sprint. That is not the rule for delivered issues above, where a delivery in overlapping sprints goes to the one that started first.\n")
             .Append("- Elapsed days are the wait divided by 24 hours, weekends and holidays included. Business days are the same wait counted only on days that are neither a weekend nor a company holiday, in the team's time zone. The median is the middle wait, or the mean of the two middle ones; the P85 is the smallest wait with at least 85% of the waits at or below it (nearest rank). Each clock is ranked on its own, from the waits before any rounding, so its figures need not come from the same pull requests as the other clock's. \"Pull requests\" is the number of pull requests with a wait counted in the sprint, the same for both clocks. A pull request that has no such event yet is not in the row: it has no wait, not a wait of zero, and a row with no pull request has no figure. The figures are recorded waits, not the effort a review took.\n")
             .Append(!hosts.Contains(PullRequestHosts.GitHub) ? "" : "- A first code review is the first submitted review by someone other than the author: a comment-only review, a request for changes or an approval, also one dismissed later, made before the pull request closed. Reviews by the author, by automation and by the Ops group are not code reviews, and neither are ordinary comments. Who is in the Ops group is read when a review is first collected, so a review collected long after it was made is judged by the group as it was at that collection, not as it was when the review was made.\n")
+            .Append(!hosts.Contains(PullRequestHosts.GitHub) ? "" : "- A first code approval is the first approving review by someone other than the author, made before the pull request closed. When it is also the first review, it ends both waits. A comment-only review and a request for changes are code reviews and not approvals. An approval by the Ops group is kept apart and is never a code approval, and neither is one by the author or by automation. A review that had been dismissed before it was first collected does not say what it was: it is a code review and no approval, and since it may have been one, a pull request with such a review before its first known approval has no first code approval here. An approval that was collected and dismissed afterwards stays an approval. As for code reviews, the Ops group is the one read when a review is first collected: its members today, not those at the time of an older review.\n")
             .Append(!hosts.Contains(PullRequestHosts.Ado) ? "" : AzureDevOpsExplained)
             .Append("- Pull request figures are not subject to the minimum group size: none is withheld for the number of people behind it, and none is reported per person.\n");
     }

@@ -42,6 +42,26 @@ public sealed record RawPullRequest
 
     /// <summary>The author as a salted hash. Null when the host names no author (a deleted account).</summary>
     public required string? AuthorHash { get; init; }
+
+    /// <summary>
+    /// One of <see cref="PullRequestHistoryStates"/>: whether the events this row was written with are in the
+    /// store. A collector sets it only for a row it writes without having read the pull request's events.
+    /// </summary>
+    public string History { get; init; } = PullRequestHistoryStates.Read;
+}
+
+/// <summary>The values of <see cref="RawPullRequest.History"/>.</summary>
+public static class PullRequestHistoryStates
+{
+    /// <summary>The store holds the events the host had when the row was written, however few.</summary>
+    public const string Read = "read";
+
+    /// <summary>
+    /// The row was written by a collection that could not read the pull request's events (for GitHub, one that
+    /// could not read the Ops group's members, so no review could be classified). The events are asked for at
+    /// the next sync whatever the list entry says, and until they are read no wait that rests on them is stated.
+    /// </summary>
+    public const string NotRead = "not read";
 }
 
 /// <summary>
