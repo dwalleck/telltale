@@ -13,7 +13,7 @@ namespace Telltale.Pipeline.Tests;
 /// </summary>
 public class PullRequestRosterTests
 {
-    private const string Figures = "SELECT sprint_id, measure, sample_count, median_elapsed_days FROM pr_timing_per_sprint WHERE sample_count > 0 ORDER BY sprint_id, measure_position";
+    private const string Figures = "SELECT sprint_id, measure, sample_count, median_elapsed_days FROM pr_timing_per_sprint WHERE sample_count > 0 AND sprint_id IS NOT NULL ORDER BY sprint_id, measure_position";
     private const string Measures = "SELECT DISTINCT measure FROM pr_timing_per_sprint ORDER BY measure_position";
     private const string HostState = "SELECT state || ', roster ' || roster FROM pull_request_host WHERE host = 'github'";
     private const string MembersPath = "/api/v3/orgs/fake-org/teams/fake-ops/members";
@@ -60,7 +60,7 @@ public class PullRequestRosterTests
         await Assert.That((await pipeline.QueryAsync<string>(Measures)).ToArray()).IsEquivalentTo(new[] { "merge" });
         await Assert.That(await FiguresAsync(pipeline)).IsEquivalentTo(new[] { ("42", "merge", 1L, 2d) });
         var report = await pipeline.ReadReportAsync(42);
-        await Assert.That(report).Contains("| Wait from opening to | Pull requests | Median (elapsed days) |\n| --- | ---: | ---: |\n| Merge | 1 | 2.0 |\n\n" + NotShown + "- These are");
+        await Assert.That(report).Contains("| P85 (business days) |\n| --- | ---: | ---: | ---: | ---: | ---: |\n| Merge | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n\n" + NotShown + "- These are");
         await Assert.That(report).DoesNotContain("| First code");
 
         // Once the roster can be read, the reviews are asked for although the list entry is as it was, and

@@ -34,7 +34,8 @@ public class PullRequestFiguresNotWithheldTests
         var report = await pipeline.ReadReportAsync(41);
         await Assert.That(report).Contains("\nDelivered issues: suppressed\n\n## Cycle time by point bucket\n\nsuppressed\n\n## Time in status\n\nsuppressed\n");
         await Assert.That(report).Contains(
-            "\n## Pull request timing\n\n| Wait from opening to | Pull requests | Median (elapsed days) |\n| --- | ---: | ---: |\n| First code review | 1 | 2.0 |\n| First code approval | 0 | none |\n| Merge | 0 | none |\n\n- These are");
+            "\n## Pull request timing\n\n| Wait from opening to | Pull requests | Median (elapsed days) | P85 (elapsed days) | Median (business days) | P85 (business days) |\n| --- | ---: | ---: | ---: | ---: | ---: |\n"
+            + "| First code review | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n| First code approval | 0 | none | none | none | none |\n| Merge | 0 | none | none | none | none |\n\n- These are");
         await Assert.That(report).Contains("- Pull request figures are not subject to the minimum group size: none is withheld for the number of people behind it, and none is reported per person.\n");
     }
 
@@ -48,11 +49,14 @@ public class PullRequestFiguresNotWithheldTests
         // The view has no flag to set: a figure is there, or there is no wait and so no figure.
         await Assert.That(await HarnessSteps.QueryAsync(pipeline, EveryRow, "SELECT sprint_id, delivered_count, suppressed FROM delivered_per_sprint;")).IsEqualTo(
             """
-            | sprint_id | measure | measure_position | sample_count | median_elapsed_days |
-            | --- | --- | --- | --- | --- |
-            | 41 | first_code_review | 1 | 1 | 2 |
-            | 41 | first_code_approval | 2 | 0 | NULL |
-            | 41 | merge | 3 | 0 | NULL |
+            | sprint_id | measure | measure_position | sample_count | median_elapsed_days | p85_elapsed_days | median_business_days | p85_business_days |
+            | --- | --- | --- | --- | --- | --- | --- | --- |
+            | NULL | first_code_review | 1 | 0 | NULL | NULL | NULL | NULL |
+            | NULL | first_code_approval | 2 | 0 | NULL | NULL | NULL | NULL |
+            | NULL | merge | 3 | 0 | NULL | NULL | NULL | NULL |
+            | 41 | first_code_review | 1 | 1 | 2 | 2 | 2 | 2 |
+            | 41 | first_code_approval | 2 | 0 | NULL | NULL | NULL | NULL |
+            | 41 | merge | 3 | 0 | NULL | NULL | NULL | NULL |
             | sprint_id | delivered_count | suppressed |
             | --- | --- | --- |
             | 41 | NULL | 1 |

@@ -11,7 +11,7 @@ namespace Telltale.Pipeline.Tests;
 /// </summary>
 public class PullRequestApprovalTests
 {
-    private const string Figures = "SELECT sprint_id, measure, sample_count, median_elapsed_days FROM pr_timing_per_sprint WHERE sample_count > 0 ORDER BY sprint_id, measure_position";
+    private const string Figures = "SELECT sprint_id, measure, sample_count, median_elapsed_days FROM pr_timing_per_sprint WHERE sample_count > 0 AND sprint_id IS NOT NULL ORDER BY sprint_id, measure_position";
 
     /// <summary>A harness on Tuesday 10 February 2026 with the checks off, sprints 41 to 43 and a synthetic GitHub. No Jira issue is in it.</summary>
     private static (PipelineHarness Pipeline, FakeGitHub GitHub) ThreeSprints()
@@ -40,8 +40,12 @@ public class PullRequestApprovalTests
         await pipeline.RunAllAsync(["run", "--sprint", "43"], ["report", "--sprint", "42"]);
 
         await Assert.That(await FiguresAsync(pipeline)).IsEquivalentTo(new[] { ("42", "first_code_review", 1L, 4d), ("43", "first_code_approval", 1L, 18d) });
-        await Assert.That(await pipeline.ReadReportAsync(43)).Contains("| First code review | 0 | none |\n| First code approval | 1 | 18.0 |\n| Merge | 0 | none |\n");
-        await Assert.That(await pipeline.ReadReportAsync(42)).Contains("| First code review | 1 | 4.0 |\n| First code approval | 0 | none |\n| Merge | 0 | none |\n");
+
+        // Business days: Friday noon to Tuesday noon of the week after next is 12, and Friday noon to Tuesday noon is 2.
+        await Assert.That(await pipeline.ReadReportAsync(43)).Contains(
+            "| First code review | 0 | none | none | none | none |\n| First code approval | 1 | 18.0 | 18.0 | 12.0 | 12.0 |\n| Merge | 0 | none | none | none | none |\n");
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains(
+            "| First code review | 1 | 4.0 | 4.0 | 2.0 | 2.0 |\n| First code approval | 0 | none | none | none | none |\n| Merge | 0 | none | none | none | none |\n");
     }
 
     [Test]

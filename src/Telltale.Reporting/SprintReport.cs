@@ -111,7 +111,7 @@ public static class SprintReport
         if (derivedFrom.PullRequestsCounted)
         {
             AppendPullRequestTiming(report, await store.QueryViewsAsync<PullRequestTimingRow>(
-                "SELECT measure, sample_count, median_elapsed_days FROM pr_timing_per_sprint WHERE sprint_id = @sprintId ORDER BY measure_position;",
+                "SELECT measure, sprint_id IS NULL AS in_no_sprint, sample_count, median_elapsed_days, p85_elapsed_days, median_business_days, p85_business_days FROM pr_timing_per_sprint WHERE sprint_id = @sprintId OR sprint_id IS NULL ORDER BY measure_position;",
                 new { sprintId },
                 cancellationToken));
         }
@@ -381,8 +381,10 @@ public static class SprintReport
     private const string NoWait = "none";
 
     /// <summary>
-    /// The pull request section: one row for each measure the view gives, in the view's order, then what the
-    /// figures are of (<see cref="AppendPullRequestTimingExplained"/>). It is written only when the derived
+    /// The pull request section: one row for each measure the view gives for the sprint, in the view's order,
+    /// with the number of pull requests and the median and P85 of their waits on each clock; then the number of
+    /// waits the view keeps in no sprint, when there are any; then what the figures are of
+    /// (<see cref="AppendPullRequestTimingExplained"/>). It is written only when the derived
     /// data was built with a pull request host configured; a report without one is what it was before.
     /// Nothing in it is withheld for group size (owner decision D114): the view applies neither check, so no
     /// cell here reads "suppressed".
@@ -390,20 +392,41 @@ public static class SprintReport
     private static void AppendPullRequestTiming(StringBuilder report, IReadOnlyList<PullRequestTimingRow> rows)
     {
         report.Append("\n## Pull request timing\n\n");
-        AppendTableHead(report, "Wait from opening to", "Pull requests", "Median (elapsed days)");
-        foreach (var row in rows)
+        AppendTableHead(report, "Wait from opening to", "Pull requests", "Median (elapsed days)", "P85 (elapsed days)", "Median (business days)", "P85 (business days)");
+        foreach (var row in rows.Where(row => row.InNoSprint == 0))
         {
             AppendTableRow(
                 report,
-                PullRequestMeasureLabels.GetValueOrDefault(row.Measure, row.Measure),
+                PullRequestMeasureLabel(row),
                 row.SampleCount.ToString(CultureInfo.InvariantCulture),
-                row.MedianElapsedDays is { } days ? days.ToString("F1", CultureInfo.InvariantCulture) : NoWait);
+                WaitDays(row.MedianElapsedDays),
+                WaitDays(row.P85ElapsedDays),
+                WaitDays(row.MedianBusinessDays),
+                WaitDays(row.P85BusinessDays));
+        }
+
+        // The waits the view keeps in no sprint are said by their number alone, and only when there are any:
+        // they are not this sprint's, so their figures are not put beside its own.
+        var inNoSprint = rows.Where(row => row.InNoSprint != 0 && row.SampleCount > 0)
+            .Select(row => $"{PullRequestMeasureLabel(row)} {row.SampleCount.ToString(CultureInfo.InvariantCulture)}")
+            .ToList();
+        if (inNoSprint.Count > 0)
+        {
+            report.Append("\nIn no sprint's row, of everything collected, because the event fell between sprint windows or in more than one: ")
+                .AppendJoin(", ", inNoSprint)
+                .Append(".\n");
         }
 
         report.Append('\n');
         AppendPullRequestMeasuresNotShown(report, rows);
         AppendPullRequestTimingExplained(report);
     }
+
+    /// <summary>The words for a row's measure, or the measure's own name when it has none yet.</summary>
+    private static string PullRequestMeasureLabel(PullRequestTimingRow row) => PullRequestMeasureLabels.GetValueOrDefault(row.Measure, row.Measure);
+
+    /// <summary>A pull request figure as the table shows it: rounded to one decimal here and nowhere earlier, or <see cref="NoWait"/> when there is none.</summary>
+    private static string WaitDays(double? days) => days?.ToString("F1", CultureInfo.InvariantCulture) ?? NoWait;
 
     /// <summary>
     /// The line for the measures the view has no row for. A rebuild leaves a measure out, where it would
@@ -435,7 +458,7 @@ public static class SprintReport
         report
             .Append("- These are the pull requests of the configured repositories: every one of them, linked to a Jira issue or not, whoever opened it. They are not necessarily this team's pull requests, and no team is inferred from them.\n")
             .Append("- Each wait runs from the moment the pull request was first opened to the event named, and is counted once, at its full length, in the sprint whose window holds that event: a review in this sprint of a pull request opened two sprints ago counts here, with the whole wait. An event between sprint windows, or in more than one, is counted in no sprint. That is not the rule for delivered issues above, where a delivery in overlapping sprints goes to the one that started first.\n")
-            .Append("- Elapsed days are the wait divided by 24 hours, weekends and holidays included. A pull request that has no such event yet is not in the row: it has no wait, not a wait of zero. The figures are recorded waits, not the effort a review took.\n")
+            .Append("- Elapsed days are the wait divided by 24 hours, weekends and holidays included. Business days are the same wait counted only on days that are neither a weekend nor a company holiday, in the team's time zone. The median is the middle wait, or the mean of the two middle ones; the P85 is the smallest wait with at least 85% of the waits at or below it (nearest rank). Each clock is ranked on its own, from the waits before any rounding, so its figures need not come from the same pull requests as the other clock's. \"Pull requests\" is the number of pull requests with a wait counted in the sprint, the same for both clocks. A pull request that has no such event yet is not in the row: it has no wait, not a wait of zero, and a row with no pull request has no figure. The figures are recorded waits, not the effort a review took.\n")
             .Append("- A first code review is the first submitted review by someone other than the author: a comment-only review, a request for changes or an approval, also one dismissed later, made before the pull request closed. Reviews by the author, by automation and by the Ops group are not code reviews, and neither are ordinary comments. Who is in the Ops group is read when a review is first collected, so a review collected long after it was made is judged by the group as it was at that collection, not as it was when the review was made.\n")
             .Append("- A first code approval is the first approving review by someone other than the author, made before the pull request closed. When it is also the first review, it ends both waits. A comment-only review and a request for changes are code reviews and not approvals. An approval by the Ops group is kept apart and is never a code approval, and neither is one by the author or by automation. A review that had been dismissed before it was first collected does not say what it was: it is a code review and no approval, and since it may have been one, a pull request with such a review before its first known approval has no first code approval here. An approval that was collected and dismissed afterwards stays an approval. As for code reviews, the Ops group is the one read when a review is first collected: its members today, not those at the time of an older review.\n")
             .Append("- Pull request figures are not subject to the minimum group size: none is withheld for the number of people behind it, and none is reported per person.\n");
@@ -912,9 +935,14 @@ public static class SprintReport
     private sealed class PullRequestTimingRow
     {
         public string Measure { get; init; } = "";
+        /// <summary>1 for the view's row of waits counted in no sprint, 0 for the reported sprint's row.</summary>
+        public long InNoSprint { get; init; }
         public long SampleCount { get; init; }
         /// <summary>Null when no pull request has a wait for the measure in the sprint.</summary>
         public double? MedianElapsedDays { get; init; }
+        public double? P85ElapsedDays { get; init; }
+        public double? MedianBusinessDays { get; init; }
+        public double? P85BusinessDays { get; init; }
     }
 
     private sealed class DataQualityRow

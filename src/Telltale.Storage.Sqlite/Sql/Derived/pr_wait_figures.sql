@@ -1,19 +1,17 @@
 -- An internal view, read by pr_timing_per_sprint: one row per sprint and measure with at least one wait
--- counted in the sprint. The median is picked as duration_figures picks it: the middle value, or the mean of
--- the two middle values, by integer rank ((n + 1) / 2 and (n + 2) / 2).
+-- counted in the sprint, and one per measure with at least one wait counted in no sprint (sprint_id null).
+-- The median and the P85 are duration_figures' (how each is picked is said there, and nowhere else), for
+-- elapsed and for business days, which are ranked separately: the two clocks can order the same pull requests
+-- differently, so a figure in one need not come from the pull request behind the figure in the other. Every
+-- wait has both durations, so sample_count is the same for both clocks. The rows pool every host's waits.
 CREATE VIEW pr_wait_figures AS
-WITH ranked AS (
-    SELECT p.sprint_id,
-           p.measure,
-           p.elapsed_days,
-           ROW_NUMBER() OVER (PARTITION BY p.sprint_id, p.measure ORDER BY p.elapsed_days) AS rn,
-           COUNT(*)     OVER (PARTITION BY p.sprint_id, p.measure)                         AS n
-    FROM pr_wait p
-    WHERE p.sprint_id IS NOT NULL
-)
-SELECT r.sprint_id,
-       r.measure,
-       r.n AS sample_count,
-       AVG(CASE WHEN r.rn IN ((r.n + 1) / 2, (r.n + 2) / 2) THEN r.elapsed_days END) AS median_elapsed_days
-FROM ranked r
-GROUP BY r.sprint_id, r.measure;
+SELECT elapsed.sprint_id,
+       elapsed.pr_measure AS measure,
+       elapsed.sample_count,
+       elapsed.median_days  AS median_elapsed_days,
+       elapsed.p85_days     AS p85_elapsed_days,
+       business.median_days AS median_business_days,
+       business.p85_days    AS p85_business_days
+FROM duration_figures elapsed
+JOIN duration_figures business ON business.scope = 'sprint' AND business.measure = 'pr business' AND business.sprint_id IS elapsed.sprint_id AND business.pr_measure = elapsed.pr_measure
+WHERE elapsed.scope = 'sprint' AND elapsed.measure = 'pr elapsed';
