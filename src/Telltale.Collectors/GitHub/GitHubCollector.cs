@@ -57,12 +57,26 @@ public sealed class GitHubCollector : IPullRequestCollector
         github.AddHeader("User-Agent", "telltale");
         github.AddHeader("X-GitHub-Api-Version", "2022-11-28");
 
-        // The roster is read before any review is, so no review is classified without it: a roster that cannot
-        // be read fails the whole read, and is never taken for an empty one.
+        // The roster is read before any review is, so no review is classified without it. A roster that cannot
+        // be read is never taken for an empty one: no review is read at all then, since a review is classified
+        // once and keeps its class. The pull requests themselves are still read, because when one was opened
+        // and merged does not depend on who reviewed it; each is marked as written without its reviews, which
+        // has them asked for at the next sync and keeps the waits that rest on reviews from being stated.
         var opsMemberIds = new HashSet<long>();
+        var rosterRead = true;
         if (_settings.OpsTeam is { } opsTeam)
         {
-            await ForEachAsync(github, $"orgs/{opsTeam.Organization}/teams/{opsTeam.Slug}/members?per_page={PageSize}", "team members", member => opsMemberIds.Add(member.GetProperty("id").GetInt64()) || true, cancellationToken);
+            try
+            {
+                await ForEachAsync(github, $"orgs/{opsTeam.Organization}/teams/{opsTeam.Slug}/members?per_page={PageSize}", "team members", member => opsMemberIds.Add(member.GetProperty("id").GetInt64()) || true, cancellationToken);
+            }
+            catch (UserFacingException exception)
+            {
+                rosterRead = false;
+                await _notices.WriteLineAsync(
+                    $"GitHub: the members of the Ops team could not be read ({exception.Message}). "
+                    + "No review was read, and no first code review or first code approval figure is given for GitHub until a sync reads the team.");
+            }
         }
 
         var known = stored.PullRequests.Where(pullRequest => pullRequest.Host == Host).ToDictionary(pullRequest => (pullRequest.Repository, pullRequest.Number));
@@ -94,15 +108,20 @@ public sealed class GitHubCollector : IPullRequestCollector
                     // or last update differs. An open one that names no last update is asked for every time.
                     // The store holds a pull request only with the reviews read for the entry it holds, since
                     // a batch is written whole or not at all, so an entry that is as stored needs no request.
+                    // The exception is a row written while the roster could not be read: it says so itself.
                     known.TryGetValue((row.Repository, row.Number), out var before);
                     var readReviews = before is null || before.Merged != row.Merged || before.Closed != row.Closed || before.Updated != row.Updated
-                        || (row.Updated is null && row.Closed is null);
+                        || (row.Updated is null && row.Closed is null)
+                        || before.History != PullRequestHistoryStates.Read;
                     if (!readReviews && before == row)
                     {
                         return false;
                     }
 
-                    pullRequests[(row.Repository, row.Number)] = (row, authorId, readReviews);
+                    pullRequests[(row.Repository, row.Number)] = (
+                        readReviews && !rosterRead ? row with { History = PullRequestHistoryStates.NotRead } : row,
+                        authorId,
+                        readReviews && rosterRead);
                     return true;
                 },
                 cancellationToken,
@@ -134,7 +153,10 @@ public sealed class GitHubCollector : IPullRequestCollector
         return new PullRequestBatch(
             [.. pullRequests.Values.Select(pullRequest => pullRequest.Row)],
             events,
-            new RawPullRequestHost(Host, PullRequestHostStates.Read, _settings.OpsTeam is null ? PullRequestRosterStates.NotConfigured : PullRequestRosterStates.Read),
+            new RawPullRequestHost(
+                Host,
+                PullRequestHostStates.Read,
+                _settings.OpsTeam is null ? PullRequestRosterStates.NotConfigured : rosterRead ? PullRequestRosterStates.Read : PullRequestRosterStates.Failed),
             IdentityHash.SaltFingerprint(_salt));
     }
 

@@ -48,9 +48,47 @@ public sealed class FakePullRequest(FakeGitHub github, int number, FakeAccount? 
 
     public List<FakeReview> Reviews { get; } = [];
 
+    /// <summary>Whether the list says the pull request is a draft now.</summary>
+    public bool IsDraft { get; private set; }
+
+    /// <summary>The last change that is none of the opening, a submitted review, the merge or the close: a dismissal, a draft marked ready, a reopening. It moves <c>updated_at</c> too.</summary>
+    public DateTimeOffset? Touched { get; private set; }
+
     /// <summary>What the list gives as <c>updated_at</c>: the latest of the opening, the submitted reviews, the merge and the close, as GitHub moves it.</summary>
     public DateTimeOffset Updated =>
-        Reviews.Select(review => review.SubmittedAt).Append(MergedAt).Append(ClosedAt).Append(opened).OfType<DateTimeOffset>().Max();
+        Reviews.Select(review => review.SubmittedAt).Append(MergedAt).Append(ClosedAt).Append(Touched).Append(opened).OfType<DateTimeOffset>().Max();
+
+    /// <summary>
+    /// The last review is dismissed at <paramref name="at"/>: GitHub then gives its state as <c>DISMISSED</c>,
+    /// whatever it was, under the same ID and submission time, and moves the pull request's last update.
+    /// </summary>
+    public FakePullRequest LastReviewDismissed(DateTimeOffset at)
+    {
+        Reviews[^1] = Reviews[^1] with { State = "DISMISSED" };
+        Touched = at;
+        return this;
+    }
+
+    /// <summary>Opened as a draft: the list says so until <see cref="MarkedReady"/>.</summary>
+    public FakePullRequest AsDraft()
+    {
+        IsDraft = true;
+        return this;
+    }
+
+    /// <summary>A draft marked ready for review at <paramref name="at"/>. GitHub's <c>created_at</c> stays the first opening.</summary>
+    public FakePullRequest MarkedReady(DateTimeOffset at)
+    {
+        (IsDraft, Touched) = (false, at);
+        return this;
+    }
+
+    /// <summary>A closed pull request opened again at <paramref name="at"/>: it has no close time any more, and <c>created_at</c> stays the first opening.</summary>
+    public FakePullRequest Reopened(DateTimeOffset at)
+    {
+        (ClosedAt, Touched) = (null, at);
+        return this;
+    }
 
     public FakePullRequest Merged(DateTimeOffset at)
     {
@@ -202,7 +240,7 @@ public sealed class FakeGitHub
         ["body"] = $"Synthetic description of pull request {pullRequest.Number}",
         ["head"] = new JsonObject { ["ref"] = pullRequest.Branch },
         ["state"] = pullRequest.ClosedAt is null ? "open" : "closed",
-        ["draft"] = false,
+        ["draft"] = pullRequest.IsDraft,
         ["created_at"] = Time(pullRequest.Opened),
         ["updated_at"] = Time(pullRequest.Updated),
         ["closed_at"] = Time(pullRequest.ClosedAt),

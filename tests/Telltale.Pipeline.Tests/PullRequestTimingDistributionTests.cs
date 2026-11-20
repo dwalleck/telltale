@@ -60,6 +60,7 @@ public class PullRequestTimingDistributionTests
             | sprint_id | measure | sample_count | median_elapsed_days | p85_elapsed_days | median_business_days | p85_business_days |
             | --- | --- | --- | --- | --- | --- | --- |
             | 42 | first_code_review | 4 | 3.125 | 4.5 | 1.625 | 2.5 |
+            | 42 | first_code_approval | 1 | 2.5 | 2.5 | 2.5 | 2.5 |
             | 42 | merge | 1 | 2.5 | 2.5 | 0.5 | 0.5 |
 
             """.ReplaceLineEndings("\n"));
@@ -68,6 +69,7 @@ public class PullRequestTimingDistributionTests
         await Assert.That(await pipeline.ReadReportAsync(42)).Contains(
             TableHead
             + "| First code review | 4 | 3.1 | 4.5 | 1.6 | 2.5 |\n"
+            + "| First code approval | 1 | 2.5 | 2.5 | 2.5 | 2.5 |\n"
             + "| Merge | 1 | 2.5 | 2.5 | 0.5 | 0.5 |\n");
     }
 
@@ -95,12 +97,14 @@ public class PullRequestTimingDistributionTests
             | sprint_id | measure | sample_count | median_elapsed_days | p85_elapsed_days | median_business_days | p85_business_days |
             | --- | --- | --- | --- | --- | --- | --- |
             | 41 | first_code_review | 0 | NULL | NULL | NULL | NULL |
+            | 41 | first_code_approval | 0 | NULL | NULL | NULL | NULL |
             | 41 | merge | 7 | 2 | 3 | 2 | 3 |
 
             """.ReplaceLineEndings("\n"));
         await Assert.That(await pipeline.ReadReportAsync(41)).Contains(
             TableHead
             + "| First code review | 0 | none | none | none | none |\n"
+            + "| First code approval | 0 | none | none | none | none |\n"
             + "| Merge | 7 | 2.0 | 3.0 | 2.0 | 3.0 |\n");
     }
 
@@ -140,12 +144,16 @@ public class PullRequestTimingDistributionTests
             | sprint_id | measure | sample_count | median_elapsed_days | p85_elapsed_days | median_business_days | p85_business_days |
             | --- | --- | --- | --- | --- | --- | --- |
             | 41 | first_code_review | 0 | NULL | NULL | NULL | NULL |
+            | 41 | first_code_approval | 0 | NULL | NULL | NULL | NULL |
             | 41 | merge | 1 | 1 | 1 | 1 | 1 |
             | 42 | first_code_review | 0 | NULL | NULL | NULL | NULL |
+            | 42 | first_code_approval | 0 | NULL | NULL | NULL | NULL |
             | 42 | merge | 1 | 21 | 21 | 15 | 15 |
             | 43 | first_code_review | 0 | NULL | NULL | NULL | NULL |
+            | 43 | first_code_approval | 0 | NULL | NULL | NULL | NULL |
             | 43 | merge | 1 | 1 | 1 | 0.5 | 0.5 |
             | NULL | first_code_review | 0 | NULL | NULL | NULL | NULL |
+            | NULL | first_code_approval | 0 | NULL | NULL | NULL | NULL |
             | NULL | merge | 2 | 1.5 | 2 | 1.5 | 2 |
 
             """.ReplaceLineEndings("\n"));
@@ -154,6 +162,7 @@ public class PullRequestTimingDistributionTests
         await Assert.That(await pipeline.ReadReportAsync(42)).Contains(
             TableHead
             + "| First code review | 0 | none | none | none | none |\n"
+            + "| First code approval | 0 | none | none | none | none |\n"
             + "| Merge | 1 | 21.0 | 21.0 | 15.0 | 15.0 |\n"
             + "\nIn no sprint's row, of everything collected, because the event fell between sprint windows or in more than one: Merge 2.\n"
             + "\n- These are");
@@ -180,16 +189,19 @@ public class PullRequestTimingDistributionTests
             | sprint_id | measure | sample_count | median_elapsed_days | p85_elapsed_days | median_business_days | p85_business_days |
             | --- | --- | --- | --- | --- | --- | --- |
             | 42 | first_code_review | 0 | NULL | NULL | NULL | NULL |
+            | 42 | first_code_approval | 0 | NULL | NULL | NULL | NULL |
             | 42 | merge | 0 | NULL | NULL | NULL | NULL |
             | sprint_id | measure | sample_count | median_elapsed_days | p85_elapsed_days | median_business_days | p85_business_days |
             | --- | --- | --- | --- | --- | --- | --- |
             | NULL | first_code_review | 0 | NULL | NULL | NULL | NULL |
+            | NULL | first_code_approval | 0 | NULL | NULL | NULL | NULL |
             | NULL | merge | 0 | NULL | NULL | NULL | NULL |
 
             """.ReplaceLineEndings("\n"));
         await Assert.That(await pipeline.ReadReportAsync(42)).Contains(
             TableHead
             + "| First code review | 0 | none | none | none | none |\n"
+            + "| First code approval | 0 | none | none | none | none |\n"
             + "| Merge | 0 | none | none | none | none |\n"
             + "\n- These are");
 
@@ -203,6 +215,7 @@ public class PullRequestTimingDistributionTests
             | sprint_id | measure | sample_count | median_elapsed_days | p85_elapsed_days | median_business_days | p85_business_days |
             | --- | --- | --- | --- | --- | --- | --- |
             | 42 | first_code_review | 1 | 1 | 1 | 1 | 1 |
+            | 42 | first_code_approval | 0 | NULL | NULL | NULL | NULL |
             | 42 | merge | 1 | 1.25 | 1.25 | 1.25 | 1.25 |
 
             """.ReplaceLineEndings("\n"));

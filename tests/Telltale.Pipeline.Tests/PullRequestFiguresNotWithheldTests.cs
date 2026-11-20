@@ -35,7 +35,7 @@ public class PullRequestFiguresNotWithheldTests
         await Assert.That(report).Contains("\nDelivered issues: suppressed\n\n## Cycle time by point bucket\n\nsuppressed\n\n## Time in status\n\nsuppressed\n");
         await Assert.That(report).Contains(
             "\n## Pull request timing\n\n| Wait from opening to | Pull requests | Median (elapsed days) | P85 (elapsed days) | Median (business days) | P85 (business days) |\n| --- | ---: | ---: | ---: | ---: | ---: |\n"
-            + "| First code review | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n| Merge | 0 | none | none | none | none |\n\n- These are");
+            + "| First code review | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n| First code approval | 0 | none | none | none | none |\n| Merge | 0 | none | none | none | none |\n\n- These are");
         await Assert.That(report).Contains("- Pull request figures are not subject to the minimum group size: none is withheld for the number of people behind it, and none is reported per person.\n");
     }
 
@@ -52,9 +52,11 @@ public class PullRequestFiguresNotWithheldTests
             | sprint_id | measure | measure_position | sample_count | median_elapsed_days | p85_elapsed_days | median_business_days | p85_business_days |
             | --- | --- | --- | --- | --- | --- | --- | --- |
             | NULL | first_code_review | 1 | 0 | NULL | NULL | NULL | NULL |
-            | NULL | merge | 2 | 0 | NULL | NULL | NULL | NULL |
+            | NULL | first_code_approval | 2 | 0 | NULL | NULL | NULL | NULL |
+            | NULL | merge | 3 | 0 | NULL | NULL | NULL | NULL |
             | 41 | first_code_review | 1 | 1 | 2 | 2 | 2 | 2 |
-            | 41 | merge | 2 | 0 | NULL | NULL | NULL | NULL |
+            | 41 | first_code_approval | 2 | 0 | NULL | NULL | NULL | NULL |
+            | 41 | merge | 3 | 0 | NULL | NULL | NULL | NULL |
             | sprint_id | delivered_count | suppressed |
             | --- | --- | --- |
             | 41 | NULL | 1 |
