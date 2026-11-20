@@ -40,4 +40,31 @@ public static class GitHubReviewRules
 
         return null;
     }
+
+    /// <summary>
+    /// The first code approval (GLOSSARY: Time to first code approval): the earliest approving review by a
+    /// person who is neither the author nor in the Ops group, made while the pull request was not yet closed.
+    /// It can be the first code review as well, and then ends both waits at the same moment. A comment-only
+    /// review and a request for changes are reviews and not approvals, whoever made them, and are passed over,
+    /// as are all reviews by the author, automation and the Ops group: an approval by the Ops group is kept as
+    /// its own class and is never a code approval.
+    /// </summary>
+    /// <param name="events">The pull request's events, earliest first.</param>
+    public static DateTimeOffset? FirstCodeApproval(RawPullRequest pullRequest, IReadOnlyList<RawPullRequestEvent> events)
+    {
+        foreach (var review in events.Where(happened => happened.Kind == PullRequestEventKinds.Review))
+        {
+            if (pullRequest.Closed is { } closed && review.At > closed)
+            {
+                return null;
+            }
+
+            if (review is { Actor: PullRequestEventActors.Human, Outcome: PullRequestEventOutcomes.Approved })
+            {
+                return review.At;
+            }
+        }
+
+        return null;
+    }
 }

@@ -373,6 +373,7 @@ public static class SprintReport
     private static readonly IReadOnlyDictionary<string, string> PullRequestMeasureLabels = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         [PullRequestTiming.FirstCodeReview] = "First code review",
+        [PullRequestTiming.FirstCodeApproval] = "First code approval",
         [PullRequestTiming.Merge] = "Merge",
     };
 

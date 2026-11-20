@@ -22,11 +22,24 @@ public static class PullRequestTiming
     /// <summary>The wait from opening to the first code review (GLOSSARY: Time to first code review).</summary>
     public const string FirstCodeReview = "first_code_review";
 
+    /// <summary>The wait from opening to the first code approval (GLOSSARY: Time to first code approval).</summary>
+    public const string FirstCodeApproval = "first_code_approval";
+
     /// <summary>The wait from opening to the merge.</summary>
     public const string Merge = "merge";
 
     /// <summary>The measures, in the order a report lists them.</summary>
-    public static IReadOnlyList<string> Measures { get; } = [FirstCodeReview, Merge];
+    public static IReadOnlyList<string> Measures { get; } = [FirstCodeReview, FirstCodeApproval, Merge];
+
+    /// <summary>
+    /// Each host's rule for the event that ends the wait for the first code approval: null when the pull
+    /// request has none that can be relied on. A host is added by its entry here.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, Func<RawPullRequest, IReadOnlyList<RawPullRequestEvent>, DateTimeOffset?>> FirstCodeApprovalBy =
+        new Dictionary<string, Func<RawPullRequest, IReadOnlyList<RawPullRequestEvent>, DateTimeOffset?>>(StringComparer.Ordinal)
+        {
+            [PullRequestHosts.GitHub] = GitHubReviewRules.FirstCodeApproval,
+        };
 
     /// <summary>
     /// Each host's rule for the event that ends the wait for the first code review: null when the pull request
@@ -95,6 +108,7 @@ public static class PullRequestTiming
     private static DateTimeOffset? EndOf(string measure, RawPullRequest pullRequest, IReadOnlyList<RawPullRequestEvent> events) => measure switch
     {
         FirstCodeReview => FirstCodeReviewBy.TryGetValue(pullRequest.Host, out var rule) ? rule(pullRequest, events) : null,
+        FirstCodeApproval => FirstCodeApprovalBy.TryGetValue(pullRequest.Host, out var rule) ? rule(pullRequest, events) : null,
 
         // The host's collector says what a merge is: a pull request closed without one has no merge time.
         Merge => pullRequest.Merged,
