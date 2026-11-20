@@ -152,6 +152,8 @@ public class OptionalSuppressionTests
     [Arguments("data_quality")]
     [Arguments("delivered_per_sprint")]
     [Arguments("minimum_group_size")]
+    [Arguments("pr_timing_per_sprint")]
+    [Arguments("pr_without_review_per_sprint")]
     [Arguments("sprint_team")]
     [Arguments("time_in_status_per_sprint")]
     public async Task A_metric_view_has_the_same_columns_with_both_numbers_zero_as_with_the_default_numbers(string view)

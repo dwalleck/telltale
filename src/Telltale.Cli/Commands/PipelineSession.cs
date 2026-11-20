@@ -36,6 +36,17 @@ internal sealed class PipelineSession : IDisposable
         if (needsJira)
         {
             secrets = await CollectionSecrets.ReadAsync(services.Secrets, services.StoreHoldsHashedPeopleAsync, cancellationToken);
+
+            // A pull request host's token is asked for only when the host is configured. One line per host.
+            if (settings.GitHub is not null)
+            {
+                secrets = secrets.WithGitHubToken(services.Secrets);
+            }
+
+            if (settings.Ado is not null)
+            {
+                secrets = secrets.WithAdoToken(services.Secrets);
+            }
         }
         else if (!File.Exists(services.DatabasePath))
         {

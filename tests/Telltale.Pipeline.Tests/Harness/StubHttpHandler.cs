@@ -5,8 +5,15 @@ using System.Web;
 
 namespace Telltale.Pipeline.Tests.Harness;
 
-/// <summary>What a route sees: method, path, parsed query and the body already read as text.</summary>
-public sealed record StubRequest(HttpMethod Method, string Path, IReadOnlyDictionary<string, string> Query, string Body, HttpRequestHeaders Headers);
+/// <summary>
+/// What a route sees: method, path, parsed query and the body already read as text. <see cref="Address"/> is
+/// where the request was sent, scheme and authority (<c>https://host</c>): a route does not match on it, so a
+/// test that claims a request went to the configured host asserts it.
+/// </summary>
+public sealed record StubRequest(HttpMethod Method, string Path, IReadOnlyDictionary<string, string> Query, string Body, HttpRequestHeaders Headers)
+{
+    public string Address { get; init; } = "";
+}
 
 /// <summary>
 /// Fake HTTP server. Routes match on method and path, plus an optional predicate over the query and
@@ -114,7 +121,7 @@ public sealed class StubHttpHandler : HttpMessageHandler
         var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(cancellationToken);
         var parsed = HttpUtility.ParseQueryString(request.RequestUri!.Query);
         var query = parsed.AllKeys.Where(key => key is not null).ToDictionary(key => key!, key => parsed[key]!);
-        var stub = new StubRequest(request.Method, request.RequestUri.AbsolutePath, query, body, request.Headers);
+        var stub = new StubRequest(request.Method, request.RequestUri.AbsolutePath, query, body, request.Headers) { Address = request.RequestUri.GetLeftPart(UriPartial.Authority) };
 
         Func<StubRequest, HttpResponseMessage> respond;
         lock (_gate)

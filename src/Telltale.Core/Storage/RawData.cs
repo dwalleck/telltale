@@ -71,7 +71,20 @@ public sealed record RawData(
     IReadOnlyList<RawIssue> Issues,
     IReadOnlyList<RawChange> Changes,
     IReadOnlyList<RawSprint> Sprints,
-    IReadOnlyList<RawStatus> Statuses);
+    IReadOnlyList<RawStatus> Statuses)
+{
+    /// <summary>The pull requests of every host. A Jira batch carries none: they are written by <see cref="PullRequestBatch"/>.</summary>
+    public IReadOnlyList<RawPullRequest> PullRequests { get; init; } = [];
+
+    /// <summary>The classified events of the pull requests.</summary>
+    public IReadOnlyList<RawPullRequestEvent> PullRequestEvents { get; init; } = [];
+
+    /// <summary>The closings of pull requests that the store saw and that no longer stand: each was reopened since.</summary>
+    public IReadOnlyList<RawPullRequestPastClosure> PullRequestPastClosures { get; init; } = [];
+
+    /// <summary>What the last collection from each pull request host came to.</summary>
+    public IReadOnlyList<RawPullRequestHost> PullRequestHosts { get; init; } = [];
+}
 
 /// <summary>
 /// One write to the raw tables: the rows a collector fetched and everything the store must do with them in

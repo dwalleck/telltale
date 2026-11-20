@@ -1,0 +1,331 @@
+using System.Globalization;
+using System.Net;
+using System.Text;
+using System.Text.Json.Nodes;
+
+namespace Telltale.Pipeline.Tests.Harness;
+
+/// <summary>A synthetic GitHub account. Its ID and login may never reach the database, a report or a log.</summary>
+public sealed record FakeAccount(long Id, string Login, string Type = "User");
+
+/// <summary>Synthetic GitHub accounts: invented people, an Ops member and a bot.</summary>
+public static class Accounts
+{
+    public static readonly FakeAccount AuthorOne = new(70000001, "fake-author-one");
+    public static readonly FakeAccount AuthorTwo = new(70000002, "fake-author-two");
+    public static readonly FakeAccount AuthorThree = new(70000003, "fake-author-three");
+    public static readonly FakeAccount AuthorFour = new(70000004, "fake-author-four");
+    public static readonly FakeAccount AuthorFive = new(70000005, "fake-author-five");
+    public static readonly FakeAccount Reviewer = new(70000011, "fake-reviewer-one");
+    public static readonly FakeAccount OpsMember = new(70000021, "fake-ops-one");
+    public static readonly FakeAccount Bot = new(70000031, "fake-checks[bot]", "Bot");
+
+    /// <summary>Five authors: as many as the default team.</summary>
+    public static IReadOnlyList<FakeAccount> Authors { get; } = [AuthorOne, AuthorTwo, AuthorThree, AuthorFour, AuthorFive];
+
+    public static IReadOnlyList<FakeAccount> All { get; } = [.. Authors, Reviewer, OpsMember, Bot];
+}
+
+/// <summary>One review of a synthetic pull request. <see cref="SubmittedAt"/> is null for a pending review.</summary>
+public sealed record FakeReview(long Id, FakeAccount? By, string State, DateTimeOffset? SubmittedAt, string Body);
+
+/// <summary>A synthetic pull request, built fluently. Its title, branch and review bodies are text that may never be stored.</summary>
+public sealed class FakePullRequest(FakeGitHub github, int number, FakeAccount? author, DateTimeOffset opened)
+{
+    public int Number => number;
+
+    public FakeAccount? Author => author;
+
+    public DateTimeOffset Opened => opened;
+
+    public DateTimeOffset? MergedAt { get; private set; }
+
+    public DateTimeOffset? ClosedAt { get; private set; }
+
+    public string Title => $"Synthetic title of pull request {number} that must never be stored";
+
+    public string Branch => $"fake-branch-{number}-that-must-never-be-stored";
+
+    public List<FakeReview> Reviews { get; } = [];
+
+    /// <summary>
+    /// What the issue events of the pull request say of its closings: <c>closed</c>, <c>reopened</c> and
+    /// <c>merged</c>, each with its time, in the order they happened. The list of pull requests says none of this.
+    /// </summary>
+    public List<(string Event, DateTimeOffset At)> IssueEvents { get; } = [];
+
+    /// <summary>Whether the list says the pull request is a draft now.</summary>
+    public bool IsDraft { get; private set; }
+
+    /// <summary>The last change that is none of the opening, a submitted review, the merge or the close: a dismissal, a draft marked ready, a reopening. It moves <c>updated_at</c> too.</summary>
+    public DateTimeOffset? Touched { get; private set; }
+
+    /// <summary>What the list gives as <c>updated_at</c>: the latest of the opening, the submitted reviews, the merge and the close, as GitHub moves it.</summary>
+    public DateTimeOffset Updated =>
+        Reviews.Select(review => review.SubmittedAt).Append(MergedAt).Append(ClosedAt).Append(Touched).Append(opened).OfType<DateTimeOffset>().Max();
+
+    /// <summary>
+    /// The last review is dismissed at <paramref name="at"/>: GitHub then gives its state as <c>DISMISSED</c>,
+    /// whatever it was, under the same ID and submission time, and moves the pull request's last update.
+    /// </summary>
+    public FakePullRequest LastReviewDismissed(DateTimeOffset at)
+    {
+        Reviews[^1] = Reviews[^1] with { State = "DISMISSED" };
+        Touched = at;
+        return this;
+    }
+
+    /// <summary>Opened as a draft: the list says so until <see cref="MarkedReady"/>.</summary>
+    public FakePullRequest AsDraft()
+    {
+        IsDraft = true;
+        return this;
+    }
+
+    /// <summary>A draft marked ready for review at <paramref name="at"/>. GitHub's <c>created_at</c> stays the first opening.</summary>
+    public FakePullRequest MarkedReady(DateTimeOffset at)
+    {
+        (IsDraft, Touched) = (false, at);
+        return this;
+    }
+
+    /// <summary>A closed pull request opened again at <paramref name="at"/>: it has no close time any more, and <c>created_at</c> stays the first opening.</summary>
+    public FakePullRequest Reopened(DateTimeOffset at)
+    {
+        (ClosedAt, Touched) = (null, at);
+        IssueEvents.Add(("reopened", at));
+        return this;
+    }
+
+    public FakePullRequest Merged(DateTimeOffset at)
+    {
+        (MergedAt, ClosedAt) = (at, at);
+        IssueEvents.Add(("merged", at));
+        IssueEvents.Add(("closed", at));
+        return this;
+    }
+
+    /// <summary>Closed without a merge.</summary>
+    public FakePullRequest Closed(DateTimeOffset at)
+    {
+        ClosedAt = at;
+        IssueEvents.Add(("closed", at));
+        return this;
+    }
+
+    /// <summary>A submitted review: <paramref name="state"/> is GitHub's (<c>APPROVED</c>, <c>COMMENTED</c>, <c>CHANGES_REQUESTED</c>, <c>DISMISSED</c>).</summary>
+    public FakePullRequest Reviewed(FakeAccount? by, string state, DateTimeOffset at)
+    {
+        var id = github.NextReviewId();
+        Reviews.Add(new FakeReview(id, by, state, at, $"Synthetic body of review {id} that must never be stored"));
+        return this;
+    }
+
+    /// <summary>A review that was started and not submitted: it has no submission time.</summary>
+    public FakePullRequest ReviewPending(FakeAccount by)
+    {
+        var id = github.NextReviewId();
+        Reviews.Add(new FakeReview(id, by, "PENDING", null, $"Synthetic body of review {id} that must never be stored"));
+        return this;
+    }
+}
+
+/// <summary>
+/// A synthetic GitHub behind the harness's HTTP stub: one repository's pull requests and their reviews, and
+/// the Ops team's members, served as GitHub's REST API serves them, page by page with a <c>Link</c> header.
+/// It answers under an Enterprise Server address, with the path prefix such a host has. Nothing here names a
+/// real repository or person. Make one with <see cref="For"/>, which also writes the <c>github</c> setting.
+/// </summary>
+public sealed class FakeGitHub
+{
+    /// <summary>The API address in the configuration: an Enterprise Server's shape, on a name that cannot resolve.</summary>
+    public const string ApiUrl = "https://github.example.invalid/api/v3/";
+
+    public const string Repository = "fake-org/fake-sample";
+    public const string OpsTeam = "fake-org/fake-ops";
+
+    private const string Prefix = "/api/v3";
+    private const string PullsPath = Prefix + "/repos/" + Repository + "/pulls";
+    private const string MembersPath = Prefix + "/orgs/fake-org/teams/fake-ops/members";
+
+    private readonly StubHttpHandler _handler;
+    private long _reviewId = 880000;
+
+    private FakeGitHub(StubHttpHandler handler)
+    {
+        _handler = handler;
+        handler.On(HttpMethod.Get, PullsPath, request => Page(request, Sorted(request).Where(pullRequest => !NotGivenByTheList.Contains(pullRequest.Number)).Select(PullRequestJson)));
+        handler.On(HttpMethod.Get, MembersPath, request => Page(request, OpsMembers.Select(AccountJson)));
+    }
+
+    /// <summary>A synthetic GitHub on the harness's stub, and the <c>github</c> setting that points the run at it.</summary>
+    public static FakeGitHub For(PipelineHarness pipeline)
+    {
+        pipeline.Config["github"] = new JsonObject
+        {
+            ["apiUrl"] = ApiUrl,
+            ["repositories"] = new JsonArray(Repository),
+            ["opsTeam"] = OpsTeam,
+        };
+        return new FakeGitHub(pipeline.Jira.Handler);
+    }
+
+    public List<FakePullRequest> PullRequests { get; } = [];
+
+    /// <summary>The Ops team's members as the next sync reads them.</summary>
+    public List<FakeAccount> OpsMembers { get; } = [Accounts.OpsMember];
+
+    /// <summary>
+    /// The numbers of the pull requests the list does not give, as happens to one that changes while the
+    /// list is read and moves to a page already given. Each still answers for itself and for its reviews.
+    /// </summary>
+    public HashSet<int> NotGivenByTheList { get; } = [];
+
+    /// <summary>The numbers of the pull requests asked for one by one (<c>pulls/{number}</c>), in the order asked.</summary>
+    public IReadOnlyList<int> AskedForSingly =>
+        [.. Requests.Select(request => request.Path)
+            .Where(path => path.StartsWith(PullsPath + "/", StringComparison.Ordinal) && path[(PullsPath.Length + 1)..].All(char.IsAsciiDigit))
+            .Select(path => int.Parse(path[(PullsPath.Length + 1)..], CultureInfo.InvariantCulture))];
+
+    /// <summary>The path of the pull request with this number by itself: what a test overrides to make it unreadable.</summary>
+    public static string PullRequestPath(int number) => $"{PullsPath}/{number}";
+
+    /// <summary>The most rows any list gives per page, whatever the request asks for.</summary>
+    public int PageSize { get; set; } = 100;
+
+    /// <summary>Every request that reached this host, as path and query.</summary>
+    public IReadOnlyList<StubRequest> Requests => [.. _handler.Requests.Where(request => request.Path.StartsWith(Prefix + "/", StringComparison.Ordinal))];
+
+    /// <summary>The requests for the list of pull requests, by the page each asked for.</summary>
+    public IReadOnlyList<string> PullRequestPagesAsked => [.. Requests.Where(request => request.Path == PullsPath).Select(request => request.Query.GetValueOrDefault("page", "1"))];
+
+    /// <summary>The numbers of the pull requests whose reviews were asked for, in the order asked.</summary>
+    public IReadOnlyList<int> ReviewsAskedFor =>
+        [.. Requests.Where(request => request.Path.EndsWith("/reviews", StringComparison.Ordinal)).Select(request => int.Parse(request.Path.Split('/')[^2], CultureInfo.InvariantCulture))];
+
+    /// <summary>Text this host serves that may never be written anywhere: logins, account IDs, titles, branch names and review bodies.</summary>
+    public IReadOnlyList<string> ForbiddenText =>
+    [
+        .. Accounts.All.SelectMany(account => new[] { account.Login, account.Id.ToString(CultureInfo.InvariantCulture) }),
+        .. PullRequests.SelectMany(pullRequest => new[] { pullRequest.Title, pullRequest.Branch }),
+        .. PullRequests.SelectMany(pullRequest => pullRequest.Reviews.Select(review => review.Body)),
+    ];
+
+    public FakePullRequest AddPullRequest(int number, FakeAccount? author, DateTimeOffset opened)
+    {
+        var pullRequest = new FakePullRequest(this, number, author, opened);
+        PullRequests.Add(pullRequest);
+
+        // The reviews are those of the pull request that has the number when they are asked for: a test that
+        // empties PullRequests and adds the number again is another server's pull request with that number.
+        _handler.On(HttpMethod.Get, $"{PullsPath}/{number}/reviews", request => Page(request, PullRequests.Last(listed => listed.Number == number).Reviews.Select(ReviewJson)));
+
+        // The pull request by itself: the same fields as its entry in the list.
+        _handler.On(HttpMethod.Get, PullRequestPath(number), _ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(PullRequestJson(PullRequests.Last(listed => listed.Number == number)).ToJsonString(), Encoding.UTF8, "application/json"),
+        });
+
+        // The issue events, as GitHub's REST documentation gives them: besides the closings, a label event,
+        // which the tool has no use for, and with each event the account that caused it.
+        _handler.On(HttpMethod.Get, IssueEventsPath(number), request =>
+        {
+            var current = PullRequests.Last(listed => listed.Number == number);
+            return Page(request, current.IssueEvents.Select((happened, index) => IssueEventJson(happened.Event, happened.At, 990000 + (number * 100) + index, current.Author))
+                .Prepend(IssueEventJson("labeled", current.Opened, 990000 + (number * 100) + 99, current.Author)));
+        });
+        return pullRequest;
+    }
+
+    /// <summary>The path of the issue events of the pull request with this number: what a test overrides to make them unreadable.</summary>
+    public static string IssueEventsPath(int number) => $"{Prefix}/repos/{Repository}/issues/{number}/events";
+
+    /// <summary>The numbers of the pull requests whose issue events were asked for, in the order asked, once for each request.</summary>
+    public IReadOnlyList<int> IssueEventsAskedFor =>
+        [.. Requests.Where(request => request.Path.EndsWith("/events", StringComparison.Ordinal)).Select(request => int.Parse(request.Path.Split('/')[^2], CultureInfo.InvariantCulture))];
+
+    internal long NextReviewId() => ++_reviewId;
+
+    private static JsonObject IssueEventJson(string happened, DateTimeOffset at, long id, FakeAccount? actor) => new()
+    {
+        ["id"] = id,
+        ["event"] = happened,
+        ["actor"] = actor is null ? null : AccountJson(actor),
+        ["commit_id"] = null,
+        ["created_at"] = Time(at),
+    };
+
+    /// <summary>The pull requests in the order the request asks for: by last update when it says <c>sort=updated</c>, by number otherwise, in its direction.</summary>
+    private IEnumerable<FakePullRequest> Sorted(StubRequest request)
+    {
+        var ascending = request.Query.GetValueOrDefault("sort") == "updated"
+            ? PullRequests.OrderBy(pullRequest => pullRequest.Updated).ThenBy(pullRequest => pullRequest.Number)
+            : PullRequests.OrderBy(pullRequest => pullRequest.Number);
+        return request.Query.GetValueOrDefault("direction") == "asc" ? ascending : ascending.Reverse();
+    }
+
+    /// <summary>One page of a list, with GitHub's <c>Link</c> header naming the next page while there is one.</summary>
+    private HttpResponseMessage Page(StubRequest request, IEnumerable<JsonObject> rows)
+    {
+        var all = rows.ToList();
+        var page = int.Parse(request.Query.GetValueOrDefault("page", "1"), CultureInfo.InvariantCulture);
+        var size = Math.Min(PageSize, int.Parse(request.Query.GetValueOrDefault("per_page", "30"), CultureInfo.InvariantCulture));
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(new JsonArray([.. all.Skip((page - 1) * size).Take(size)]).ToJsonString(), Encoding.UTF8, "application/json"),
+        };
+        if (page * size < all.Count)
+        {
+            var query = string.Join("&", request.Query.Where(pair => pair.Key != "page").Select(pair => $"{pair.Key}={Uri.EscapeDataString(pair.Value)}").Append($"page={page + 1}"));
+            response.Headers.TryAddWithoutValidation("Link", $"<https://github.example.invalid{request.Path}?{query}>; rel=\"next\", <https://github.example.invalid{request.Path}?{query}>; rel=\"last\"");
+        }
+
+        return response;
+    }
+
+    private static JsonObject AccountJson(FakeAccount account) => new()
+    {
+        ["id"] = account.Id,
+        ["login"] = account.Login,
+        ["type"] = account.Type,
+        ["html_url"] = $"https://github.example.invalid/{account.Login}",
+    };
+
+    private static JsonObject PullRequestJson(FakePullRequest pullRequest) => new()
+    {
+        ["number"] = pullRequest.Number,
+        ["user"] = pullRequest.Author is { } author ? AccountJson(author) : null,
+        ["title"] = pullRequest.Title,
+        ["body"] = $"Synthetic description of pull request {pullRequest.Number}",
+        ["head"] = new JsonObject { ["ref"] = pullRequest.Branch },
+        ["state"] = pullRequest.ClosedAt is null ? "open" : "closed",
+        ["draft"] = pullRequest.IsDraft,
+        ["created_at"] = Time(pullRequest.Opened),
+        ["updated_at"] = Time(pullRequest.Updated),
+        ["closed_at"] = Time(pullRequest.ClosedAt),
+        ["merged_at"] = Time(pullRequest.MergedAt),
+    };
+
+    private static JsonObject ReviewJson(FakeReview review)
+    {
+        var json = new JsonObject
+        {
+            ["id"] = review.Id,
+            ["user"] = review.By is { } by ? AccountJson(by) : null,
+            ["state"] = review.State,
+            ["body"] = review.Body,
+        };
+
+        // GitHub leaves the submission time out of a pending review.
+        if (review.SubmittedAt is { } at)
+        {
+            json["submitted_at"] = Time(at);
+        }
+
+        return json;
+    }
+
+    /// <summary>A time as GitHub writes it: UTC, to the second.</summary>
+    private static JsonNode? Time(DateTimeOffset? value) =>
+        value is { } time ? JsonValue.Create(time.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture)) : null;
+}

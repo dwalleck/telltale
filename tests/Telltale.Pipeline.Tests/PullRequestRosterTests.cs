@@ -1,0 +1,220 @@
+using System.Net;
+using Telltale.Pipeline.Tests.Harness;
+using static Telltale.Pipeline.Tests.Harness.Scenarios;
+using static Telltale.Tests.Shared.TeamTime;
+
+namespace Telltale.Pipeline.Tests;
+
+/// <summary>
+/// The Ops group's members cannot be read (PR timing, ticket 04): the roster is not taken for an empty one, so
+/// no review is classified, the figures that rest on reviews are not given, and the merge figure, which does
+/// not, still is. The synthetic host is <see cref="FakeGitHub"/>; sprint 42 runs from Monday 19 January to
+/// Monday 2 February 2026.
+/// </summary>
+public class PullRequestRosterTests
+{
+    private const string Figures = "SELECT sprint_id, measure, sample_count, median_elapsed_days FROM pr_timing_per_sprint WHERE sample_count > 0 AND sprint_id IS NOT NULL ORDER BY sprint_id, measure_position";
+    private const string Measures = "SELECT DISTINCT measure || ': ' || coverage || ', ' || COALESCE(sample_count, 'no count') FROM pr_timing_per_sprint WHERE sprint_id = '42' ORDER BY measure_position";
+    private const string HostState = "SELECT state || ', roster ' || roster FROM pull_request_host WHERE host = 'github'";
+    private const string MembersPath = "/api/v3/orgs/fake-org/teams/fake-ops/members";
+
+    private const string NotShown =
+        "- Not shown: First code review, First code approval. The members of the Ops group could not be read at a collection of the pull requests, so reviews by the group could not be told apart from code reviews, and the reviews of the pull requests collected then were not read and have not been read since. These waits are given for no sprint until a collection reads those reviews, which takes the group's members; nothing here says that no pull request was reviewed or approved. A merge does not depend on who reviewed, and is shown.\n";
+
+    private static async Task<(string, string, long, double)[]> FiguresAsync(PipelineHarness pipeline) =>
+        [.. await pipeline.QueryAsync<(string, string, long, double)>(Figures)];
+
+    /// <summary>The roster's address answers 403 until the returned action is called.</summary>
+    private static Action RefuseTheRoster(PipelineHarness pipeline)
+    {
+        var refused = true;
+        pipeline.Jira.Handler.Override(HttpMethod.Get, MembersPath, _ => refused, StubHttpHandler.Json("""{"message":"Synthetic refusal naming fake-ops-one"}""", HttpStatusCode.Forbidden));
+        return () => refused = false;
+    }
+
+    [Test]
+    public async Task With_a_roster_that_cannot_be_read_the_run_goes_on_and_gives_the_merge_figure_and_neither_review_figure()
+    {
+        await using var pipeline = SuppressionOff();
+        pipeline.Jira.AddSprints41And42();
+        var github = FakeGitHub.For(pipeline);
+        github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 20, 12))
+            .Reviewed(Accounts.OpsMember, "APPROVED", Local(2026, 1, 20, 13))
+            .Reviewed(Accounts.Reviewer, "APPROVED", Local(2026, 1, 21, 12))
+            .Merged(Local(2026, 1, 22, 12));
+        var readable = RefuseTheRoster(pipeline);
+
+        var exit = await pipeline.RunAsync("run", "--sprint", "42");
+
+        // The command goes on, says what it could not read, and the store records it.
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).Contains(
+            "GitHub: the members of the Ops team could not be read (GitHub answered 403 (Forbidden) to GET orgs/fake-org/teams/fake-ops/members?per_page=100.). "
+            + "No review was read, and no first code review or first code approval figure is given for GitHub until a sync reads the team.\n");
+        await Assert.That((await pipeline.QueryAsync<string>(HostState)).ToArray()).IsEquivalentTo(new[] { "read, roster failed" });
+
+        // No review is asked for: without the roster it could not be classified, and a class is never changed.
+        await Assert.That(github.ReviewsAskedFor).IsEmpty();
+
+        // The review measures' rows say that the reviews were not read and have no count: not a count of zero. The merge is known and counted.
+        await Assert.That((await pipeline.QueryAsync<string>(Measures)).ToArray()).IsEquivalentTo(new[] { "first_code_review: reviews not read, no count", "first_code_approval: reviews not read, no count", "merge: read, 1" });
+        await Assert.That(await FiguresAsync(pipeline)).IsEquivalentTo(new[] { ("42", "merge", 1L, 2d) });
+        var report = await pipeline.ReadReportAsync(42);
+        await Assert.That(report).Contains("| P85 (business days) |\n| --- | ---: | ---: | ---: | ---: | ---: |\n| Merge | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n\n" + NotShown + "- These are");
+        await Assert.That(report).DoesNotContain("| First code");
+
+        // Once the roster can be read, the reviews are asked for although the list entry is as it was, and
+        // each is classified by the roster read then: the Ops approval is none, the reviewer's is.
+        readable();
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+
+        await Assert.That(github.ReviewsAskedFor).IsEquivalentTo(new[] { 1 });
+        await Assert.That((await pipeline.QueryAsync<string>(HostState)).ToArray()).IsEquivalentTo(new[] { "read, roster read" });
+        await Assert.That(await FiguresAsync(pipeline)).IsEquivalentTo(new[] { ("42", "first_code_review", 1L, 1d), ("42", "first_code_approval", 1L, 1d), ("42", "merge", 1L, 2d) });
+        await Assert.That(await pipeline.ReadReportAsync(42)).DoesNotContain("Not shown");
+    }
+
+    [Test]
+    public async Task The_notice_of_a_roster_that_cannot_be_understood_does_not_say_that_nothing_was_stored()
+    {
+        // The pull request is stored, without its reviews: the notice must not repeat the failure's own
+        // closing words, which are true only of a read that stops there.
+        await using var pipeline = SuppressionOff();
+        pipeline.Jira.AddSprints41And42();
+        var github = FakeGitHub.For(pipeline);
+        github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 20, 12)).Merged(Local(2026, 1, 22, 12));
+        pipeline.Jira.Handler.Override(HttpMethod.Get, MembersPath, _ => true, StubHttpHandler.Json("""{"members":"Synthetic text of another shape naming fake-ops-one"}"""));
+
+        var exit = await pipeline.RunAsync("sync");
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
+            "GitHub: the members of the Ops team could not be read (GitHub's team members answered in a shape this tool does not understand (InvalidOperationException).). "
+            + "No review was read, and no first code review or first code approval figure is given for GitHub until a sync reads the team.\n");
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM pull_request")).IsEquivalentTo(new[] { 1L });
+    }
+
+    [Test]
+    public async Task A_connection_that_fails_on_the_roster_read_ends_the_read_and_is_not_taken_for_a_team_that_cannot_be_read()
+    {
+        // Review 2, finding 8. The roster is GitHub's first request, so a fault on the way there is reported
+        // at once. It says nothing about the team: the read ends as any failed read does, to be run again,
+        // and no pull request is stored as one whose reviews wait for a readable team.
+        await using var pipeline = SuppressionOff();
+        pipeline.Jira.AddSprints41And42();
+        var github = FakeGitHub.For(pipeline);
+        github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 20, 12)).Reviewed(Accounts.Reviewer, "COMMENTED", Local(2026, 1, 21, 12));
+        pipeline.Jira.Handler.AnswerNext(HttpMethod.Get, MembersPath, _ => throw new HttpRequestException(HttpRequestError.SecureConnectionError, "synthetic TLS failure"));
+
+        var exit = await pipeline.RunAsync("sync");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).StartsWith("Could not reach GitHub (GET orgs/fake-org/teams/fake-ops/members?per_page=100): SecureConnectionError.");
+        await Assert.That(pipeline.Error.ToString()).DoesNotContain("the members of the Ops team could not be read");
+        await Assert.That((await pipeline.QueryAsync<string>(HostState)).ToArray()).IsEquivalentTo(new[] { "failed, roster not read" });
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM pull_request")).IsEquivalentTo(new[] { 0L });
+
+        // Run again, the fault gone: an ordinary read, with the reviews.
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+
+        await Assert.That((await pipeline.QueryAsync<string>(HostState)).ToArray()).IsEquivalentTo(new[] { "read, roster read" });
+        await Assert.That(await FiguresAsync(pipeline)).IsEquivalentTo(new[] { ("42", "first_code_review", 1L, 1d) });
+    }
+
+    [Test]
+    public async Task A_roster_that_fails_at_a_later_sync_withholds_the_review_figures_already_given_until_it_is_read_again()
+    {
+        await using var pipeline = SuppressionOff();
+        pipeline.Jira.AddSprints41And42();
+        var github = FakeGitHub.For(pipeline);
+        github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 20, 12)).Reviewed(Accounts.Reviewer, "COMMENTED", Local(2026, 1, 21, 12));
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+        await Assert.That(await FiguresAsync(pipeline)).IsEquivalentTo(new[] { ("42", "first_code_review", 1L, 1d) });
+
+        // A second pull request is reviewed and merged, and the roster cannot be read at the next sync: the
+        // figure for first code review would count one pull request of two, so it is not given.
+        github.AddPullRequest(2, Accounts.AuthorTwo, Local(2026, 1, 20, 12)).Reviewed(Accounts.Reviewer, "APPROVED", Local(2026, 1, 23, 12)).Merged(Local(2026, 1, 24, 12));
+        var readable = RefuseTheRoster(pipeline);
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+
+        await Assert.That(await FiguresAsync(pipeline)).IsEquivalentTo(new[] { ("42", "merge", 1L, 4d) });
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains(NotShown);
+
+        // A sync that fails as a whole after that leaves the reviews unread: still no review figure.
+        pipeline.Jira.Handler.AnswerNext(HttpMethod.Get, "/api/v3/repos/fake-org/fake-sample/pulls", StubHttpHandler.Json("""{"message":"Synthetic refusal"}""", HttpStatusCode.Forbidden));
+        readable();
+        await Assert.That(await pipeline.RunAsync("sync")).IsEqualTo(1);
+        await pipeline.RunAllAsync(["derive"]);
+        await Assert.That((await pipeline.QueryAsync<string>(HostState)).ToArray()).IsEquivalentTo(new[] { "failed, roster not read" });
+        await Assert.That(await FiguresAsync(pipeline)).IsEquivalentTo(new[] { ("42", "merge", 1L, 4d) });
+
+        // The report's line for the failed read does not explain the two review rows by a store that holds
+        // nothing: an earlier collection did read pull request 1's review (review 2, finding 19).
+        await pipeline.RunAllAsync(["report", "--sprint", "42"]);
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains(
+            "| First code review | not known | not known | not known | not known | not known |\n"
+            + "| First code approval | not known | not known | not known | not known | not known |\n"
+            + "| Merge | 1 | 4.0 | 4.0 | 3.5 | 3.5 |\n"
+            + "\n- GitHub could not be read when pull requests were last collected. Its figures are of what the store holds, which may be short of what GitHub has now: "
+            + "a read that stopped part-way keeps what it had read whole, and the rest is what earlier collections stored. "
+            + "Where the store holds nothing for a row, the row says \"not known\", and so do the rows of the waits for a first code review and a first code approval "
+            + "while the store holds pull requests whose reviews were not read, whatever earlier collections read of them: that is not a count of zero.\n");
+
+        // Read again: only the pull request whose reviews were not read is asked for.
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+
+        await Assert.That(github.ReviewsAskedFor).IsEquivalentTo(new[] { 1, 2 });
+        await Assert.That(await FiguresAsync(pipeline)).IsEquivalentTo(new[] { ("42", "first_code_review", 2L, 2d), ("42", "first_code_approval", 1L, 3d), ("42", "merge", 1L, 4d) });
+    }
+
+    [Test]
+    public async Task A_pull_request_stored_without_its_reviews_is_read_once_the_roster_is_although_the_list_no_longer_brings_it()
+    {
+        // Pull request 1 is stored while the roster cannot be read: without its reviews. Then the start date
+        // is set after its last update, so the list pass leaves it out. Its reviews are asked for all the
+        // same: while it stays unread, neither review figure is given for the whole host.
+        await using var pipeline = SuppressionOff();
+        pipeline.Jira.AddSprints41And42();
+        var github = FakeGitHub.For(pipeline);
+        github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 20, 12))
+            .Reviewed(Accounts.AuthorOne, "COMMENTED", Local(2026, 1, 20, 13))
+            .Reviewed(Accounts.OpsMember, "APPROVED", Local(2026, 1, 20, 14))
+            .Reviewed(Accounts.Reviewer, "COMMENTED", Local(2026, 1, 21, 12));
+        var readable = RefuseTheRoster(pipeline);
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+        await Assert.That((await pipeline.QueryAsync<string>("SELECT history FROM pull_request")).ToArray()).IsEquivalentTo(new[] { "not read" });
+
+        readable();
+        pipeline.Config["github"]!["collectFrom"] = "2026-01-25";
+        github.AddPullRequest(2, Accounts.AuthorTwo, Local(2026, 1, 26, 12)).Reviewed(Accounts.Reviewer, "COMMENTED", Local(2026, 1, 28, 12));
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+
+        await Assert.That(github.ReviewsAskedFor).IsEquivalentTo(new[] { 1, 2 });
+        await Assert.That((await pipeline.QueryAsync<string>("SELECT pr_number || ': ' || history FROM pull_request ORDER BY pr_number")).ToArray()).IsEquivalentTo(new[] { "1: read", "2: read" });
+
+        // The author's own review and the Ops approval are told apart as at any other read: the wait of pull
+        // request 1 ends with the reviewer's comment, a day after it was opened.
+        await Assert.That(await FiguresAsync(pipeline)).IsEquivalentTo(new[] { ("42", "first_code_review", 2L, 1.5d) });
+        await Assert.That(await pipeline.ReadReportAsync(42)).DoesNotContain("Not shown");
+
+        // And it is asked for once: read, it costs no request at the next sync.
+        await pipeline.RunAllAsync(["sync"]);
+        await Assert.That(github.ReviewsAskedFor).IsEquivalentTo(new[] { 1, 2 });
+    }
+
+    [Test]
+    public async Task Without_an_ops_team_configured_there_is_no_roster_to_read_and_every_figure_is_given()
+    {
+        await using var pipeline = SuppressionOff();
+        pipeline.Jira.AddSprints41And42();
+        var github = FakeGitHub.For(pipeline);
+        pipeline.Config["github"]!.AsObject().Remove("opsTeam");
+        github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 20, 12)).Reviewed(Accounts.OpsMember, "APPROVED", Local(2026, 1, 21, 12));
+        RefuseTheRoster(pipeline);
+
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+
+        await Assert.That((await pipeline.QueryAsync<string>(HostState)).ToArray()).IsEquivalentTo(new[] { "read, roster not configured" });
+        await Assert.That(await FiguresAsync(pipeline)).IsEquivalentTo(new[] { ("42", "first_code_review", 1L, 1d), ("42", "first_code_approval", 1L, 1d) });
+    }
+}

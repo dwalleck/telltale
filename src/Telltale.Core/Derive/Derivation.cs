@@ -172,6 +172,13 @@ public static class Derivation
             Anomalies = anomalies,
             ClosedSprintsWithoutAnEnd = [.. raw.Sprints.Where(SprintWindows.IsClosedWithoutAnEnd).Select(sprint => sprint.SprintId)],
             BriefVisits = briefVisits,
+
+            // Pull request timing is PullRequestTiming's, whole: nothing above reads a pull request, and
+            // nothing there reads an issue.
+            PullRequestWaits = PullRequestTiming.Waits(raw, settings.PullRequestRepositories, windows, calendar, asOf),
+            PullRequestsWithoutReview = PullRequestsWithoutReview.Of(raw, settings.PullRequestRepositories, windows, asOf),
+            PullRequestMeasures = PullRequestTiming.MeasuresGiven(settings.PullRequestRepositories),
+            PullRequestCoverage = PullRequestTiming.Coverage(raw, settings.PullRequestRepositories),
         };
     }
 
@@ -213,4 +220,7 @@ public sealed record DerivationSettings(DeliveryRules Delivery, BusinessCalendar
     /// Brief visits are counted and nothing is left out unless this says otherwise.
     /// </summary>
     public BriefVisitTreatmentSetting BriefVisitTreatment { get; init; } = BriefVisitTreatmentSetting.None;
+
+    /// <summary>The repositories whose pull requests count, by host. Empty when no pull request host is configured: then no pull request has a wait.</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> PullRequestRepositories { get; init; } = new Dictionary<string, IReadOnlyList<string>>();
 }

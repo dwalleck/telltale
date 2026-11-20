@@ -26,6 +26,8 @@ public sealed class PipelineHarness : IAsyncDisposable
     public const string JiraEmail = "tool.owner@example.invalid";
     public const string JiraApiToken = "synthetic-api-token-0001";
     public const string HashingSalt = "synthetic-salt-one";
+    public const string GitHubToken = "synthetic-github-token-0001";
+    public const string AdoToken = "synthetic-ado-token-0001";
 
     private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
 
@@ -45,6 +47,10 @@ public sealed class PipelineHarness : IAsyncDisposable
         [SecretName.JiraEmail] = JiraEmail,
         [SecretName.JiraApiToken] = JiraApiToken,
         [SecretName.HashingSalt] = HashingSalt,
+
+        // A pull request host's token is read only when the host is configured. Another host's goes after this one.
+        [SecretName.GitHubToken] = GitHubToken,
+        [SecretName.AdoToken] = AdoToken,
     };
 
     /// <summary>When set, the commands get this secret store in place of the in-memory one over <see cref="Secrets"/>.</summary>

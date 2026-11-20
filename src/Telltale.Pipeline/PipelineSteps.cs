@@ -1,5 +1,8 @@
 using System.Globalization;
+using Telltale.Collectors.Ado;
+using Telltale.Collectors.GitHub;
 using Telltale.Collectors.Jira;
+using Telltale.Collectors.PullRequests;
 using Telltale.Core;
 using Telltale.Core.Configuration;
 using Telltale.Core.Derive;
@@ -63,31 +66,136 @@ public sealed class PipelineSteps
     {
         // The store is this pipeline's alone (the host sees to it), so nothing changes it between the counts and the write.
         var before = await _store.CountRawAsync(cancellationToken);
-        await CollectAsync(CollectionMode.Backfill, allowEmpty, cancellationToken);
+        await CollectFromJiraAsync(CollectionMode.Backfill, allowEmpty, cancellationToken);
+
+        // Said as soon as Jira's batch is committed, and before any pull request host is asked: a host that
+        // then fails ends the command, and what the backfill replaced must not go unsaid with it.
         var now = await _store.CountRawAsync(cancellationToken);
         await _environment.Out.WriteLineAsync(string.Create(
             CultureInfo.InvariantCulture,
             $"The store now holds what Jira returned. Issues: {before.Issues} before, {now.Issues} now. Sprints: {before.Sprints} before, {now.Sprints} now. Changes: {before.Changes} before, {now.Changes} now."));
+        await CollectPullRequestsAsync(CollectionMode.Backfill, cancellationToken);
     }
 
     /// <summary>
     /// The whole pipeline: sync, derive, and the report of <paramref name="sprintId"/> or, without one, of the
     /// most recently completed sprint. When there is no sprint to report, the store has still been brought up
     /// to date, and that is said, not failed (owner decision D28).
+    /// <para>
+    /// A Jira failure stops the run there, as it stops a sync. A pull request host that cannot be read does
+    /// not: by then Jira's batch is stored and so is the host's failure, with whatever the read had read
+    /// whole, and the report has words for exactly that (the host's rows say its last read failed). So the
+    /// run still derives and writes the report, and then fails with the host's message, so that the exit code
+    /// says the store is not up to date.
+    /// </para>
     /// </summary>
     public async Task RunAsync(long? sprintId, CancellationToken cancellationToken)
     {
-        await SyncAsync(cancellationToken);
-        await DeriveAsync(cancellationToken);
-        await ReportAsync(sprintId, needsSprint: false, cancellationToken);
+        await RequireConfiguredPullRequestSourcesAsync(cancellationToken);
+        await CollectFromJiraAsync(CollectionMode.Incremental, allowEmpty: false, cancellationToken);
+        UserFacingException? hostFailure = null;
+        try
+        {
+            await CollectPullRequestsAsync(CollectionMode.Incremental, cancellationToken);
+        }
+        catch (UserFacingException failure)
+        {
+            hostFailure = failure;
+        }
+
+        try
+        {
+            await DeriveAsync(cancellationToken);
+            await ReportAsync(sprintId, needsSprint: false, cancellationToken);
+        }
+        catch (UserFacingException refusal) when (hostFailure is not null)
+        {
+            // Both are said: the host's failure is why the command fails either way.
+            throw new UserFacingException($"{hostFailure.Message}{Environment.NewLine}{refusal.Message}", new AggregateException(hostFailure, refusal));
+        }
+
+        if (hostFailure is not null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(hostFailure).Throw();
+        }
     }
 
     /// <summary>Brings the raw tables up to date with what changed in Jira since the last sync or backfill.</summary>
-    public Task SyncAsync(CancellationToken cancellationToken) => CollectAsync(CollectionMode.Incremental, allowEmpty: false, cancellationToken);
+    public async Task SyncAsync(CancellationToken cancellationToken)
+    {
+        await RequireConfiguredPullRequestSourcesAsync(cancellationToken);
+        await CollectFromJiraAsync(CollectionMode.Incremental, allowEmpty: false, cancellationToken);
+        await CollectPullRequestsAsync(CollectionMode.Incremental, cancellationToken);
+    }
 
-    private Task CollectAsync(CollectionMode mode, bool allowEmpty, CancellationToken cancellationToken) =>
-        new JiraCollector(_environment.HttpHandler, _settings.Jira, _secrets ?? throw new InvalidOperationException("This command was started without the secrets a collection needs."), _environment.Clock, _environment.Notices)
+    /// <summary>The secrets a collection needs, which a host that collects passes in.</summary>
+    private CollectionSecrets SecretsOfACollection =>
+        _secrets ?? throw new InvalidOperationException("This command was started without the secrets a collection needs.");
+
+    /// <summary>
+    /// Jira is read first, before any pull request host (<see cref="CollectPullRequestsAsync"/>): the sprints
+    /// come from its board, and its batch settles which salt the store's people are hashed with.
+    /// </summary>
+    private Task CollectFromJiraAsync(CollectionMode mode, bool allowEmpty, CancellationToken cancellationToken) =>
+        new JiraCollector(_environment.HttpHandler, _settings.Jira, SecretsOfACollection, _environment.Clock, _environment.Notices)
             .BringUpToDateAsync(_store, mode, allowEmpty, cancellationToken);
+
+    /// <summary>
+    /// Each configured pull request host, once Jira's batch is stored. A backfill reads each host's whole
+    /// list, where a sync stops once it reaches pull requests that have not changed. It removes no pull
+    /// request of a host that is still read from where its rows were read from; for a host whose source
+    /// changed it removes what the store holds of the host and says so (<see cref="PullRequestSource"/>).
+    /// A host that cannot be read fails this step after the store has recorded that, with the host's message.
+    /// </summary>
+    private Task CollectPullRequestsAsync(CollectionMode mode, CancellationToken cancellationToken)
+    {
+        var secrets = SecretsOfACollection;
+        return PullRequestCollection.BringUpToDateAsync(PullRequestCollectors(secrets), _store, everything: mode == CollectionMode.Backfill, IdentityHash.SaltFingerprint(secrets.HashingSalt), _environment.Clock, _environment.Out, cancellationToken);
+    }
+
+    /// <summary>
+    /// What every command but a backfill asks before it reads or writes anything of a pull request host: the
+    /// store's rows of each configured host were read from where the configuration reads the host now. Rows
+    /// of another server or organization would be continued by a sync and passed off as the configured one's
+    /// by a rebuild or a report. A sync asks before Jira is read, so a refused sync changes nothing. A host
+    /// that is no longer configured is not asked about: its rows are in no figure.
+    /// </summary>
+    private async Task RequireConfiguredPullRequestSourcesAsync(CancellationToken cancellationToken)
+    {
+        if (_settings.PullRequestSources is not { Count: > 0 } sources)
+        {
+            return;
+        }
+
+        var hosts = await _store.ReadPullRequestHostsAsync(cancellationToken);
+        foreach (var source in sources)
+        {
+            source.RequireSameAs(hosts.FirstOrDefault(host => host.Host == source.Host));
+        }
+    }
+
+    /// <summary>
+    /// The collector of each pull request host that is configured, in the order they are read; none for a
+    /// Jira-only configuration, which then makes no pull request call at all. Another host is another entry.
+    /// </summary>
+    private IEnumerable<IPullRequestCollector> PullRequestCollectors(CollectionSecrets secrets)
+    {
+        if (_settings.GitHub is { } github)
+        {
+            yield return new GitHubCollector(
+                _environment.HttpHandler, github,
+                secrets.GitHubToken ?? throw new InvalidOperationException("This command was started without the GitHub token a collection from GitHub needs."),
+                secrets.HashingSalt, _environment.Clock, _environment.Notices);
+        }
+
+        if (_settings.Ado is { } ado)
+        {
+            yield return new AdoCollector(
+                _environment.HttpHandler, ado,
+                secrets.AdoToken ?? throw new InvalidOperationException("This command was started without the Azure DevOps token a collection from Azure DevOps needs."),
+                secrets.HashingSalt, _environment.Clock, _environment.Notices);
+        }
+    }
 
     /// <summary>
     /// Rebuilds every derived table and metric view from the raw tables, and logs the changelog anomalies it
@@ -157,6 +265,9 @@ public sealed class PipelineSteps
         }
 
         filled.Scope.RequireSameAs(JiraCollector.ScopeOf(_settings.Jira));
+
+        // The same of each pull request host: its rows are what the source they were read from has.
+        await RequireConfiguredPullRequestSourcesAsync(cancellationToken);
         return JiraCollector.CompleteFrom(filled.Scope);
     }
 
@@ -176,16 +287,21 @@ public sealed class PipelineSteps
     /// <summary>
     /// The as-of time that closes open intervals and the active sprint's window: the clock, read when
     /// derive starts, so after any sync in the same command. It is never earlier than the newest
-    /// thing Jira reported, because Jira's clock can run ahead of this machine's; otherwise an issue
-    /// finished moments ago would fall outside the active sprint.
+    /// thing a host reported, because a host's clock can run ahead of this machine's; otherwise an issue
+    /// finished moments ago would fall outside the active sprint, and a merge or a review made moments ago
+    /// would be missing from the report of the run that collected it. That holds of Jira and of every pull
+    /// request host alike: when a pull request was opened, merged and closed, when each of its events was
+    /// made, and the times of a closing that no longer stands all count toward that newest moment.
     /// </summary>
     private DateTimeOffset AsOf(RawData raw)
     {
         var now = _environment.Clock.GetUtcNow();
-        var newest = raw.Changes.Select(change => change.At)
-            .Concat(raw.Issues.Select(issue => issue.Updated))
-            .DefaultIfEmpty(DateTimeOffset.MinValue)
-            .Max();
+        var newest = raw.Changes.Select(change => (DateTimeOffset?)change.At)
+            .Concat(raw.Issues.Select(issue => (DateTimeOffset?)issue.Updated))
+            .Concat(raw.PullRequests.SelectMany(pullRequest => new[] { pullRequest.Opened, pullRequest.Merged, pullRequest.Closed }))
+            .Concat(raw.PullRequestEvents.Select(happened => (DateTimeOffset?)happened.At))
+            .Concat(raw.PullRequestPastClosures.SelectMany(closure => new[] { closure.Closed, closure.ReopenedBy, closure.Reopened }))
+            .Max() ?? DateTimeOffset.MinValue;
 
         // Windows are half-open, so the as-of time must be after the newest moment, not equal to it.
         // Stored times have millisecond precision.
@@ -353,6 +469,13 @@ public sealed class PipelineSteps
         if (derivedFrom.BriefVisitTreatment != current.BriefVisitTreatment)
         {
             throw new UserFacingException("briefVisitTreatment in the configuration file changed since the derived data was built. Run derive first.");
+        }
+
+        // Which pull requests have a wait was decided by the repositories listed at the last derive. Deriving
+        // again is all it takes for the figures; a repository that was never read is the next sync's to read.
+        if (derivedFrom.PullRequestRepositories != current.PullRequestRepositories)
+        {
+            throw new UserFacingException("The pull request repositories in the configuration file changed since the derived data was built. Run derive first.");
         }
 
         // Each check above compares the fields it knows and says which setting changed. This one compares the

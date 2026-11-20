@@ -1,3 +1,4 @@
+using Telltale.Collectors.Http;
 using System.Globalization;
 using System.Text.Json;
 using Telltale.Core;
@@ -45,7 +46,7 @@ internal static class OffsetPages
     /// <param name="read">The caller's wrapper that turns an answer in an unknown shape into its plain message.</param>
     /// <param name="nothingKept">The sentence that ends a stop's message, e.g. "Nothing was stored."</param>
     public static async Task<List<T>> ReadAllAsync<T>(
-        JiraClient jira,
+        HostClient jira,
         string path,
         int? pageSize,
         OffsetPaging paging,

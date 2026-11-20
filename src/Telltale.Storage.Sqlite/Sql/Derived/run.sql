@@ -14,7 +14,9 @@
 -- is the briefVisitTreatment setting (GLOSSARY: Treatment) as a JSON object of each part and its label
 -- ('{"cycleTime":"count","timeInStatus":"exclude"}'), every part 'count' when the setting is left out: the treatment derive
 -- applied, which the report states and never reads from the configuration; the brief_visit_treatment view
--- gives it to query and to every metric view that needs it. objects_version identifies the
+-- gives it to query and to every metric view that needs it. pull_request_repositories is the repositories
+-- whose pull requests were counted, as a JSON object of host to repository names in order
+-- ('{"github":["owner/name"]}'), '{}' when no pull request host is configured. objects_version identifies the
 -- scripts that created the derived tables and the metric views: when the tool's scripts differ, the views
 -- may lack a rule the tool relies on (the minimum group size, ADR-0003), and nothing is read from them.
 CREATE TABLE run (
@@ -29,5 +31,6 @@ CREATE TABLE run (
     minimum_assignees_behind_a_figure INTEGER NOT NULL,
     brief_visit_thresholds TEXT NOT NULL,
     brief_visit_treatment TEXT NOT NULL,
+    pull_request_repositories TEXT NOT NULL,
     objects_version     TEXT NOT NULL
 ) STRICT;

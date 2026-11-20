@@ -164,6 +164,7 @@ public sealed record IssueAnomaly(string IssueId, ChangelogAnomalyKind Kind)
 /// <param name="MinimumTeam">The minimum group size's team number (GLOSSARY: Minimum group size): the metric views read it from the rebuild's record and never from the configuration.</param>
 /// <param name="MinimumAssigneesBehindAFigure">The minimum group size's number of assignees behind a figure, read by the views in the same way.</param>
 /// <param name="BriefVisitThresholds">The brief visit thresholds (GLOSSARY: Brief visit) as a JSON object of status ID to minutes, the IDs in order, e.g. <c>{"10001":5,"10005":0.5}</c>; <c>{}</c> when no status is checked. The metric view <c>brief_visits_per_sprint</c> reads the listed statuses and their thresholds from the rebuild's record.</param>
+/// <param name="PullRequestRepositories">The repositories whose pull requests the rebuild counted, as a JSON object of host to repository names, both in order, e.g. <c>{"github":["owner/name"]}</c>; <see cref="NoPullRequestRepositories"/> when no pull request host is configured. Left out, it is that.</param>
 /// <param name="BriefVisitTreatment">The treatment of brief visits (GLOSSARY: Treatment) as a JSON object of each part and its label, the parts in order, e.g. <c>{"cycleTime":"count","timeInStatus":"exclude"}</c>. Left out, it is <see cref="BriefVisitsCounted"/>: a record made without it is of a rebuild that counted brief visits and changed nothing.</param>
 public sealed record DerivedSource(
     string RawDigest,
@@ -175,8 +176,40 @@ public sealed record DerivedSource(
     long MinimumTeam,
     long MinimumAssigneesBehindAFigure,
     string BriefVisitThresholds,
-    string BriefVisitTreatment = DerivedSource.BriefVisitsCounted)
+    string BriefVisitTreatment = DerivedSource.BriefVisitsCounted,
+    string PullRequestRepositories = DerivedSource.NoPullRequestRepositories)
 {
+    /// <summary><see cref="PullRequestRepositories"/> when no pull request host is configured. The one place that spells it.</summary>
+    public const string NoPullRequestRepositories = "{}";
+
+    /// <summary>Whether the rebuild counted pull requests at all: a pull request host was configured. A report has its pull request section only then.</summary>
+    public bool PullRequestsCounted => PullRequestRepositories != NoPullRequestRepositories;
+
+    /// <summary>The pull request hosts the rebuild counted (<c>PullRequestHosts</c>), in the order <see cref="PullRequestRepositories"/> has them. A report words a host's own rules only for a host that is here.</summary>
+    public IReadOnlyList<string> PullRequestHostsCounted
+    {
+        get
+        {
+            using var repositories = System.Text.Json.JsonDocument.Parse(PullRequestRepositories);
+            return [.. repositories.RootElement.EnumerateObject().Select(host => host.Name)];
+        }
+    }
+
+    /// <summary>
+    /// <see cref="PullRequestRepositories"/> for the configured repositories by host: the form the store keeps,
+    /// hosts and repositories in order, e.g. <c>{"github":["owner/name"]}</c>.
+    /// </summary>
+    public static string PullRequestRepositoriesOf(IReadOnlyDictionary<string, IReadOnlyList<string>> repositoriesByHost)
+    {
+        var ordered = new SortedDictionary<string, string[]>(StringComparer.Ordinal);
+        foreach (var (host, repositories) in repositoriesByHost)
+        {
+            ordered.Add(host, [.. repositories.Order(StringComparer.Ordinal)]);
+        }
+
+        return System.Text.Json.JsonSerializer.Serialize(ordered);
+    }
+
     /// <summary><see cref="BriefVisitThresholds"/> when no status is checked. The one place that spells it.</summary>
     public const string NoBriefVisitThresholds = "{}";
 
@@ -274,4 +307,102 @@ public sealed record DerivedData(
 
     /// <summary>The brief visits counted toward a sprint: at most one per issue, sprint and status. Empty when no status is checked.</summary>
     public IReadOnlyList<SprintBriefVisit> BriefVisits { get; init; } = [];
+
+    /// <summary>The waits of the pull requests of the configured repositories: at most one per pull request and measure. Empty when no pull request host is configured.</summary>
+    public IReadOnlyList<PullRequestWait> PullRequestWaits { get; init; } = [];
+
+    /// <summary>The measures a pull request can have a wait for, in the order a report lists them.</summary>
+    public IReadOnlyList<string> PullRequestMeasures { get; init; } = [];
+
+    /// <summary>The pull requests that had no first code review at a sprint's close: at most one row per sprint and pull request. Empty when no pull request host is configured.</summary>
+    public IReadOnlyList<PullRequestWithoutReview> PullRequestsWithoutReview { get; init; } = [];
+
+    /// <summary>What the store holds of each configured pull request host for each measure: one row per host and measure. Empty when no pull request host is configured.</summary>
+    public IReadOnlyList<PullRequestHostCoverage> PullRequestCoverage { get; init; } = [];
 }
+
+/// <summary>
+/// What the store holds of one configured pull request host for one measure (see <c>PullRequestTiming.Coverage</c>).
+/// </summary>
+/// <param name="Host">One of <see cref="PullRequestHosts"/>.</param>
+/// <param name="Position">The host's place among the configured hosts, from 1.</param>
+/// <param name="Measure">One of <c>PullRequestTiming.Measures</c>.</param>
+/// <param name="Coverage">One of <see cref="PullRequestCoverageStates"/>.</param>
+/// <param name="CollectFrom">
+/// The start date the host's stored pull requests were collected under (<see cref="RawPullRequestHost.CollectFrom"/>),
+/// or null when none bounded them. The views mark a host's rows of a sprint that began before it as
+/// <see cref="PullRequestCoverageStates.Partial"/> when the host is otherwise <see cref="PullRequestCoverageStates.Read"/>.
+/// </param>
+public sealed record PullRequestHostCoverage(string Host, long Position, string Measure, string Coverage, DateTimeOffset? CollectFrom = null);
+
+/// <summary>
+/// The values of <see cref="PullRequestHostCoverage.Coverage"/>, and those of a combined row of the view
+/// <c>pr_timing_per_sprint</c>. Only under <see cref="Read"/> (and, combined, <see cref="Complete"/>) is the
+/// absence of a wait a count of zero; under every other value it is not known.
+/// </summary>
+public static class PullRequestCoverageStates
+{
+    /// <summary>The host's last collection ended and what the measure rests on was read, however little there was.</summary>
+    public const string Read = "read";
+
+    /// <summary>
+    /// The host's last collection failed: what the store holds of it is what earlier collections read, and what
+    /// the failed one had read whole when it stopped part-way. It may be short of what the host has now.
+    /// </summary>
+    public const string FailedRead = "failed read";
+
+    /// <summary>The host is configured and no collection of it has ended or failed yet.</summary>
+    public const string NotRead = "not read";
+
+    /// <summary>The host was read, and the reviews the measure rests on were not: the measure has no wait from it.</summary>
+    public const string ReviewsNotRead = "reviews not read";
+
+    /// <summary>
+    /// The host's last collection ended, and a repository that is configured now was not one it went through:
+    /// it was added to the configuration since. The host's rows hold the other repositories' pull requests
+    /// only, and the next collection reads the one that is missing.
+    /// </summary>
+    public const string RepositoryNotRead = "repository not read";
+
+    /// <summary>A combined row for which every configured host is <see cref="Read"/>.</summary>
+    public const string Complete = "complete";
+
+    /// <summary>
+    /// A row that holds only part of what its hosts have. A combined row for which at least one configured
+    /// host is not <see cref="Read"/>. Also a host's own row of a sprint that began before the start date the
+    /// host's pull requests were collected under (<see cref="PullRequestHostCoverage.CollectFrom"/>), and its
+    /// row of the waits in no sprint when there is such a date: the host was read, and pull requests last
+    /// active before the date are not in the store. The views give this value; derive records the date.
+    /// </summary>
+    public const string Partial = "partial";
+
+    /// <summary>The host scope of the rows that hold every configured host's waits together.</summary>
+    public const string CombinedScope = "combined";
+}
+
+/// <summary>
+/// One pull request that had no first code review when a sprint closed, or at the as-of time for a sprint
+/// still running (see <c>PullRequestsWithoutReview</c>). It is an explanation and no wait: it has no duration.
+/// It carries no author: pull request results are not grouped or counted by person.
+/// </summary>
+/// <param name="State">One of <c>PullRequestReviewStates</c>: why it has none.</param>
+/// <param name="Activity">One of <c>PullRequestReviewActivities</c>: what had been submitted on it by then.</param>
+public sealed record PullRequestWithoutReview(string SprintId, string Host, string Repository, long Number, string State, string Activity);
+
+/// <summary>
+/// One wait of one pull request: from its opening to the event that ended the wait for <see cref="Measure"/>
+/// (see <c>PullRequestTiming</c>). <see cref="SprintId"/> is the sprint whose window holds <see cref="Ended"/>;
+/// null when no window or more than one holds it. <see cref="ElapsedDays"/> is the whole wait divided by 24
+/// hours, and <see cref="BusinessDays"/> the same wait in business days; neither is clipped to a sprint.
+/// It carries no author: pull request figures are not grouped or counted by person.
+/// </summary>
+public sealed record PullRequestWait(
+    string Host,
+    string Repository,
+    long Number,
+    string Measure,
+    DateTimeOffset Opened,
+    DateTimeOffset Ended,
+    double ElapsedDays,
+    double BusinessDays,
+    string? SprintId);

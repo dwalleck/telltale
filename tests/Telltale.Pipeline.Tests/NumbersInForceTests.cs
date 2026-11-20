@@ -302,6 +302,7 @@ public class NumbersInForceTests
         await Assert.That(string.Join(' ', pipeline.Out.ToString().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))).Contains(
             "Run a SQL query over the metric views and print its rows as a markdown table. Jira is not called. "
             + "The query reads the metric views and nothing else in the store, and the metric views withhold small-group figures according to the minimumGroupSize setting of the configuration file. "
+            + "The two pull request views, pr_timing_per_sprint and pr_without_review_per_sprint, are the exception: their figures are not subject to that setting, and they give no figure per person. "
             + "Opening the database file in another program bypasses the suppression rule: that program reads every table.");
     }
 
