@@ -55,6 +55,8 @@ public sealed class GitHubCollector : IPullRequestCollector
 
     public string Host => PullRequestHosts.GitHub;
 
+    public PullRequestSource Source => _settings.Source;
+
     public async Task<PullRequestBatch> FetchAsync(RawData stored, bool everything, CancellationToken cancellationToken)
     {
         using var github = new HostClient(_handler, "GitHub", _settings.ApiUrl, new AuthenticationHeaderValue("Bearer", _token), _clock, _notices);

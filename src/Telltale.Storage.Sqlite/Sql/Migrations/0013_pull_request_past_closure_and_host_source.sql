@@ -15,3 +15,13 @@ CREATE TABLE pull_request_past_closure (
     reopened_by TEXT NOT NULL,
     PRIMARY KEY (host, repository, pr_number, closed)
 ) STRICT;
+
+-- Where a host's stored pull requests were read from, as the collection that last wrote them recorded it: for
+-- GitHub the address of the REST API (github.apiUrl, or the public one), for Azure DevOps the address of the
+-- organization (ado.apiUrl and ado.organization together). A pull request is one by host, repository and
+-- number, so rows read from one server or organization must not be continued from another: while the
+-- configured source differs from this one every command but backfill refuses, and a backfill removes the
+-- host's pull requests, events and past closures before it reads the host whole. A read that failed leaves
+-- it as it was. Null in rows written before this column existed: the source is then taken to be the
+-- configured one, and the next read of the host records it.
+ALTER TABLE pull_request_host ADD COLUMN source TEXT NULL;

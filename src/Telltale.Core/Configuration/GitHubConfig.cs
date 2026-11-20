@@ -1,3 +1,5 @@
+using Telltale.Core.Storage;
+
 namespace Telltale.Core.Configuration;
 
 /// <summary>
@@ -48,6 +50,9 @@ public sealed record GitHubSettings
 
     /// <summary>The address every request is relative to. It ends in a slash.</summary>
     public required Uri ApiUrl { get; init; }
+
+    /// <summary>Where the pull requests are read from, as the store records it: the API's address, whether <c>apiUrl</c> gives it or it is the public one.</summary>
+    public PullRequestSource Source => new(PullRequestHosts.GitHub, "GitHub", ApiUrl.AbsoluteUri, "github.apiUrl", "another server");
 
     /// <summary>The repositories read, each once, in order.</summary>
     public required IReadOnlyList<GitHubRepository> Repositories { get; init; }

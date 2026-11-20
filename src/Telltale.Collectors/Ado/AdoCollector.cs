@@ -67,6 +67,8 @@ public sealed class AdoCollector : IPullRequestCollector
 
     public string Host => PullRequestHosts.Ado;
 
+    public PullRequestSource Source => _settings.Source;
+
     public async Task<PullRequestBatch> FetchAsync(RawData stored, bool everything, CancellationToken cancellationToken)
     {
         // A personal access token is sent as the password of basic authentication, with no user name.

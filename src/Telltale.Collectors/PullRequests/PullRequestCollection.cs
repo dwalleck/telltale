@@ -13,6 +13,9 @@ public interface IPullRequestCollector
     /// <summary>The host's name in the store: one of <see cref="PullRequestHosts"/>.</summary>
     string Host { get; }
 
+    /// <summary>Where the collector reads the host's pull requests from, by its settings: what the store records with the rows it gives.</summary>
+    PullRequestSource Source { get; }
+
     /// <summary>
     /// Fetches what the store does not hold yet of the pull requests of the configured repositories, open or
     /// not: the rows that are new or differ from <paramref name="stored"/>, and the classified events of those
@@ -61,36 +64,55 @@ public static class PullRequestCollection
     /// so that what one host has does not go unread because another could not be reached; the command then
     /// fails with what each host that could not be read said.
     /// </summary>
+    /// <remarks>
+    /// A host whose stored rows were read from another source than the configured one
+    /// (<see cref="PullRequestSource"/>) is not continued. A sync refuses it. A backfill reads the host as if
+    /// the store held nothing of it, and the batch it writes removes the host's stored pull requests, events
+    /// and past closures in the same transaction and records the new source; <paramref name="output"/> is
+    /// told so. If that read fails outright, the old rows and the old source stay, and the next command
+    /// refuses again.
+    /// </remarks>
     /// <param name="saltFingerprint">The fingerprint of the salt the collectors hash authors with.</param>
     /// <param name="everything">Read each host's whole list (a backfill), not only as far as something changed (a sync).</param>
     /// <param name="clock">The clock the collectors use: it dates a batch that records only that a read failed.</param>
-    public static async Task BringUpToDateAsync(IEnumerable<IPullRequestCollector> collectors, ITelltaleStore store, bool everything, string saltFingerprint, TimeProvider clock, CancellationToken cancellationToken)
+    /// <param name="output">Where a backfill says that it removed a host's rows of another source.</param>
+    public static async Task BringUpToDateAsync(IEnumerable<IPullRequestCollector> collectors, ITelltaleStore store, bool everything, string saltFingerprint, TimeProvider clock, TextWriter output, CancellationToken cancellationToken)
     {
         var failures = new List<UserFacingException>();
         foreach (var collector in collectors)
         {
             PullRequestBatch batch;
             var stored = await store.ReadRawAsync(cancellationToken);
+            var recorded = stored.PullRequestHosts.FirstOrDefault(known => known.Host == collector.Host);
+            var source = collector.Source;
+            var replaces = source.DiffersFrom(recorded);
+            if (replaces && !everything)
+            {
+                source.RequireSameAs(recorded);
+            }
+
             try
             {
-                batch = await collector.FetchAsync(stored, everything, cancellationToken);
+                // Under a changed source nothing the store holds of the host is this source's: the collector
+                // is shown none of it, so it reads everything and compares with nothing.
+                batch = await collector.FetchAsync(replaces ? WithoutHost(stored, collector.Host) : stored, everything, cancellationToken);
             }
             catch (PullRequestReadStoppedException stopped)
             {
                 // The read failed like any other, and what it read whole before that is kept.
-                await store.WritePullRequestsAsync(stopped.Read, cancellationToken);
+                await WriteAsync(stopped.Read, readWhole: false);
                 failures.Add(stopped);
                 continue;
             }
             catch (UserFacingException failure)
             {
-                // The rows of earlier reads stay, and so do the start date they were collected under and the
-                // repositories the last read that ended went through.
+                // The rows of earlier reads stay, and so do the start date they were collected under, the
+                // repositories the last read that ended went through and the source they were read from.
                 await store.WritePullRequestsAsync(
                     new PullRequestBatch(
                         [],
                         [],
-                        new RawPullRequestHost(collector.Host, PullRequestHostStates.Failed, PullRequestRosterStates.NotRead) { CollectFrom = CollectedFrom(stored, collector.Host), Repositories = RepositoriesRead(stored, collector.Host) },
+                        new RawPullRequestHost(collector.Host, PullRequestHostStates.Failed, PullRequestRosterStates.NotRead) { CollectFrom = CollectedFrom(stored, collector.Host), Repositories = RepositoriesRead(stored, collector.Host), Source = recorded?.Source },
                         saltFingerprint,
                         clock.GetUtcNow()),
                     cancellationToken);
@@ -98,11 +120,33 @@ public static class PullRequestCollection
                 continue;
             }
 
-            await store.WritePullRequestsAsync(batch, cancellationToken);
+            await WriteAsync(batch, readWhole: true);
+
+            // Every batch of rows records the source it was read from, here and not in each collector.
+            async Task WriteAsync(PullRequestBatch read, bool readWhole)
+            {
+                await store.WritePullRequestsAsync(read with { ReplacesHost = replaces, HostState = read.HostState with { Source = source.Address } }, cancellationToken);
+                if (replaces)
+                {
+                    var removed = stored.PullRequests.Count(pullRequest => pullRequest.Host == collector.Host);
+                    await output.WriteLineAsync(string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        $"{source.HostName}: {source.Settings} changed since its pull requests were last read. {(removed == 1 ? "The 1 pull request stored before the change was" : $"The {removed} pull requests stored before the change were")} removed, with everything stored of them{(readWhole ? $", and {source.HostName} was read whole" : "")}."));
+                }
+            }
         }
 
         ThrowWhatFailed(failures);
     }
+
+    /// <summary>What the store holds, without anything of one pull request host.</summary>
+    private static RawData WithoutHost(RawData stored, string host) => stored with
+    {
+        PullRequests = [.. stored.PullRequests.Where(pullRequest => pullRequest.Host != host)],
+        PullRequestEvents = [.. stored.PullRequestEvents.Where(happened => happened.Host != host)],
+        PullRequestPastClosures = [.. stored.PullRequestPastClosures.Where(closure => closure.Host != host)],
+        PullRequestHosts = [.. stored.PullRequestHosts.Where(known => known.Host != host)],
+    };
 
     /// <summary>The start date the store records for the host's pull requests (<see cref="RawPullRequestHost.CollectFrom"/>); null when it records none, or holds nothing of the host.</summary>
     public static DateTimeOffset? CollectedFrom(RawData stored, string host) =>

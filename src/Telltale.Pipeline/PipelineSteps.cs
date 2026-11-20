@@ -91,6 +91,7 @@ public sealed class PipelineSteps
     /// </summary>
     public async Task RunAsync(long? sprintId, CancellationToken cancellationToken)
     {
+        await RequireConfiguredPullRequestSourcesAsync(cancellationToken);
         await CollectFromJiraAsync(CollectionMode.Incremental, allowEmpty: false, cancellationToken);
         UserFacingException? hostFailure = null;
         try
@@ -122,6 +123,7 @@ public sealed class PipelineSteps
     /// <summary>Brings the raw tables up to date with what changed in Jira since the last sync or backfill.</summary>
     public async Task SyncAsync(CancellationToken cancellationToken)
     {
+        await RequireConfiguredPullRequestSourcesAsync(cancellationToken);
         await CollectFromJiraAsync(CollectionMode.Incremental, allowEmpty: false, cancellationToken);
         await CollectPullRequestsAsync(CollectionMode.Incremental, cancellationToken);
     }
@@ -139,14 +141,37 @@ public sealed class PipelineSteps
             .BringUpToDateAsync(_store, mode, allowEmpty, cancellationToken);
 
     /// <summary>
-    /// Each configured pull request host, once Jira's batch is stored. A backfill removes no pull request; it
-    /// reads each host's whole list, where a sync stops once it reaches pull requests that have not changed.
+    /// Each configured pull request host, once Jira's batch is stored. A backfill reads each host's whole
+    /// list, where a sync stops once it reaches pull requests that have not changed. It removes no pull
+    /// request of a host that is still read from where its rows were read from; for a host whose source
+    /// changed it removes what the store holds of the host and says so (<see cref="PullRequestSource"/>).
     /// A host that cannot be read fails this step after the store has recorded that, with the host's message.
     /// </summary>
     private Task CollectPullRequestsAsync(CollectionMode mode, CancellationToken cancellationToken)
     {
         var secrets = SecretsOfACollection;
-        return PullRequestCollection.BringUpToDateAsync(PullRequestCollectors(secrets), _store, everything: mode == CollectionMode.Backfill, IdentityHash.SaltFingerprint(secrets.HashingSalt), _environment.Clock, cancellationToken);
+        return PullRequestCollection.BringUpToDateAsync(PullRequestCollectors(secrets), _store, everything: mode == CollectionMode.Backfill, IdentityHash.SaltFingerprint(secrets.HashingSalt), _environment.Clock, _environment.Out, cancellationToken);
+    }
+
+    /// <summary>
+    /// What every command but a backfill asks before it reads or writes anything of a pull request host: the
+    /// store's rows of each configured host were read from where the configuration reads the host now. Rows
+    /// of another server or organization would be continued by a sync and passed off as the configured one's
+    /// by a rebuild or a report. A sync asks before Jira is read, so a refused sync changes nothing. A host
+    /// that is no longer configured is not asked about: its rows are in no figure.
+    /// </summary>
+    private async Task RequireConfiguredPullRequestSourcesAsync(CancellationToken cancellationToken)
+    {
+        if (_settings.PullRequestSources is not { Count: > 0 } sources)
+        {
+            return;
+        }
+
+        var hosts = await _store.ReadPullRequestHostsAsync(cancellationToken);
+        foreach (var source in sources)
+        {
+            source.RequireSameAs(hosts.FirstOrDefault(host => host.Host == source.Host));
+        }
     }
 
     /// <summary>
@@ -240,6 +265,9 @@ public sealed class PipelineSteps
         }
 
         filled.Scope.RequireSameAs(JiraCollector.ScopeOf(_settings.Jira));
+
+        // The same of each pull request host: its rows are what the source they were read from has.
+        await RequireConfiguredPullRequestSourcesAsync(cancellationToken);
         return JiraCollector.CompleteFrom(filled.Scope);
     }
 

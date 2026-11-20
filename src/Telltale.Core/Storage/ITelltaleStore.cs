@@ -24,10 +24,19 @@ public interface ITelltaleStore
     /// Writes a pull request host's batch in one transaction: its pull requests and events, what the read came
     /// to, the salt's fingerprint and the raw data's digest. A stored closing time that a pull request of the
     /// batch no longer has (it was reopened) is kept as a <see cref="RawPullRequestPastClosure"/>, dated with
-    /// <see cref="PullRequestBatch.CollectedAt"/>. It never deletes, and a batch under another salt
+    /// <see cref="PullRequestBatch.CollectedAt"/>. It deletes only for a batch that replaces its host's rows
+    /// (<see cref="PullRequestBatch.ReplacesHost"/>): then that host's pull requests, events and past closures
+    /// go first, in the same transaction. A batch under another salt
     /// than the stored people were hashed with throws <see cref="UserFacingException"/> and writes nothing.
     /// </summary>
     Task WritePullRequestsAsync(PullRequestBatch batch, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// What the last collection from each pull request host came to, and where its rows were read from: the
+    /// rows of <see cref="RawData.PullRequestHosts"/>, for a command that asks only whether the store's pull
+    /// requests are of the configured sources and reads no other raw row.
+    /// </summary>
+    Task<IReadOnlyList<RawPullRequestHost>> ReadPullRequestHostsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>How many issues, sprints and changes the raw tables hold.</summary>
     Task<RawCounts> CountRawAsync(CancellationToken cancellationToken = default);

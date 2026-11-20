@@ -277,6 +277,19 @@ public sealed class SqliteStore : ITelltaleStore
         var hashedWithBefore = await ReadSaltFingerprintAsync(connection, transaction, cancellationToken);
         IdentityHash.RequireSameSalt(hashedWithBefore, batch.SaltFingerprint);
 
+        // The host's stored rows were read from another source than the batch's (PullRequestSource): nothing of
+        // them is this source's, and a pull request of the same repository name and number would be written
+        // over one of them and keep its events and closures. They go, in the batch's transaction, so a write
+        // that fails leaves what was there. Only this host's rows: another host's are of another source anyway.
+        if (batch.ReplacesHost)
+        {
+            await connection.ExecuteAsync(Command(
+                cancellationToken,
+                "DELETE FROM pull_request_past_closure WHERE host = @Host; DELETE FROM pull_request_event WHERE host = @Host; DELETE FROM pull_request WHERE host = @Host;",
+                new { batch.HostState.Host },
+                transaction));
+        }
+
         // pull_request keeps only the closing that stands now. A closing the store holds and the batch's row
         // no longer has (the host lists the pull request as open again, or closed at another time) was
         // nevertheless seen, and the sprints that closed under it are rebuilt from it: it is kept, with this
@@ -342,13 +355,14 @@ public sealed class SqliteStore : ITelltaleStore
         await connection.ExecuteAsync(Command(
             cancellationToken,
             """
-            INSERT INTO pull_request_host (host, state, roster, collect_from, repositories) VALUES (@Host, @State, @Roster, @CollectFrom, @Repositories)
-            ON CONFLICT (host) DO UPDATE SET state = excluded.state, roster = excluded.roster, collect_from = excluded.collect_from, repositories = excluded.repositories;
+            INSERT INTO pull_request_host (host, state, roster, collect_from, repositories, source) VALUES (@Host, @State, @Roster, @CollectFrom, @Repositories, @Source)
+            ON CONFLICT (host) DO UPDATE SET state = excluded.state, roster = excluded.roster, collect_from = excluded.collect_from, repositories = excluded.repositories, source = excluded.source;
             """,
             new
             {
                 batch.HostState.Host, batch.HostState.State, batch.HostState.Roster, CollectFrom = StoredTime.ToStored(batch.HostState.CollectFrom),
                 Repositories = batch.HostState.Repositories is { } repositories ? JsonSerializer.Serialize(repositories) : null,
+                batch.HostState.Source,
             },
             transaction));
 
@@ -440,7 +454,7 @@ public sealed class SqliteStore : ITelltaleStore
         var pullRequests = await connection.QueryAsync<PullRequestRow>(Command(cancellationToken, "SELECT * FROM pull_request ORDER BY host, repository, pr_number;", transaction: transaction));
         var pullRequestEvents = await connection.QueryAsync<PullRequestEventRow>(Command(cancellationToken, "SELECT * FROM pull_request_event ORDER BY host, repository, pr_number, kind, event_id;", transaction: transaction));
         var pullRequestPastClosures = await connection.QueryAsync<PullRequestPastClosureRow>(Command(cancellationToken, "SELECT * FROM pull_request_past_closure ORDER BY host, repository, pr_number, closed;", transaction: transaction));
-        var pullRequestHosts = await connection.QueryAsync<PullRequestHostRow>(Command(cancellationToken, "SELECT * FROM pull_request_host ORDER BY host;", transaction: transaction));
+        var pullRequestHosts = await ReadPullRequestHostsAsync(connection, transaction, cancellationToken);
 
         return new RawData(
             [.. issues.Select(row => new RawIssue
@@ -483,13 +497,26 @@ public sealed class SqliteStore : ITelltaleStore
                 At = StoredTime.FromStored(row.At),
             })],
             PullRequestPastClosures = [.. pullRequestPastClosures.Select(row => new RawPullRequestPastClosure(row.Host, row.Repository, row.PrNumber, StoredTime.FromStored(row.Closed), StoredTime.FromStored(row.ReopenedBy)))],
-            PullRequestHosts = [.. pullRequestHosts.Select(row => new RawPullRequestHost(row.Host, row.State, row.Roster)
+            PullRequestHosts = pullRequestHosts,
+        };
+    }
+
+    public async Task<IReadOnlyList<RawPullRequestHost>> ReadPullRequestHostsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
+        return await ReadPullRequestHostsAsync(connection, transaction: null, cancellationToken);
+    }
+
+    private static async Task<IReadOnlyList<RawPullRequestHost>> ReadPullRequestHostsAsync(DbConnection connection, DbTransaction? transaction, CancellationToken cancellationToken) =>
+    [
+        .. (await connection.QueryAsync<PullRequestHostRow>(Command(cancellationToken, "SELECT * FROM pull_request_host ORDER BY host;", transaction: transaction)))
+            .Select(row => new RawPullRequestHost(row.Host, row.State, row.Roster)
             {
                 CollectFrom = StoredTime.FromStoredOrNull(row.CollectFrom),
                 Repositories = row.Repositories is null ? null : JsonSerializer.Deserialize<string[]>(row.Repositories),
-            })],
-        };
-    }
+                Source = row.Source,
+            }),
+    ];
 
     public async Task ReplaceDerivedAsync(DerivedData derived, DerivedSource source, CancellationToken cancellationToken = default)
     {
@@ -1069,6 +1096,7 @@ public sealed class SqliteStore : ITelltaleStore
         public string Roster { get; init; } = "";
         public string? CollectFrom { get; init; }
         public string? Repositories { get; init; }
+        public string? Source { get; init; }
     }
 
     private sealed class StatusRow

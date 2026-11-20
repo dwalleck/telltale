@@ -72,6 +72,16 @@ public sealed record TelltaleSettings
     public AdoSettings? Ado { get; init; }
 
     /// <summary>
+    /// Where each configured pull request host is read from, in the order the hosts are read. Empty when no
+    /// pull request host is configured. Another host adds its entry here.
+    /// </summary>
+    public IReadOnlyList<PullRequestSource> PullRequestSources =>
+    [
+        .. GitHub is { } github ? [github.Source] : Array.Empty<PullRequestSource>(),
+        .. Ado is { } ado ? [ado.Source] : Array.Empty<PullRequestSource>(),
+    ];
+
+    /// <summary>
     /// The settings as a rebuild records them, apart from the raw data's digest, the brief visit thresholds and
     /// the treatment of brief visits, which <see cref="DerivedFrom"/> fills in: the thresholds are recorded from
     /// <see cref="BriefVisitThresholds"/> and the treatment from <see cref="BriefVisitTreatment"/>, the ones
