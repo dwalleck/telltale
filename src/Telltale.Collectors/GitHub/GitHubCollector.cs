@@ -59,7 +59,7 @@ public sealed class GitHubCollector : IPullRequestCollector
 
     public async Task<PullRequestBatch> FetchAsync(RawData stored, bool everything, CancellationToken cancellationToken)
     {
-        using var github = new HostClient(_handler, "GitHub", _settings.ApiUrl, new AuthenticationHeaderValue("Bearer", _token), _clock, _notices);
+        using var github = new HostClient(_handler, "GitHub", _settings.ApiUrl, new AuthenticationHeaderValue("Bearer", _token), _clock, _notices, namesTheResetOfAUsedUpLimit: true);
         github.AddHeader("User-Agent", "telltale");
         github.AddHeader("X-GitHub-Api-Version", "2022-11-28");
 
