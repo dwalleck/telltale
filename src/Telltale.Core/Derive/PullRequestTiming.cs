@@ -91,7 +91,9 @@ public static class PullRequestTiming
                 .ToList();
             foreach (var measure in Measures)
             {
-                if (RestsOnReviews(measure) && withoutReviews.Contains(seen.Host))
+                // A pull request whose own events the host did not give (PullRequestHistoryStates.Failed) has no
+                // wait that rests on them: an event that was not read can be its first. Its merge is still counted.
+                if (RestsOnReviews(measure) && (withoutReviews.Contains(seen.Host) || seen.History != PullRequestHistoryStates.Read))
                 {
                     continue;
                 }
@@ -160,12 +162,19 @@ public static class PullRequestTiming
     public static IReadOnlySet<string> HostsWithoutTheirReviews(RawData raw, IReadOnlyDictionary<string, IReadOnlyList<string>> repositoriesByHost) =>
         raw.PullRequestHosts.Where(host => host.Roster == PullRequestRosterStates.Failed).Select(host => host.Host)
             .Concat(raw.PullRequests
-                .Where(pullRequest => pullRequest.History != PullRequestHistoryStates.Read
+                .Where(pullRequest => pullRequest.History == PullRequestHistoryStates.NotRead
                     && repositoriesByHost.TryGetValue(pullRequest.Host, out var repositories)
                     && repositories.Contains(pullRequest.Repository, StringComparer.Ordinal))
                 .Select(pullRequest => pullRequest.Host))
             .Where(repositoriesByHost.ContainsKey)
             .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The moment of the pull request's first code review by its host's rule, or null when it has none that
+    /// can be relied on. <paramref name="events"/> are the pull request's, earliest first.
+    /// </summary>
+    public static DateTimeOffset? FirstCodeReviewOf(RawPullRequest pullRequest, IReadOnlyList<RawPullRequestEvent> events) =>
+        EndOf(FirstCodeReview, pullRequest, events) is { } ended && ended >= pullRequest.Opened ? ended : null;
 
     /// <summary>Whether a measure's end is a review, and so needs the host's reviews to have been read and classified.</summary>
     private static bool RestsOnReviews(string measure) => measure is FirstCodeReview or FirstCodeApproval;

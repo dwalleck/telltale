@@ -314,6 +314,9 @@ public sealed record DerivedData(
     /// <summary>The measures a pull request can have a wait for, in the order a report lists them.</summary>
     public IReadOnlyList<string> PullRequestMeasures { get; init; } = [];
 
+    /// <summary>The pull requests that had no first code review at a sprint's close: at most one row per sprint and pull request. Empty when no pull request host is configured.</summary>
+    public IReadOnlyList<PullRequestWithoutReview> PullRequestsWithoutReview { get; init; } = [];
+
     /// <summary>What the store holds of each configured pull request host for each measure: one row per host and measure. Empty when no pull request host is configured.</summary>
     public IReadOnlyList<PullRequestHostCoverage> PullRequestCoverage { get; init; } = [];
 }
@@ -355,6 +358,15 @@ public static class PullRequestCoverageStates
     /// <summary>The host scope of the rows that hold every configured host's waits together.</summary>
     public const string CombinedScope = "combined";
 }
+
+/// <summary>
+/// One pull request that had no first code review when a sprint closed, or at the as-of time for a sprint
+/// still running (see <c>PullRequestsWithoutReview</c>). It is an explanation and no wait: it has no duration.
+/// It carries no author: pull request results are not grouped or counted by person.
+/// </summary>
+/// <param name="State">One of <c>PullRequestReviewStates</c>: why it has none.</param>
+/// <param name="Activity">One of <c>PullRequestReviewActivities</c>: what had been submitted on it by then.</param>
+public sealed record PullRequestWithoutReview(string SprintId, string Host, string Repository, long Number, string State, string Activity);
 
 /// <summary>
 /// One wait of one pull request: from its opening to the event that ended the wait for <see cref="Measure"/>

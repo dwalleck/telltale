@@ -200,8 +200,10 @@ public class AdoPullRequestCollectionTests
     }
 
     [Test]
-    public async Task An_answer_in_an_unknown_shape_stops_the_command_without_quoting_it_and_stores_nothing_of_that_read()
+    public async Task Threads_in_an_unknown_shape_are_not_quoted_and_leave_their_pull_request_stored_as_one_whose_history_was_not_read()
     {
+        // Since ticket 07 one pull request's threads that cannot be understood no longer stop the command:
+        // the pull request is stored and says its history was not read (AdoPullRequestsWithoutReviewTests).
         var (pipeline, ado) = AdoOnly();
         await using var _ = pipeline;
         ado.AddPullRequest(1, AdoIdentities.AuthorOne, Local(2026, 1, 20, 12));
@@ -211,10 +213,12 @@ public class AdoPullRequestCollectionTests
 
         var exit = await pipeline.RunAsync("sync");
 
-        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(exit).IsEqualTo(0);
         await Assert.That(pipeline.Error.ToString().ReplaceLineEndings("\n")).IsEqualTo(
-            "Azure DevOps's pull request threads answered in a shape this tool does not understand (KeyNotFoundException). Nothing was stored.\n");
-        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM pull_request")).IsEquivalentTo(new[] { 0L });
+            "Azure DevOps: the threads of a pull request could not be read (Azure DevOps's pull request threads answered in a shape this tool does not understand (KeyNotFoundException).). "
+            + "It is stored without them and counted as a pull request whose history was not read; its threads are asked for again at the next sync.\n");
+        await Assert.That((await pipeline.QueryAsync<string>("SELECT history FROM pull_request")).ToArray()).IsEquivalentTo(new[] { "failed" });
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM pull_request_event")).IsEquivalentTo(new[] { 0L });
     }
 
     [Test]

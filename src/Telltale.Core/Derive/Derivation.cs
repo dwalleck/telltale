@@ -176,6 +176,7 @@ public static class Derivation
             // Pull request timing is PullRequestTiming's, whole: nothing above reads a pull request, and
             // nothing there reads an issue.
             PullRequestWaits = PullRequestTiming.Waits(raw, settings.PullRequestRepositories, windows, calendar, asOf),
+            PullRequestsWithoutReview = PullRequestsWithoutReview.Of(raw, settings.PullRequestRepositories, windows, asOf),
             PullRequestMeasures = PullRequestTiming.MeasuresGiven(settings.PullRequestRepositories),
             PullRequestCoverage = PullRequestTiming.Coverage(raw, settings.PullRequestRepositories),
         };
