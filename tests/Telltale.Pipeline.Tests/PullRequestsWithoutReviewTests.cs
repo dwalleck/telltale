@@ -117,6 +117,32 @@ public class PullRequestsWithoutReviewTests
     }
 
     [Test]
+    public async Task Not_known_in_a_column_that_splits_the_waiting_and_the_closed_is_explained_like_any_other()
+    {
+        // Read in full first: one waiting with nothing on it, one closed with nothing, and one whose only
+        // review names no reviewer. Then a fourth is opened and the Ops roster cannot be read: its reviews
+        // are not read, and the row no longer rests on a full read of the reviews.
+        await using var pipeline = SuppressionOff();
+        pipeline.Jira.AddSprints41And42();
+        var github = FakeGitHub.For(pipeline);
+        github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 20, 12));
+        github.AddPullRequest(2, Accounts.AuthorOne, Local(2026, 1, 20, 12)).Closed(Local(2026, 1, 22, 12));
+        github.AddPullRequest(3, Accounts.AuthorTwo, Local(2026, 1, 20, 12)).Reviewed(null, "COMMENTED", Local(2026, 1, 21, 12));
+        await pipeline.RunAllAsync(["sync"]);
+        github.AddPullRequest(4, Accounts.AuthorTwo, Local(2026, 1, 21, 12));
+        pipeline.Jira.Handler.Override(HttpMethod.Get, "/api/v3/orgs/fake-org/teams/fake-ops/members", _ => true, StubHttpHandler.Json("""{"message":"Synthetic refusal"}""", System.Net.HttpStatusCode.Forbidden));
+
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+
+        // The four columns that each hold a pull request have their numbers. Automation only and Ops only
+        // hold none, which under this coverage is not known: the line that says what that means is there.
+        await Assert.That(await pipeline.ReadReportAsync(42)).Contains(
+            TableHead + "| GitHub | 1 | 1 | 2 | not known | not known | 1 | 1 |\n"
+            + "\n- \"not known\" stands where a row does not rest on a full read of its reviews (the lines under the table above say which and why) and the store holds no such pull request: that is not a count of zero.\n"
+            + "- Still waiting");
+    }
+
+    [Test]
     public async Task A_review_that_cannot_be_classified_gives_no_wait_and_is_counted_apart_from_the_waiting()
     {
         await using var pipeline = SuppressionOff();

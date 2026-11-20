@@ -604,7 +604,11 @@ public static class SprintReport
                 Number(row.HistoryNotRead));
         }
 
-        var someNotKnown = rows.Any(row => row.Waiting is null || row.ClosedWithoutReview is null || row.Unclassifiable is null || row.HistoryNotRead is null);
+
+        // Every column that can print "not known" is looked at. Ops only is left out for the Azure DevOps
+        // row alone: the view gives no number there for another reason, and the cell says "no Ops group".
+        var someNotKnown = rows.Any(row => row.Waiting is null || row.ClosedWithoutReview is null || row.NoActivity is null || row.AutomationOnly is null
+            || (row.OpsOnly is null && row.HostScope != PullRequestHosts.Ado) || row.Unclassifiable is null || row.HistoryNotRead is null);
         report.Append(!someNotKnown ? "\n" : "\n- \"not known\" stands where a row does not rest on a full read of its reviews (the lines under the table above say which and why) and the store holds no such pull request: that is not a count of zero.\n");
         report
             .Append("- Still waiting: open at that moment with no first code review yet. A review made later does not take a pull request out of this sprint's number: it was waiting when the sprint closed, and its wait is counted in the sprint of the review.\n")
