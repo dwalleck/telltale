@@ -138,7 +138,7 @@ public class PullRequestsWithoutReviewTests
         // hold none, which under this coverage is not known: the line that says what that means is there.
         await Assert.That(await pipeline.ReadReportAsync(42)).Contains(
             TableHead + "| GitHub | 1 | 1 | 2 | not known | not known | 1 | 1 |\n"
-            + "\n- \"not known\" stands where a row does not rest on a full read of its reviews (the lines under the table above say which and why) and the store holds no such pull request: that is not a count of zero.\n"
+            + "\n- \"not known\" stands where a row does not rest on a full read (the lines under the table above say which rows and why) and the store holds no such pull request: that is not a count of zero.\n"
             + "- Still waiting");
     }
 
@@ -182,7 +182,7 @@ public class PullRequestsWithoutReviewTests
         await Assert.That(report).Contains("| Merge | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n");
         await Assert.That(report).Contains(
             "| GitHub | not known | not known | not known | not known | not known | not known | 2 |\n\n"
-            + "- \"not known\" stands where a row does not rest on a full read of its reviews (the lines under the table above say which and why) and the store holds no such pull request: that is not a count of zero.\n- Still waiting");
+            + "- \"not known\" stands where a row does not rest on a full read (the lines under the table above say which rows and why) and the store holds no such pull request: that is not a count of zero.\n- Still waiting");
 
         // Read: one was reviewed and is in no column, and the other's history is empty, which is waiting with no activity.
         refused = false;

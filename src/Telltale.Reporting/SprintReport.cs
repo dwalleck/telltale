@@ -636,7 +636,7 @@ public static class SprintReport
         // row alone: the view gives no number there for another reason, and the cell says "no Ops group".
         var someNotKnown = rows.Any(row => row.Waiting is null || row.ClosedWithoutReview is null || row.NoActivity is null || row.AutomationOnly is null
             || (row.OpsOnly is null && row.HostScope != PullRequestHosts.Ado) || row.Unclassifiable is null || row.HistoryNotRead is null);
-        report.Append(!someNotKnown ? "\n" : "\n- \"not known\" stands where a row does not rest on a full read of its reviews (the lines under the table above say which and why) and the store holds no such pull request: that is not a count of zero.\n");
+        report.Append(!someNotKnown ? "\n" : "\n- \"not known\" stands where a row does not rest on a full read (the lines under the table above say which rows and why) and the store holds no such pull request: that is not a count of zero.\n");
         report
             .Append("- Still waiting: open at that moment with no first code review yet. A review made later does not take a pull request out of this sprint's number: it was waiting when the sprint closed, and its wait is counted in the sprint of the review.\n")
             .Append("- Closed without one: closed during the sprint, merged or not, with no first code review before it closed. A merge is still counted in the Merge row.\n")
