@@ -14,7 +14,7 @@ namespace Telltale.Pipeline.Tests;
 public class PullRequestRosterTests
 {
     private const string Figures = "SELECT sprint_id, measure, sample_count, median_elapsed_days FROM pr_timing_per_sprint WHERE sample_count > 0 AND sprint_id IS NOT NULL ORDER BY sprint_id, measure_position";
-    private const string Measures = "SELECT DISTINCT measure FROM pr_timing_per_sprint ORDER BY measure_position";
+    private const string Measures = "SELECT DISTINCT measure || ': ' || coverage || ', ' || COALESCE(sample_count, 'no count') FROM pr_timing_per_sprint WHERE sprint_id = '42' ORDER BY measure_position";
     private const string HostState = "SELECT state || ', roster ' || roster FROM pull_request_host WHERE host = 'github'";
     private const string MembersPath = "/api/v3/orgs/fake-org/teams/fake-ops/members";
 
@@ -56,8 +56,8 @@ public class PullRequestRosterTests
         // No review is asked for: without the roster it could not be classified, and a class is never changed.
         await Assert.That(github.ReviewsAskedFor).IsEmpty();
 
-        // The review measures have no row at all, not a row that counts nothing. The merge is known and counted.
-        await Assert.That((await pipeline.QueryAsync<string>(Measures)).ToArray()).IsEquivalentTo(new[] { "merge" });
+        // The review measures' rows say that the reviews were not read and have no count: not a count of zero. The merge is known and counted.
+        await Assert.That((await pipeline.QueryAsync<string>(Measures)).ToArray()).IsEquivalentTo(new[] { "first_code_review: reviews not read, no count", "first_code_approval: reviews not read, no count", "merge: read, 1" });
         await Assert.That(await FiguresAsync(pipeline)).IsEquivalentTo(new[] { ("42", "merge", 1L, 2d) });
         var report = await pipeline.ReadReportAsync(42);
         await Assert.That(report).Contains("| P85 (business days) |\n| --- | ---: | ---: | ---: | ---: | ---: |\n| Merge | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n\n" + NotShown + "- These are");
