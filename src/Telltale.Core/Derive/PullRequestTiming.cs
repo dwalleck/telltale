@@ -56,7 +56,9 @@ public static class PullRequestTiming
     /// <summary>
     /// The waits of the pull requests in <paramref name="raw"/> that belong to a repository listed in
     /// <paramref name="repositoriesByHost"/>, as of <paramref name="asOf"/>: nothing dated at or after it is
-    /// counted in this rebuild, and a later one picks it up.
+    /// counted. A run sets its as-of time just past the newest thing a host reported, so what a host dates
+    /// after this machine's clock is counted by the run that collected it; the rule here is for whatever
+    /// as-of time is given.
     /// </summary>
     public static IReadOnlyList<PullRequestWait> Waits(
         RawData raw,
