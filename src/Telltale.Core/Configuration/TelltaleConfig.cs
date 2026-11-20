@@ -69,6 +69,14 @@ public sealed record TelltaleConfig
     /// no listed status has the work role: nothing could be left out.
     /// </summary>
     public BriefVisitTreatmentSetting BriefVisitTreatment { get; init; } = BriefVisitTreatmentSetting.None;
+
+    /// <summary>
+    /// Where pull requests are read from on GitHub (see <see cref="GitHubConfig"/>). The setting may be left
+    /// out: then nothing is asked of GitHub and reports have no pull request section. Each pull request host
+    /// has a setting, a record and a file of its own.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonPropertyName("github")]
+    public GitHubConfig? GitHub { get; init; }
 }
 
 /// <summary>Where the team's work lives in Jira.</summary>

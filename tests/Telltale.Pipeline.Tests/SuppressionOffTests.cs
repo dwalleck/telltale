@@ -37,12 +37,12 @@ public class SuppressionOffTests
 
     /// <summary>
     /// The metric views: what <c>query</c> may read. A view added later is added here, and to what
-    /// <see cref="The_metric_views_are_these_twelve_with_suppression_off_and_none_holds_a_person"/> says of each.
+    /// <see cref="The_metric_views_are_these_thirteen_with_suppression_off_and_none_holds_a_person"/> says of each.
     /// </summary>
     private static readonly string[] MetricViews =
     [
         "baseline_cycle_time_per_bucket", "baseline_sprint", "baseline_time_in_status", "brief_visit_treatment", "brief_visits_per_sprint", "cycle_starts_with_brief_visit_per_sprint", "cycle_time_per_sprint_and_bucket", "data_quality",
-        "delivered_per_sprint", "minimum_group_size", "sprint_team", "time_in_status_per_sprint",
+        "delivered_per_sprint", "minimum_group_size", "pr_timing_per_sprint", "sprint_team", "time_in_status_per_sprint",
     ];
 
     private const string DataQualitySql = "SELECT anomaly_issue_count, delivered_between_sprints_count, suppressed FROM data_quality;";
@@ -463,6 +463,7 @@ public class SuppressionOffTests
             | data_quality.suppressed | 1 | 0 |
             | delivered_per_sprint.suppressed | 3 | 0 |
             | delivered_per_sprint.team_suppressed | 3 | 0 |
+            | pr_timing_per_sprint.suppressed | 0 | 0 |
             | sprint_team.delivered_suppressed | 3 | 0 |
             | sprint_team.team_suppressed | 3 | 0 |
             | time_in_status_per_sprint.suppressed | 8 | 0 |
@@ -652,7 +653,7 @@ public class SuppressionOffTests
     }
 
     [Test]
-    public async Task The_metric_views_are_these_twelve_with_suppression_off_and_none_holds_a_person()
+    public async Task The_metric_views_are_these_thirteen_with_suppression_off_and_none_holds_a_person()
     {
         // Owner decision D68: turning suppression off adds no view, and no view is about a person. (That each
         // view has the same columns in either state is OptionalSuppressionTests'.)

@@ -135,6 +135,14 @@ public sealed class SqliteStore : ITelltaleStore
         if (replaceAll)
         {
             await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM change; DELETE FROM issue; DELETE FROM sprint;", transaction: transaction));
+
+            // Pull request rows are not Jira's and stay. But a batch that replaces everything may bring another
+            // salt, and then no stored hash may be left under the old one: the authors are forgotten here, and
+            // the pull request collector, which runs after Jira's in the same command, hashes them again.
+            if (hashedWithBefore != batch.SaltFingerprint)
+            {
+                await connection.ExecuteAsync(Command(cancellationToken, "UPDATE pull_request SET author_hash = NULL WHERE author_hash IS NOT NULL;", transaction: transaction));
+            }
         }
 
         // An issue that is out of scope now may have been stored while it was in scope (owner decision D13).
@@ -250,8 +258,74 @@ public sealed class SqliteStore : ITelltaleStore
         // Every write reads all raw rows back for this, so its cost grows with the store and not with the
         // batch. That is accepted: the store is one team's board (thousands of rows), a fetch is one batch,
         // and a digest of the whole raw set is what makes "the raw data changed" reliable.
+        await RecordDigestAsync(connection, transaction, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task RecordDigestAsync(DbConnection connection, DbTransaction transaction, CancellationToken cancellationToken)
+    {
         var digest = DigestOf(await ReadRawAsync(connection, transaction, cancellationToken));
         await connection.ExecuteAsync(Command(cancellationToken, "DELETE FROM raw_state; INSERT INTO raw_state (digest) VALUES (@digest);", new { digest }, transaction));
+    }
+
+    public async Task WritePullRequestsAsync(PullRequestBatch batch, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        // The batch is added to what the store holds, so its authors must be hashed with the stored people's salt.
+        var hashedWithBefore = await ReadSaltFingerprintAsync(connection, transaction, cancellationToken);
+        IdentityHash.RequireSameSalt(hashedWithBefore, batch.SaltFingerprint);
+
+        // What a pull request is now replaces what it was: it can be merged, closed or reopened since.
+        await ExecuteForEachRowAsync(
+            connection,
+            transaction,
+            """
+            INSERT INTO pull_request (host, repository, pr_number, opened, merged, closed, author_hash)
+            VALUES (@host, @repository, @number, @opened, @merged, @closed, @authorHash)
+            ON CONFLICT (host, repository, pr_number) DO UPDATE SET
+                opened = excluded.opened,
+                merged = excluded.merged,
+                closed = excluded.closed,
+                author_hash = excluded.author_hash;
+            """,
+            ["@host", "@repository", "@number", "@opened", "@merged", "@closed", "@authorHash"],
+            batch.PullRequests.Select(pullRequest => new object?[]
+            {
+                pullRequest.Host, pullRequest.Repository, pullRequest.Number, StoredTime.ToStored(pullRequest.Opened),
+                StoredTime.ToStored(pullRequest.Merged), StoredTime.ToStored(pullRequest.Closed), pullRequest.AuthorHash,
+            }),
+            cancellationToken);
+
+        // An event is stored as it was first classified and is not classified again (RawPullRequestEvent): the
+        // store keeps nothing of who acted, so a later answer could only be judged by a later roster.
+        await ExecuteForEachRowAsync(
+            connection,
+            transaction,
+            """
+            INSERT INTO pull_request_event (host, repository, pr_number, kind, event_id, outcome, actor, at)
+            VALUES (@host, @repository, @number, @kind, @eventId, @outcome, @actor, @at)
+            ON CONFLICT (host, repository, pr_number, kind, event_id) DO NOTHING;
+            """,
+            ["@host", "@repository", "@number", "@kind", "@eventId", "@outcome", "@actor", "@at"],
+            batch.Events.Select(happened => new object?[]
+            {
+                happened.Host, happened.Repository, happened.Number, happened.Kind, happened.EventId, happened.Outcome, happened.Actor, StoredTime.ToStored(happened.At),
+            }),
+            cancellationToken);
+
+        await connection.ExecuteAsync(Command(
+            cancellationToken,
+            """
+            INSERT INTO pull_request_host (host, state, roster) VALUES (@Host, @State, @Roster)
+            ON CONFLICT (host) DO UPDATE SET state = excluded.state, roster = excluded.roster;
+            """,
+            batch.HostState,
+            transaction));
+
+        await RecordSaltAsync(connection, transaction, batch.SaltFingerprint, hashedWithBefore, cancellationToken);
+        await RecordDigestAsync(connection, transaction, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -266,7 +340,11 @@ public sealed class SqliteStore : ITelltaleStore
 
     private static async Task<string?> ReadSaltFingerprintAsync(DbConnection connection, DbTransaction? transaction, CancellationToken cancellationToken) =>
         await connection.QuerySingleOrDefaultAsync<string?>(Command(cancellationToken, "SELECT salt_fingerprint FROM person_hashing;", transaction: transaction))
-        ?? (await connection.ExecuteScalarAsync<long>(Command(cancellationToken, "SELECT COUNT(*) FROM issue WHERE assignee_hash IS NOT NULL;", transaction: transaction)) > 0 ? UnknownSalt : null);
+        ?? (await connection.ExecuteScalarAsync<long>(Command(cancellationToken, HoldsHashedPeopleSql, transaction: transaction)) > 0 ? UnknownSalt : null);
+
+    /// <summary>Whether any raw row holds a person's hash: an issue's assignee or a pull request's author. The one place that lists where hashes are kept.</summary>
+    private const string HoldsHashedPeopleSql =
+        "SELECT EXISTS (SELECT 1 FROM issue WHERE assignee_hash IS NOT NULL) OR EXISTS (SELECT 1 FROM pull_request WHERE author_hash IS NOT NULL);";
 
     /// <summary>
     /// Records the salt a batch was hashed with, after the batch's rows are written. A batch under another
@@ -331,6 +409,9 @@ public sealed class SqliteStore : ITelltaleStore
         var changes = await connection.QueryAsync<ChangeRow>(Command(cancellationToken, "SELECT * FROM change ORDER BY issue_id, at, history_id;", transaction: transaction));
         var sprints = await connection.QueryAsync<SprintRow>(Command(cancellationToken, "SELECT * FROM sprint ORDER BY sprint_id;", transaction: transaction));
         var statuses = await connection.QueryAsync<StatusRow>(Command(cancellationToken, "SELECT * FROM status ORDER BY status_id;", transaction: transaction));
+        var pullRequests = await connection.QueryAsync<PullRequestRow>(Command(cancellationToken, "SELECT * FROM pull_request ORDER BY host, repository, pr_number;", transaction: transaction));
+        var pullRequestEvents = await connection.QueryAsync<PullRequestEventRow>(Command(cancellationToken, "SELECT * FROM pull_request_event ORDER BY host, repository, pr_number, kind, event_id;", transaction: transaction));
+        var pullRequestHosts = await connection.QueryAsync<PullRequestHostRow>(Command(cancellationToken, "SELECT * FROM pull_request_host ORDER BY host;", transaction: transaction));
 
         return new RawData(
             [.. issues.Select(row => new RawIssue
@@ -347,7 +428,31 @@ public sealed class SqliteStore : ITelltaleStore
             })],
             [.. changes.Select(row => new RawChange(row.HistoryId, row.IssueId, StoredTime.FromStored(row.At), row.Field, row.FromValue, row.ToValue))],
             [.. sprints.Select(row => new RawSprint(row.SprintId, row.BoardId, row.Name, row.State, StoredTime.FromStoredOrNull(row.Started), StoredTime.FromStoredOrNull(row.PlannedEnd), StoredTime.FromStoredOrNull(row.Completed)))],
-            [.. statuses.Select(row => new RawStatus(row.StatusId, row.Name, row.Category))]);
+            [.. statuses.Select(row => new RawStatus(row.StatusId, row.Name, row.Category))])
+        {
+            PullRequests = [.. pullRequests.Select(row => new RawPullRequest
+            {
+                Host = row.Host,
+                Repository = row.Repository,
+                Number = row.PrNumber,
+                Opened = StoredTime.FromStored(row.Opened),
+                Merged = StoredTime.FromStoredOrNull(row.Merged),
+                Closed = StoredTime.FromStoredOrNull(row.Closed),
+                AuthorHash = row.AuthorHash,
+            })],
+            PullRequestEvents = [.. pullRequestEvents.Select(row => new RawPullRequestEvent
+            {
+                Host = row.Host,
+                Repository = row.Repository,
+                Number = row.PrNumber,
+                Kind = row.Kind,
+                EventId = row.EventId,
+                Outcome = row.Outcome,
+                Actor = row.Actor,
+                At = StoredTime.FromStored(row.At),
+            })],
+            PullRequestHosts = [.. pullRequestHosts.Select(row => new RawPullRequestHost(row.Host, row.State, row.Roster))],
+        };
     }
 
     public async Task ReplaceDerivedAsync(DerivedData derived, DerivedSource source, CancellationToken cancellationToken = default)
@@ -442,14 +547,37 @@ public sealed class SqliteStore : ITelltaleStore
             connection,
             transaction,
             """
-            INSERT INTO run (as_of, raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure, brief_visit_thresholds, brief_visit_treatment, objects_version)
-            VALUES (@asOf, @rawDigest, @timeZone, @holidays, @baselineSprintIds, @statusRoles, @abandonedResolutionIds, @minimumTeam, @minimumAssigneesBehindAFigure, @briefVisitThresholds, @briefVisitTreatment, @objectsVersion);
+            INSERT INTO run (as_of, raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure, brief_visit_thresholds, brief_visit_treatment, pull_request_repositories, objects_version)
+            VALUES (@asOf, @rawDigest, @timeZone, @holidays, @baselineSprintIds, @statusRoles, @abandonedResolutionIds, @minimumTeam, @minimumAssigneesBehindAFigure, @briefVisitThresholds, @briefVisitTreatment, @pullRequestRepositories, @objectsVersion);
             """,
-            ["@asOf", "@rawDigest", "@timeZone", "@holidays", "@baselineSprintIds", "@statusRoles", "@abandonedResolutionIds", "@minimumTeam", "@minimumAssigneesBehindAFigure", "@briefVisitThresholds", "@briefVisitTreatment", "@objectsVersion"],
+            ["@asOf", "@rawDigest", "@timeZone", "@holidays", "@baselineSprintIds", "@statusRoles", "@abandonedResolutionIds", "@minimumTeam", "@minimumAssigneesBehindAFigure", "@briefVisitThresholds", "@briefVisitTreatment", "@pullRequestRepositories", "@objectsVersion"],
             [[
                 StoredTime.ToStored(derived.AsOf), source.RawDigest, source.TimeZone, source.Holidays, source.BaselineSprintIds, source.StatusRoles, source.AbandonedResolutionIds,
-                source.MinimumTeam, source.MinimumAssigneesBehindAFigure, source.BriefVisitThresholds, source.BriefVisitTreatment, DerivedObjectsVersion,
+                source.MinimumTeam, source.MinimumAssigneesBehindAFigure, source.BriefVisitThresholds, source.BriefVisitTreatment, source.PullRequestRepositories, DerivedObjectsVersion,
             ]],
+            cancellationToken);
+
+        await ExecuteForEachRowAsync(
+            connection,
+            transaction,
+            """
+            INSERT INTO pr_wait (host, repository, pr_number, measure, author_hash, opened, ended, elapsed_days, business_days, sprint_id)
+            VALUES (@host, @repository, @number, @measure, @authorHash, @opened, @ended, @elapsedDays, @businessDays, @sprintId);
+            """,
+            ["@host", "@repository", "@number", "@measure", "@authorHash", "@opened", "@ended", "@elapsedDays", "@businessDays", "@sprintId"],
+            derived.PullRequestWaits.Select(wait => new object?[]
+            {
+                wait.Host, wait.Repository, wait.Number, wait.Measure, wait.AuthorHash, StoredTime.ToStored(wait.Opened), StoredTime.ToStored(wait.Ended),
+                wait.ElapsedDays, wait.BusinessDays, wait.SprintId,
+            }),
+            cancellationToken);
+
+        await ExecuteForEachRowAsync(
+            connection,
+            transaction,
+            "INSERT INTO pr_measure (measure, position) VALUES (@measure, @position);",
+            ["@measure", "@position"],
+            derived.PullRequestMeasures.Select((measure, index) => new object?[] { measure, (long)index + 1 }),
             cancellationToken);
 
         await ExecuteForEachRowAsync(
@@ -500,7 +628,7 @@ public sealed class SqliteStore : ITelltaleStore
         await RequireDerivedByThisVersionAsync(connection, cancellationToken);
         return await connection.QuerySingleOrDefaultAsync<DerivedSource?>(Command(
             cancellationToken,
-            "SELECT raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure, brief_visit_thresholds, brief_visit_treatment FROM run;"));
+            "SELECT raw_digest, time_zone, holidays, baseline_sprint_ids, status_roles, abandoned_resolution_ids, minimum_team, minimum_assignees_behind_a_figure, brief_visit_thresholds, brief_visit_treatment, pull_request_repositories FROM run;"));
     }
 
     /// <summary>
@@ -723,9 +851,17 @@ public sealed class SqliteStore : ITelltaleStore
         }
 
         await using var connection = await OpenAsync(ReadOnlyConnectionString(databasePath), cancellationToken);
-        var hasIssues = await connection.ExecuteScalarAsync<long>(Command(cancellationToken, "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'issue';"));
-        return hasIssues > 0
-            && await connection.ExecuteScalarAsync<long>(Command(cancellationToken, "SELECT EXISTS (SELECT 1 FROM issue WHERE assignee_hash IS NOT NULL);")) > 0;
+        // A file from before a table existed holds nobody in it. The file is not upgraded here: it is only read.
+        foreach (var (table, column) in new[] { ("issue", "assignee_hash"), ("pull_request", "author_hash") })
+        {
+            var exists = await connection.ExecuteScalarAsync<long>(Command(cancellationToken, "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = @table;", new { table }));
+            if (exists > 0 && await connection.ExecuteScalarAsync<long>(Command(cancellationToken, $"SELECT EXISTS (SELECT 1 FROM {table} WHERE {column} IS NOT NULL);")) > 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>A connection that cannot write, whatever SQL it is given, and never creates the file.</summary>
@@ -838,6 +974,36 @@ public sealed class SqliteStore : ITelltaleStore
         public string? StartDate { get; init; }
         public string HistoryFields { get; init; } = "";
         public string? UpdatedThrough { get; init; }
+    }
+
+    private sealed class PullRequestRow
+    {
+        public string Host { get; init; } = "";
+        public string Repository { get; init; } = "";
+        public long PrNumber { get; init; }
+        public string Opened { get; init; } = "";
+        public string? Merged { get; init; }
+        public string? Closed { get; init; }
+        public string? AuthorHash { get; init; }
+    }
+
+    private sealed class PullRequestEventRow
+    {
+        public string Host { get; init; } = "";
+        public string Repository { get; init; } = "";
+        public long PrNumber { get; init; }
+        public string Kind { get; init; } = "";
+        public string EventId { get; init; } = "";
+        public string Outcome { get; init; } = "";
+        public string Actor { get; init; } = "";
+        public string At { get; init; } = "";
+    }
+
+    private sealed class PullRequestHostRow
+    {
+        public string Host { get; init; } = "";
+        public string State { get; init; } = "";
+        public string Roster { get; init; } = "";
     }
 
     private sealed class StatusRow

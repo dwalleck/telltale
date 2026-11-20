@@ -42,6 +42,18 @@ public sealed record TelltaleSettings
     /// <summary>What is done with brief visits (GLOSSARY: Treatment), part by part. Every part is <c>count</c> when the setting is left out.</summary>
     public required BriefVisitTreatmentSetting BriefVisitTreatment { get; init; }
 
+    /// <summary>Where pull requests are read from on GitHub, or null when the setting is left out: then nothing is asked of GitHub.</summary>
+    public GitHubSettings? GitHub { get; init; }
+
+    /// <summary>
+    /// The repositories whose pull requests count, by host (<see cref="PullRequestHosts"/>), each under the name
+    /// the store keeps its rows by. Empty when no pull request host is configured. Another host adds its entry here.
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> PullRequestRepositories =>
+        GitHub is null
+            ? new Dictionary<string, IReadOnlyList<string>>()
+            : new Dictionary<string, IReadOnlyList<string>> { [PullRequestHosts.GitHub] = [.. GitHub.Repositories.Select(repository => repository.Key)] };
+
     /// <summary>
     /// The settings as a rebuild records them, apart from the raw data's digest, the brief visit thresholds and
     /// the treatment of brief visits, which <see cref="DerivedFrom"/> fills in: the thresholds are recorded from
@@ -51,11 +63,11 @@ public sealed record TelltaleSettings
     private DerivedSource Recorded { get; init; } = new("", "", "", "", "", "", MinimumGroupSize.Default.Team, MinimumGroupSize.Default.AssigneesBehindAFigure, DerivedSource.NoBriefVisitThresholds);
 
     /// <summary>Everything a rebuild is decided with besides the raw data and the as-of time.</summary>
-    public DerivationSettings Derivation => new(new DeliveryRules(StatusRoles, AbandonedResolutionIds), new BusinessCalendar(TimeZone, Holidays)) { BriefVisitThresholds = BriefVisitThresholds, BriefVisitTreatment = BriefVisitTreatment };
+    public DerivationSettings Derivation => new(new DeliveryRules(StatusRoles, AbandonedResolutionIds), new BusinessCalendar(TimeZone, Holidays)) { BriefVisitThresholds = BriefVisitThresholds, BriefVisitTreatment = BriefVisitTreatment, PullRequestRepositories = PullRequestRepositories };
 
     /// <summary>What a rebuild of raw data with the digest <paramref name="rawDigest"/> under these settings is built from.</summary>
     public DerivedSource DerivedFrom(string rawDigest) =>
-        Recorded with { RawDigest = rawDigest, BriefVisitThresholds = DerivedSource.BriefVisitThresholdsOf(BriefVisitThresholds), BriefVisitTreatment = DerivedSource.BriefVisitTreatmentOf(BriefVisitTreatment) };
+        Recorded with { RawDigest = rawDigest, BriefVisitThresholds = DerivedSource.BriefVisitThresholdsOf(BriefVisitThresholds), BriefVisitTreatment = DerivedSource.BriefVisitTreatmentOf(BriefVisitTreatment), PullRequestRepositories = DerivedSource.PullRequestRepositoriesOf(PullRequestRepositories) };
 
     /// <summary>
     /// Checks every setting and throws <see cref="SettingRefusedException"/> for the first that is refused.
@@ -95,6 +107,7 @@ public sealed record TelltaleSettings
             Holidays = config.Holidays,
             BriefVisitThresholds = briefVisitThresholds,
             BriefVisitTreatment = briefVisitTreatment,
+            GitHub = config.GitHub is null ? null : GitHubSettings.Checked(config.GitHub),
             Recorded = new DerivedSource(
                 RawDigest: "",
                 config.TimeZone,

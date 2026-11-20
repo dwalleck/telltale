@@ -18,7 +18,7 @@ internal static class SecretsCommand
     {
         // There is deliberately no option or argument that takes the value: a command line is kept in shell
         // history and shown in process lists.
-        var secret = new Argument<string>("secret") { Description = "Which secret to set: jira-email, jira-api-token or hashing-salt." };
+        var secret = new Argument<string>("secret") { Description = $"Which secret to set: {string.Join(", ", SecretInfo.All.Select(info => info.Argument))}." };
         secret.AcceptOnlyFromAmong([.. SecretInfo.All.Select(info => info.Argument)]);
         var generate = new Option<bool>("--generate") { Description = "For hashing-salt: store a new random salt in place of asking for one.", Arity = ArgumentArity.Zero };
         var replace = new Option<bool>("--replace") { Description = "For hashing-salt: replace the salt people are already hashed with. Every person hash already in the database stops matching.", Arity = ArgumentArity.Zero };
@@ -31,7 +31,7 @@ internal static class SecretsCommand
             await SetAsync(services, chosen, new Options(parse.GetValue(generate), parse.GetValue(replace), parse.GetValue(stdin)), cancellationToken);
         }));
 
-        return new Command("secrets", "Manage the secrets the tool needs: the Jira email, the Jira API token and the hashing salt.") { set };
+        return new Command("secrets", "Manage the secrets the tool needs: the Jira email, the Jira API token and the hashing salt, and the token of each pull request host that is configured.") { set };
     }
 
     private static async Task SetAsync(AppServices services, SecretInfo secret, Options options, CancellationToken cancellationToken)

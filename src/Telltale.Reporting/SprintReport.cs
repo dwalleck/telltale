@@ -105,6 +105,17 @@ public static class SprintReport
             new { sprintId },
             cancellationToken));
         AppendTimeInStatus(report, baseline, await ReadTimeInStatusAsync(store, sprintId, leftOutOfTimeInStatus, cancellationToken), leftOutOfTimeInStatus);
+
+        // The pull request section is there only when the rebuild counted pull requests: without a pull
+        // request host configured the view has no rows and is not asked, and the report is what it was.
+        if (derivedFrom.PullRequestsCounted)
+        {
+            AppendPullRequestTiming(report, numbers, await store.QueryViewsAsync<PullRequestTimingRow>(
+                "SELECT measure, sample_count, median_elapsed_days, suppressed FROM pr_timing_per_sprint WHERE sprint_id = @sprintId ORDER BY measure_position;",
+                new { sprintId },
+                cancellationToken));
+        }
+
         var quality = await ReadDataQualityAsync(store, cancellationToken);
 
         // With no status listed neither brief visit view has rows, so neither is asked. The footer's cycle time
@@ -353,6 +364,81 @@ public static class SprintReport
             var status = row.Adjusted != 0 ? row.StatusName + AdjustedMark : row.StatusName;
             AppendTableRow(report, [status, Count(row.IssueCount), Days(row.Suppressed, row.MedianBusinessDays), Days(row.Suppressed, row.TotalBusinessDays), .. baselineCells]);
         }
+    }
+
+    /// <summary>
+    /// How the pull request table names each measure of <c>pr_timing_per_sprint</c>. A measure the view gains
+    /// is given its words here; one without an entry is printed under its own name, never left out.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> PullRequestMeasureLabels = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        [PullRequestTiming.FirstCodeReview] = "First code review",
+        [PullRequestTiming.Merge] = "Merge",
+    };
+
+    /// <summary>What a figure's cell says when no pull request has a wait for the row's measure in the sprint: there is no figure, and nothing is withheld.</summary>
+    private const string NoWait = "none";
+
+    /// <summary>
+    /// The pull request section: one row for each measure the view gives, in the view's order, then what the
+    /// figures are of (<see cref="AppendPullRequestTimingExplained"/>). It is written only when the derived
+    /// data was built with a pull request host configured; a report without one is what it was before. A
+    /// sprint the view withholds as a whole (no row has a count) gets the one "suppressed" line, as the other
+    /// tables do.
+    /// </summary>
+    private static void AppendPullRequestTiming(StringBuilder report, NumbersInForce numbers, IReadOnlyList<PullRequestTimingRow> rows)
+    {
+        report.Append("\n## Pull request timing\n\n");
+        if (rows.Count > 0 && rows.All(row => row.SampleCount is null))
+        {
+            AppendSuppressedTable(report);
+        }
+        else
+        {
+            AppendTableHead(report, "Wait from opening to", "Pull requests", "Median (elapsed days)");
+            foreach (var row in rows)
+            {
+                AppendTableRow(
+                    report,
+                    PullRequestMeasureLabels.GetValueOrDefault(row.Measure, row.Measure),
+                    Count(row.SampleCount),
+                    row is { SampleCount: 0, Suppressed: 0 } ? NoWait : Days(row.Suppressed, row.MedianElapsedDays));
+            }
+        }
+
+        AppendPullRequestTimingExplained(report, numbers);
+    }
+
+    /// <summary>
+    /// The pull request section's own notes: what the population is, where a wait starts, ends and is counted,
+    /// what is not a code review, and whose number the minimum group size counts here. They stand under the
+    /// table and not in the method note, so a report without the section has nothing of them.
+    /// </summary>
+    private static void AppendPullRequestTimingExplained(StringBuilder report, NumbersInForce numbers)
+    {
+        report.Append('\n')
+            .Append("- These are the pull requests of the configured repositories: every one of them, linked to a Jira issue or not, whoever opened it. They are not necessarily this team's pull requests, and no team is inferred from them.\n")
+            .Append("- Each wait runs from the moment the pull request was first opened to the event named, and is counted once, at its full length, in the sprint whose window holds that event: a review in this sprint of a pull request opened two sprints ago counts here, with the whole wait. An event between sprint windows, or in more than one, is counted in no sprint. That is not the rule for delivered issues above, where a delivery in overlapping sprints goes to the one that started first.\n")
+            .Append("- Elapsed days are the wait divided by 24 hours, weekends and holidays included. A pull request that has no such event yet is not in the row: it has no wait, not a wait of zero. The figures are recorded waits, not the effort a review took.\n")
+            .Append("- A first code review is the first submitted review by someone other than the author: a comment-only review, a request for changes or an approval, also one dismissed later, made before the pull request closed. Reviews by the author, by automation and by the Ops group are not code reviews, and neither are ordinary comments. Who is in the Ops group is read when a review is first collected, so a review collected long after it was made is judged by the group as it was at that collection, not as it was when the review was made.\n");
+        if (!numbers.TeamCheck && !numbers.FigureCheck)
+        {
+            // The method note says that suppression is off; nothing here is withheld either.
+            return;
+        }
+
+        report.Append("- For these figures the minimum group size counts distinct pull request authors, not Jira assignees.");
+        if (numbers.TeamCheck)
+        {
+            report.Append(" When the pull requests with a wait counted in the sprint have fewer than ").Append(numbers.TeamInWords).Append(" distinct authors, the table reads \"suppressed\", with no rows.");
+        }
+
+        if (numbers.FigureCheck)
+        {
+            report.Append(" A row with fewer than ").Append(numbers.BehindAFigureInWords).Append(" distinct authors behind it keeps its count and reads \"suppressed\" for its figure.");
+        }
+
+        report.Append('\n');
     }
 
     /// <summary>
@@ -821,6 +907,15 @@ public static class SprintReport
         public double? BaselineMedianBusinessDays { get; init; }
         /// <summary>Null when the baseline has no row for the status.</summary>
         public long? BaselineSuppressed { get; init; }
+    }
+
+    private sealed class PullRequestTimingRow
+    {
+        public string Measure { get; init; } = "";
+        /// <summary>Null in every row of a sprint the view withholds as a whole: fewer distinct pull request authors than a team.</summary>
+        public long? SampleCount { get; init; }
+        public double? MedianElapsedDays { get; init; }
+        public long Suppressed { get; init; } = 1;
     }
 
     private sealed class DataQualityRow

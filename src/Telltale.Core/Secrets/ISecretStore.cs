@@ -11,6 +11,9 @@ public enum SecretName
 
     /// <summary>The key for hashing person identities (ADR-0003).</summary>
     HashingSalt,
+
+    /// <summary>The token pull requests are read from GitHub with. Asked for only when the <c>github</c> setting is there. A host's token is added after this one.</summary>
+    GitHubToken,
 }
 
 /// <summary>Where secrets are kept: Windows Credential Manager on the work laptop, environment variables in development, memory in tests.</summary>
