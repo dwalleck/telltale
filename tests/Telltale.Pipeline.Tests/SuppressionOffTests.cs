@@ -642,7 +642,7 @@ public class SuppressionOffTests
     }
 
     [Test]
-    public async Task The_metric_views_are_these_fourteen_with_suppression_off_and_none_holds_a_person()
+    public async Task The_metric_views_are_those_of_the_shared_list_with_suppression_off_and_none_holds_a_person()
     {
         // Owner decision D68: turning suppression off adds no view, and no view is about a person. (That each
         // view has the same columns in either state is OptionalSuppressionTests'.)

@@ -90,7 +90,7 @@ public class QueryCommandTests
 
         await Assert.That(exit).IsEqualTo(1);
         await Assert.That(pipeline.Error.ToString()).StartsWith(
-            $"This query reads only the metric views ({string.Join(", ", MetricViews.All)}), and it asked for something else: ");
+            $"This query reads only the metric views ({string.Join(", ", MetricViews.All.Order(StringComparer.Ordinal))}), and it asked for something else: ");
         await Assert.That(pipeline.Error.ToString().TrimEnd().Split('\n').Length).IsEqualTo(1);
         await Assert.That(pipeline.Out.ToString()).IsEmpty();
         await Assert.That(await pipeline.ReadStoreContentAsync()).IsEqualTo(storeBefore);

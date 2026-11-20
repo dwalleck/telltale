@@ -1,12 +1,16 @@
 namespace Telltale.Pipeline.Tests.Harness;
 
 /// <summary>
-/// The metric views: what <c>query</c> may read. The one list for every test that speaks of all of them, so a
-/// view added later is added here and nowhere else in the tests.
+/// The metric views: what <c>query</c> may read. The one list for every test that speaks of all of them. A view
+/// added later is added here; if it has a column whose name contains <c>suppressed</c>, the flags table of
+/// <c>SuppressionOffTests</c> also gets a row for that column, because that table states what each flag holds.
 /// </summary>
 public static class MetricViews
 {
-    /// <summary>Every metric view's name, in the order <c>query</c> names them when it refuses: by name.</summary>
+    /// <summary>
+    /// Every metric view's name. The order here does not matter: a test that needs the order <c>query</c> names
+    /// them in sorts them as it does, ordinally.
+    /// </summary>
     public static readonly IReadOnlyList<string> All =
     [
         "baseline_cycle_time_per_bucket",

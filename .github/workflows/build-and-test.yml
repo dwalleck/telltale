@@ -41,6 +41,9 @@ jobs:
         shell: pwsh
         run: ./eng/check-sql-line-endings.ps1 -RepoRoot .
 
-      # Tests run against a fake Jira: no network, no secrets.
+      # Tests run against a fake Jira: no network, no secrets. The limit of four tests at once is for a
+      # developer's machine; the Windows runner finishes sooner with no limit (11m 25s against 13m 20s with it).
       - name: Test
         run: dotnet test --no-build
+        env:
+          TELLTALE_TEST_PARALLELISM: "0"
