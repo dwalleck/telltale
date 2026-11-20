@@ -113,15 +113,39 @@ public static class PullRequestTiming
     }
 
     /// <summary>
-    /// The measures a rebuild gives figures for, in the order a report lists them: none when no host is
-    /// configured, and otherwise each measure that at least one configured host can state. A measure that rests
-    /// on reviews is not given while no configured host has its reviews (<see cref="HostsWithoutTheirReviews"/>):
-    /// it then has no row in any sprint, which is not the same as a row that counts no pull request.
+    /// The measures a rebuild gives rows for, in the order a report lists them: none when no host is
+    /// configured, and otherwise all of them. Whether a host's rows of a measure can be relied on is not said
+    /// by leaving the measure out but by <see cref="Coverage"/>.
     /// </summary>
-    public static IReadOnlyList<string> MeasuresGiven(RawData raw, IReadOnlyDictionary<string, IReadOnlyList<string>> repositoriesByHost)
+    public static IReadOnlyList<string> MeasuresGiven(IReadOnlyDictionary<string, IReadOnlyList<string>> repositoriesByHost) =>
+        repositoriesByHost.Count == 0 ? [] : Measures;
+
+    /// <summary>
+    /// What the store holds of each configured host for each measure, one row per host and measure, the hosts
+    /// in the order they are configured: one of <see cref="PullRequestCoverageStates"/>. It is what lets a figure
+    /// say that a host is missing from it, and what keeps a host that was not read from being read as a host
+    /// with no pull requests. A host's last collection decides first (never read, or failed); for a host that
+    /// was read, a measure that rests on reviews is not covered while the host is without them
+    /// (<see cref="HostsWithoutTheirReviews"/>). A host that is not configured has no row: nothing is said of it.
+    /// </summary>
+    public static IReadOnlyList<PullRequestHostCoverage> Coverage(RawData raw, IReadOnlyDictionary<string, IReadOnlyList<string>> repositoriesByHost)
     {
+        var states = raw.PullRequestHosts.ToDictionary(host => host.Host, host => host.State, StringComparer.Ordinal);
         var withoutReviews = HostsWithoutTheirReviews(raw, repositoriesByHost);
-        return [.. Measures.Where(measure => repositoriesByHost.Keys.Any(host => !(RestsOnReviews(measure) && withoutReviews.Contains(host))))];
+        return
+        [
+            .. repositoriesByHost.Keys.SelectMany((host, index) => Measures.Select(measure => new PullRequestHostCoverage(
+                host,
+                index + 1,
+                measure,
+                states.GetValueOrDefault(host) switch
+                {
+                    null => PullRequestCoverageStates.NotRead,
+                    PullRequestHostStates.Read when RestsOnReviews(measure) && withoutReviews.Contains(host) => PullRequestCoverageStates.ReviewsNotRead,
+                    PullRequestHostStates.Read => PullRequestCoverageStates.Read,
+                    _ => PullRequestCoverageStates.FailedRead,
+                }))),
+        ];
     }
 
     /// <summary>

@@ -49,14 +49,14 @@ public class PullRequestFiguresNotWithheldTests
         // The view has no flag to set: a figure is there, or there is no wait and so no figure.
         await Assert.That(await HarnessSteps.QueryAsync(pipeline, EveryRow, "SELECT sprint_id, delivered_count, suppressed FROM delivered_per_sprint;")).IsEqualTo(
             """
-            | sprint_id | measure | measure_position | sample_count | median_elapsed_days | p85_elapsed_days | median_business_days | p85_business_days |
-            | --- | --- | --- | --- | --- | --- | --- | --- |
-            | NULL | first_code_review | 1 | 0 | NULL | NULL | NULL | NULL |
-            | NULL | first_code_approval | 2 | 0 | NULL | NULL | NULL | NULL |
-            | NULL | merge | 3 | 0 | NULL | NULL | NULL | NULL |
-            | 41 | first_code_review | 1 | 1 | 2 | 2 | 2 | 2 |
-            | 41 | first_code_approval | 2 | 0 | NULL | NULL | NULL | NULL |
-            | 41 | merge | 3 | 0 | NULL | NULL | NULL | NULL |
+            | sprint_id | measure | measure_position | host_scope | host_scope_position | coverage | sample_count | median_elapsed_days | p85_elapsed_days | median_business_days | p85_business_days |
+            | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+            | NULL | first_code_review | 1 | github | 1 | read | 0 | NULL | NULL | NULL | NULL |
+            | NULL | first_code_approval | 2 | github | 1 | read | 0 | NULL | NULL | NULL | NULL |
+            | NULL | merge | 3 | github | 1 | read | 0 | NULL | NULL | NULL | NULL |
+            | 41 | first_code_review | 1 | github | 1 | read | 1 | 2 | 2 | 2 | 2 |
+            | 41 | first_code_approval | 2 | github | 1 | read | 0 | NULL | NULL | NULL | NULL |
+            | 41 | merge | 3 | github | 1 | read | 0 | NULL | NULL | NULL | NULL |
             | sprint_id | delivered_count | suppressed |
             | --- | --- | --- |
             | 41 | NULL | 1 |

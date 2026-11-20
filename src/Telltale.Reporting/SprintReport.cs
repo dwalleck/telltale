@@ -111,7 +111,7 @@ public static class SprintReport
         if (derivedFrom.PullRequestsCounted)
         {
             AppendPullRequestTiming(report, await store.QueryViewsAsync<PullRequestTimingRow>(
-                "SELECT measure, sprint_id IS NULL AS in_no_sprint, sample_count, median_elapsed_days, p85_elapsed_days, median_business_days, p85_business_days FROM pr_timing_per_sprint WHERE sprint_id = @sprintId OR sprint_id IS NULL ORDER BY measure_position;",
+                "SELECT measure, sprint_id IS NULL AS in_no_sprint, host_scope, coverage, sample_count, median_elapsed_days, p85_elapsed_days, median_business_days, p85_business_days FROM pr_timing_per_sprint WHERE sprint_id = @sprintId OR sprint_id IS NULL ORDER BY measure_position, host_scope_position;",
                 new { sprintId },
                 cancellationToken), derivedFrom.PullRequestHostsCounted);
         }
@@ -402,23 +402,41 @@ public static class SprintReport
     private static void AppendPullRequestTiming(StringBuilder report, IReadOnlyList<PullRequestTimingRow> rows, IReadOnlyList<string> hosts)
     {
         report.Append("\n## Pull request timing\n\n");
-        AppendTableHead(report, "Wait from opening to", "Pull requests", "Median (elapsed days)", "P85 (elapsed days)", "Median (business days)", "P85 (business days)");
-        foreach (var row in rows.Where(row => row.InNoSprint == 0))
+
+        // The view has combined rows only when more than one host is configured, and only then does the table
+        // say whose pull requests a row is of: with one host every row is that host's.
+        var severalHosts = rows.Any(row => row.HostScope == PullRequestCoverageStates.CombinedScope);
+        if (severalHosts)
+        {
+            AppendTableRow(report, "Wait from opening to", "Host", "Pull requests", "Median (elapsed days)", "P85 (elapsed days)", "Median (business days)", "P85 (business days)");
+            report.Append("| --- | --- | ---: | ---: | ---: | ---: | ---: |\n");
+        }
+        else
+        {
+            AppendTableHead(report, "Wait from opening to", "Pull requests", "Median (elapsed days)", "P85 (elapsed days)", "Median (business days)", "P85 (business days)");
+        }
+
+        // A host's row of a wait whose reviews were not read is not in the table: the line under it names it.
+        foreach (var row in rows.Where(row => row.InNoSprint == 0 && row.Coverage != PullRequestCoverageStates.ReviewsNotRead))
         {
             AppendTableRow(
                 report,
-                PullRequestMeasureLabel(row),
-                row.SampleCount.ToString(CultureInfo.InvariantCulture),
-                WaitDays(row.MedianElapsedDays),
-                WaitDays(row.P85ElapsedDays),
-                WaitDays(row.MedianBusinessDays),
-                WaitDays(row.P85BusinessDays));
+                [
+                    PullRequestMeasureLabel(row),
+                    .. severalHosts ? [HostScopeLabel(row)] : Array.Empty<string>(),
+                    row.SampleCount?.ToString(CultureInfo.InvariantCulture) ?? NotKnown,
+                    WaitDays(row, row.MedianElapsedDays),
+                    WaitDays(row, row.P85ElapsedDays),
+                    WaitDays(row, row.MedianBusinessDays),
+                    WaitDays(row, row.P85BusinessDays),
+                ]);
         }
 
         // The waits the view keeps in no sprint are said by their number alone, and only when there are any:
-        // they are not this sprint's, so their figures are not put beside its own.
-        var inNoSprint = rows.Where(row => row.InNoSprint != 0 && row.SampleCount > 0)
-            .Select(row => $"{PullRequestMeasureLabel(row)} {row.SampleCount.ToString(CultureInfo.InvariantCulture)}")
+        // they are not this sprint's, so their figures are not put beside its own. With several hosts it is the
+        // number of all of them together.
+        var inNoSprint = rows.Where(row => row.InNoSprint != 0 && row.SampleCount > 0 && (!severalHosts || row.HostScope == PullRequestCoverageStates.CombinedScope))
+            .Select(row => $"{PullRequestMeasureLabel(row)} {row.SampleCount?.ToString(CultureInfo.InvariantCulture)}")
             .ToList();
         if (inNoSprint.Count > 0)
         {
@@ -428,33 +446,87 @@ public static class SprintReport
         }
 
         report.Append('\n');
-        AppendPullRequestMeasuresNotShown(report, rows);
+        var sprintRows = rows.Where(row => row.InNoSprint == 0).ToList();
+        AppendPullRequestMeasuresNotShown(report, sprintRows, severalHosts);
+        AppendPullRequestHostsNotRead(report, sprintRows, severalHosts);
+        if (severalHosts)
+        {
+            report.Append("- Each host has its own rows, and a combined row holds the waits of every host together: its median and P85 are taken of those waits, never of the hosts' medians or P85s.\n");
+        }
+
         AppendPullRequestTimingExplained(report, hosts);
     }
 
     /// <summary>The words for a row's measure, or the measure's own name when it has none yet.</summary>
     private static string PullRequestMeasureLabel(PullRequestTimingRow row) => PullRequestMeasureLabels.GetValueOrDefault(row.Measure, row.Measure);
 
-    /// <summary>A pull request figure as the table shows it: rounded to one decimal here and nowhere earlier, or <see cref="NoWait"/> when there is none.</summary>
-    private static string WaitDays(double? days) => days?.ToString("F1", CultureInfo.InvariantCulture) ?? NoWait;
+    /// <summary>How the report names each pull request host. A host without an entry is printed under its own name.</summary>
+    private static readonly IReadOnlyDictionary<string, string> PullRequestHostLabels = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        [PullRequestHosts.GitHub] = "GitHub",
+        [PullRequestHosts.Ado] = "Azure DevOps",
+        [PullRequestCoverageStates.CombinedScope] = "Combined",
+    };
+
+    /// <summary>The words for a host, or for the combined scope.</summary>
+    private static string PullRequestHostLabel(string hostScope) => PullRequestHostLabels.GetValueOrDefault(hostScope, hostScope);
 
     /// <summary>
-    /// The line for the measures the view has no row for. A rebuild leaves a measure out, where it would
-    /// otherwise give a row that counts nothing, only when it cannot be stated at all, and the one case there
-    /// is today is that of the waits that end with a review: the Ops group's members could not be read, so no
-    /// review was collected (<see cref="PullRequestTiming.MeasuresGiven"/>). Nothing is written when every
-    /// measure has its row.
+    /// The host cell of a row: whose pull requests it is of, and, when the view says the row does not rest on
+    /// a full read, that it does not. The label is the view's <c>coverage</c> in words: the report decides
+    /// nothing about coverage itself.
     /// </summary>
-    private static void AppendPullRequestMeasuresNotShown(StringBuilder report, IReadOnlyList<PullRequestTimingRow> rows)
+    private static string HostScopeLabel(PullRequestTimingRow row) => PullRequestHostLabel(row.HostScope) + row.Coverage switch
     {
-        var notShown = PullRequestTiming.Measures
-            .Where(measure => rows.All(row => row.Measure != measure))
-            .Select(measure => PullRequestMeasureLabels.GetValueOrDefault(measure, measure))
-            .ToList();
-        if (notShown.Count > 0)
+        PullRequestCoverageStates.FailedRead => " (last read failed)",
+        PullRequestCoverageStates.NotRead => " (not read yet)",
+        PullRequestCoverageStates.Partial => " (partial)",
+        _ => "",
+    };
+
+    /// <summary>What a cell says when the view gives no count: the store does not hold what the row would count, and that is not zero.</summary>
+    private const string NotKnown = "not known";
+
+    /// <summary>
+    /// A pull request figure as the table shows it: rounded to one decimal here and nowhere earlier,
+    /// <see cref="NoWait"/> when the row counts no pull request, or <see cref="NotKnown"/> when the row has no count.
+    /// </summary>
+    private static string WaitDays(PullRequestTimingRow row, double? days) =>
+        days?.ToString("F1", CultureInfo.InvariantCulture) ?? (row.SampleCount is null ? NotKnown : NoWait);
+
+    /// <summary>
+    /// The line for the waits a host has no row for in the table, by the reason the view gives
+    /// (<c>coverage</c> is "reviews not read"): the Ops group's members could not be read, so no review of
+    /// that host was collected. With several hosts the line names the host, and says what that makes of the
+    /// combined rows. Nothing is written when no row has that reason.
+    /// </summary>
+    private static void AppendPullRequestMeasuresNotShown(StringBuilder report, IReadOnlyList<PullRequestTimingRow> sprintRows, bool severalHosts)
+    {
+        foreach (var host in sprintRows.Where(row => row.Coverage == PullRequestCoverageStates.ReviewsNotRead).GroupBy(row => row.HostScope))
         {
-            report.Append("- Not shown: ").AppendJoin(", ", notShown)
-                .Append(". The members of the Ops group could not be read when the pull requests were last collected, so reviews by the group could not be told apart from code reviews, and no review was collected. These waits are given for no sprint until a collection reads the group; nothing here says that no pull request was reviewed or approved. A merge does not depend on who reviewed, and is shown.\n");
+            report.Append(severalHosts ? $"- Not shown for {PullRequestHostLabel(host.Key)}: " : "- Not shown: ")
+                .AppendJoin(", ", host.Select(PullRequestMeasureLabel))
+                .Append(". The members of the Ops group could not be read when the pull requests were last collected, so reviews by the group could not be told apart from code reviews, and no review was collected. These waits are given for no sprint until a collection reads the group; nothing here says that no pull request was reviewed or approved. A merge does not depend on who reviewed, and is shown.")
+                .Append(severalHosts ? " The combined rows of these waits are marked partial: they hold the other hosts' waits only." : "")
+                .Append('\n');
+        }
+    }
+
+    /// <summary>
+    /// One line for each host whose rows do not rest on a finished read, by the reason the view gives: its
+    /// last collection failed, or it is configured and was never read. Either way the line says that a row
+    /// without a count is not a row that counts nothing. A host that is not configured has no row and no line.
+    /// </summary>
+    private static void AppendPullRequestHostsNotRead(StringBuilder report, IReadOnlyList<PullRequestTimingRow> sprintRows, bool severalHosts)
+    {
+        foreach (var host in sprintRows.Where(row => row.Coverage is PullRequestCoverageStates.FailedRead or PullRequestCoverageStates.NotRead).GroupBy(row => (row.HostScope, row.Coverage)))
+        {
+            var name = PullRequestHostLabel(host.Key.HostScope);
+            report.Append(host.Key.Coverage == PullRequestCoverageStates.FailedRead
+                    ? $"- {name} could not be read when pull requests were last collected. Its figures are of what earlier collections read, so a count may be short of what {name} has now, and where they read nothing the row says \"not known\": that is not a count of zero."
+                    : $"- {name} is configured and has not been read yet: no collection of it has finished. Its rows say \"not known\": that is not a count of zero.")
+                .Append(severalHosts ? $" The combined rows are marked partial: they leave out whatever a read of {name} would add." : "")
+                .Append('\n');
         }
     }
 
@@ -949,7 +1021,12 @@ public static class SprintReport
         public string Measure { get; init; } = "";
         /// <summary>1 for the view's row of waits counted in no sprint, 0 for the reported sprint's row.</summary>
         public long InNoSprint { get; init; }
-        public long SampleCount { get; init; }
+        /// <summary>A host of <c>PullRequestHosts</c>, or the combined scope.</summary>
+        public string HostScope { get; init; } = "";
+        /// <summary>One of <c>PullRequestCoverageStates</c>: what the count rests on.</summary>
+        public string Coverage { get; init; } = "";
+        /// <summary>Null when the view gives no count: the row's coverage is not a full read and the store holds no wait for it.</summary>
+        public long? SampleCount { get; init; }
         /// <summary>Null when no pull request has a wait for the measure in the sprint.</summary>
         public double? MedianElapsedDays { get; init; }
         public double? P85ElapsedDays { get; init; }
