@@ -156,7 +156,7 @@ internal sealed class HostClient : IDisposable
                 return next.AbsoluteUri[baseUrl.Length..];
             }
 
-            throw new UserFacingException($"{_host} answered {call} with a next page that is not under the configured address, so it was not followed. Nothing was stored.");
+            throw new HostGaveUpException($"{_host} answered {call} with a next page that is not under the configured address, so it was not followed. Nothing was stored.");
         }
 
         return null;
@@ -184,7 +184,8 @@ internal sealed class HostClient : IDisposable
     /// asked for is longer than <see cref="LongestWait"/>; so is, a few times, a failure that can pass by itself (<see cref="MaxTransientRetries"/>).
     /// Every other way this can fail for reasons outside the tool becomes a
     /// <see cref="UserFacingException"/> that names the request and never quotes the response, which can hold
-    /// issue or person data.
+    /// issue or person data. It is a <see cref="HostGaveUpException"/> unless the host refused the one thing
+    /// asked for (a 403 or a 404), which a caller that reads many things may pass over.
     /// </summary>
     private async Task<Answer> SendAsync(HttpMethod method, string relativeUrl, JsonObject? body, CancellationToken cancellationToken)
     {
@@ -234,7 +235,7 @@ internal sealed class HostClient : IDisposable
                 if (await RetryAsync($"The connection to {_host} failed", failed, call, started, PassingWait(retries), cancellationToken,
                         (retries.Passing, MaxTransientRetries)) is { } gaveUp)
                 {
-                    throw new UserFacingException(gaveUp, exception);
+                    throw new HostGaveUpException(gaveUp, exception);
                 }
 
                 retries.Passing++;
@@ -243,7 +244,7 @@ internal sealed class HostClient : IDisposable
 
             // DNS, connection, proxy tunnel and TLS failures. The category is enough; the message can name hosts.
             var reason = exception.HttpRequestError == HttpRequestError.Unknown ? "the connection failed" : exception.HttpRequestError.ToString();
-            throw new UserFacingException(
+            throw new HostGaveUpException(
                 $"Could not reach {_host} ({call}): {reason}. On the corporate network this usually means the proxy or the certificate: "
                 + "check that the system proxy is set and that the corporate root certificate is trusted.",
                 exception);
@@ -254,13 +255,13 @@ internal sealed class HostClient : IDisposable
             var failed = $"{_host} did not answer {call} in time";
             if (!_hostHasAnswered)
             {
-                throw new UserFacingException($"{failed}.", exception);
+                throw new HostGaveUpException($"{failed}.", exception);
             }
 
             if (await RetryAsync($"{_host} did not answer in time", failed, call, started, PassingWait(retries), cancellationToken,
                     (retries.Passing, MaxTransientRetries), (retries.NoAnswer, MaxRetriesAfterNoAnswer)) is { } gaveUp)
             {
-                throw new UserFacingException(gaveUp, exception);
+                throw new HostGaveUpException(gaveUp, exception);
             }
 
             retries.Passing++;
@@ -272,7 +273,7 @@ internal sealed class HostClient : IDisposable
         {
             if (response.StatusCode == HttpStatusCode.ProxyAuthenticationRequired)
             {
-                throw new UserFacingException(
+                throw new HostGaveUpException(
                     $"The proxy asked for authentication (407) on {call}, so the request never reached {_host}. "
                     + "Check the system proxy settings and that this account may use the proxy.");
             }
@@ -290,14 +291,14 @@ internal sealed class HostClient : IDisposable
                 var wait = reset - _clock.GetUtcNow();
                 if (wait > LongestWait)
                 {
-                    throw new UserFacingException(
+                    throw new HostGaveUpException(
                         $"{usedUp} and takes requests again at {reset.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)} UTC. Run the command again after that.");
                 }
 
                 if (await RetryAsync($"{_host}'s rate limit is used up", usedUp, call, started, () => wait > ShortestWait ? wait : ShortestWait, cancellationToken,
                         (retries.RateLimited, MaxRetries)) is { } gaveUp)
                 {
-                    throw new UserFacingException(gaveUp);
+                    throw new HostGaveUpException(gaveUp);
                 }
 
                 retries.RateLimited++;
@@ -313,7 +314,7 @@ internal sealed class HostClient : IDisposable
                         () => RetryWait(response, rateLimited, FirstWaitWithoutRetryAfter * Math.Pow(2, retries.RateLimited)), cancellationToken,
                         (retries.RateLimited, MaxRetries)) is { } gaveUp)
                 {
-                    throw new UserFacingException(gaveUp);
+                    throw new HostGaveUpException(gaveUp);
                 }
 
                 retries.RateLimited++;
@@ -325,15 +326,22 @@ internal sealed class HostClient : IDisposable
                 LastRefusal = response.StatusCode;
                 var answered = $"{_host} answered {(int)response.StatusCode} ({response.StatusCode})";
                 var failed = $"{answered} to {call}";
+                if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
+                {
+                    // The host refused what was asked for, or does not have it: that is about this request's
+                    // subject. Every other failure here is the client giving up (HostGaveUpException).
+                    throw new UserFacingException($"{failed}.");
+                }
+
                 if (!CanPass(response.StatusCode))
                 {
-                    throw new UserFacingException($"{failed}.");
+                    throw new HostGaveUpException($"{failed}.");
                 }
 
                 if (await RetryAsync(answered, failed, call, started, () => RetryWait(response, failed, PassingWait(retries)()), cancellationToken,
                         (retries.Passing, MaxTransientRetries)) is { } gaveUp)
                 {
-                    throw new UserFacingException(gaveUp);
+                    throw new HostGaveUpException(gaveUp);
                 }
 
                 retries.Passing++;
@@ -347,7 +355,7 @@ internal sealed class HostClient : IDisposable
             }
             catch (JsonException exception)
             {
-                throw new UserFacingException($"The answer to {call} was not JSON. A proxy or sign-in page may have been served in place of {_host}'s answer.", exception);
+                throw new HostGaveUpException($"The answer to {call} was not JSON. A proxy or sign-in page may have been served in place of {_host}'s answer.", exception);
             }
         }
     }
@@ -448,7 +456,7 @@ internal sealed class HostClient : IDisposable
         // The message does not quote the header.
         if (wait is not { } readable || readable > LongestWait)
         {
-            throw new UserFacingException(
+            throw new HostGaveUpException(
                 $"{failed} and asked for a wait of more than {LongestWait.TotalMinutes:0} minutes, or one this tool cannot read. Run the command again later.");
         }
 

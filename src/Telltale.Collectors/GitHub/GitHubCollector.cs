@@ -70,8 +70,12 @@ public sealed class GitHubCollector : IPullRequestCollector
             {
                 await ForEachAsync(github, $"orgs/{opsTeam.Organization}/teams/{opsTeam.Slug}/members?per_page={PageSize}", "team members", member => opsMemberIds.Add(member.GetProperty("id").GetInt64()) || true, cancellationToken);
             }
-            catch (UserFacingException exception)
+            catch (UserFacingException exception) when (exception is not HostGaveUpException)
             {
+                // Only a failure that is about the team: GitHub refused it (403, 404), or its list could not
+                // be understood or read to an end. A client that gave up (no connection, the proxy, a rate
+                // limit, a token GitHub does not take) says nothing of the team, and ends the read like any
+                // other failed read, to be run again (owner decision D111).
                 rosterRead = false;
 
                 // The failure's own words may end by saying nothing was stored, which is true of a read that

@@ -95,6 +95,33 @@ public class PullRequestRosterTests
     }
 
     [Test]
+    public async Task A_connection_that_fails_on_the_roster_read_ends_the_read_and_is_not_taken_for_a_team_that_cannot_be_read()
+    {
+        // Review 2, finding 8. The roster is GitHub's first request, so a fault on the way there is reported
+        // at once. It says nothing about the team: the read ends as any failed read does, to be run again,
+        // and no pull request is stored as one whose reviews wait for a readable team.
+        await using var pipeline = SuppressionOff();
+        pipeline.Jira.AddSprints41And42();
+        var github = FakeGitHub.For(pipeline);
+        github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 20, 12)).Reviewed(Accounts.Reviewer, "COMMENTED", Local(2026, 1, 21, 12));
+        pipeline.Jira.Handler.AnswerNext(HttpMethod.Get, MembersPath, _ => throw new HttpRequestException(HttpRequestError.SecureConnectionError, "synthetic TLS failure"));
+
+        var exit = await pipeline.RunAsync("sync");
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(pipeline.Error.ToString()).StartsWith("Could not reach GitHub (GET orgs/fake-org/teams/fake-ops/members?per_page=100): SecureConnectionError.");
+        await Assert.That(pipeline.Error.ToString()).DoesNotContain("the members of the Ops team could not be read");
+        await Assert.That((await pipeline.QueryAsync<string>(HostState)).ToArray()).IsEquivalentTo(new[] { "failed, roster not read" });
+        await Assert.That(await pipeline.QueryAsync<long>("SELECT COUNT(*) FROM pull_request")).IsEquivalentTo(new[] { 0L });
+
+        // Run again, the fault gone: an ordinary read, with the reviews.
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+
+        await Assert.That((await pipeline.QueryAsync<string>(HostState)).ToArray()).IsEquivalentTo(new[] { "read, roster read" });
+        await Assert.That(await FiguresAsync(pipeline)).IsEquivalentTo(new[] { ("42", "first_code_review", 1L, 1d) });
+    }
+
+    [Test]
     public async Task A_roster_that_fails_at_a_later_sync_withholds_the_review_figures_already_given_until_it_is_read_again()
     {
         await using var pipeline = SuppressionOff();
