@@ -109,6 +109,41 @@ public class PullRequestRosterTests
     }
 
     [Test]
+    public async Task A_pull_request_stored_without_its_reviews_is_read_once_the_roster_is_although_the_list_no_longer_brings_it()
+    {
+        // Pull request 1 is stored while the roster cannot be read: without its reviews. Then the start date
+        // is set after its last update, so the list pass leaves it out. Its reviews are asked for all the
+        // same: while it stays unread, neither review figure is given for the whole host.
+        await using var pipeline = SuppressionOff();
+        pipeline.Jira.AddSprints41And42();
+        var github = FakeGitHub.For(pipeline);
+        github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 20, 12))
+            .Reviewed(Accounts.AuthorOne, "COMMENTED", Local(2026, 1, 20, 13))
+            .Reviewed(Accounts.OpsMember, "APPROVED", Local(2026, 1, 20, 14))
+            .Reviewed(Accounts.Reviewer, "COMMENTED", Local(2026, 1, 21, 12));
+        var readable = RefuseTheRoster(pipeline);
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+        await Assert.That((await pipeline.QueryAsync<string>("SELECT history FROM pull_request")).ToArray()).IsEquivalentTo(new[] { "not read" });
+
+        readable();
+        pipeline.Config["github"]!["collectFrom"] = "2026-01-25";
+        github.AddPullRequest(2, Accounts.AuthorTwo, Local(2026, 1, 26, 12)).Reviewed(Accounts.Reviewer, "COMMENTED", Local(2026, 1, 28, 12));
+        await pipeline.RunAllAsync(["run", "--sprint", "42"]);
+
+        await Assert.That(github.ReviewsAskedFor).IsEquivalentTo(new[] { 1, 2 });
+        await Assert.That((await pipeline.QueryAsync<string>("SELECT pr_number || ': ' || history FROM pull_request ORDER BY pr_number")).ToArray()).IsEquivalentTo(new[] { "1: read", "2: read" });
+
+        // The author's own review and the Ops approval are told apart as at any other read: the wait of pull
+        // request 1 ends with the reviewer's comment, a day after it was opened.
+        await Assert.That(await FiguresAsync(pipeline)).IsEquivalentTo(new[] { ("42", "first_code_review", 2L, 1.5d) });
+        await Assert.That(await pipeline.ReadReportAsync(42)).DoesNotContain("Not shown");
+
+        // And it is asked for once: read, it costs no request at the next sync.
+        await pipeline.RunAllAsync(["sync"]);
+        await Assert.That(github.ReviewsAskedFor).IsEquivalentTo(new[] { 1, 2 });
+    }
+
+    [Test]
     public async Task Without_an_ops_team_configured_there_is_no_roster_to_read_and_every_figure_is_given()
     {
         await using var pipeline = SuppressionOff();

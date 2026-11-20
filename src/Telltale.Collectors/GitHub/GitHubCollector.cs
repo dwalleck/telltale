@@ -80,7 +80,7 @@ public sealed class GitHubCollector : IPullRequestCollector
         }
 
         var known = stored.PullRequests.Where(pullRequest => pullRequest.Host == Host).ToDictionary(pullRequest => (pullRequest.Repository, pullRequest.Number));
-        var pullRequests = new Dictionary<(string Repository, long Number), (RawPullRequest Row, long? AuthorId, bool ReadReviews)>();
+        var pullRequests = new Dictionary<(string Repository, long Number), (RawPullRequest Row, Func<long, bool> IsAuthor, bool ReadReviews)>();
         foreach (var repository in _settings.Repositories)
         {
             // Every state: an old pull request can be reviewed, merged or reopened at any time. The most
@@ -120,7 +120,7 @@ public sealed class GitHubCollector : IPullRequestCollector
 
                     pullRequests[(row.Repository, row.Number)] = (
                         readReviews && !rosterRead ? row with { History = PullRequestHistoryStates.NotRead } : row,
-                        authorId,
+                        id => id == authorId,
                         readReviews && rosterRead);
                     return true;
                 },
@@ -128,10 +128,26 @@ public sealed class GitHubCollector : IPullRequestCollector
                 stopAtAPageWithNothingNew: !everything);
         }
 
+        // A stored pull request whose reviews were not read is read now, whether or not the list pass came to
+        // it: it can lie beyond the page a sync stops at, or before the start date, and while it stays unread no
+        // wait that rests on reviews is stated for the whole host. Its list entry is not needed for that. Its
+        // author is known here only as the stored hash, which is what a reviewer is compared with.
+        // One of a repository that is no longer configured is left as it is: nothing is asked of that repository.
+        if (rosterRead)
+        {
+            var configured = _settings.Repositories.Select(repository => repository.Key).ToHashSet(StringComparer.Ordinal);
+            foreach (var unread in known.Values.Where(pullRequest => pullRequest.History != PullRequestHistoryStates.Read
+                && configured.Contains(pullRequest.Repository)
+                && !pullRequests.ContainsKey((pullRequest.Repository, pullRequest.Number))))
+            {
+                pullRequests[(unread.Repository, unread.Number)] = (unread with { History = PullRequestHistoryStates.Read }, id => AuthorHash(id) == unread.AuthorHash, true);
+            }
+        }
+
         var events = new List<RawPullRequestEvent>();
         foreach (var repository in _settings.Repositories)
         {
-            foreach (var (row, authorId, _) in pullRequests.Values.Where(pullRequest => pullRequest.ReadReviews && pullRequest.Row.Repository == repository.Key).OrderBy(pullRequest => pullRequest.Row.Number))
+            foreach (var (row, isAuthor, _) in pullRequests.Values.Where(pullRequest => pullRequest.ReadReviews && pullRequest.Row.Repository == repository.Key).OrderBy(pullRequest => pullRequest.Row.Number))
             {
                 await ForEachAsync(
                     github,
@@ -139,7 +155,7 @@ public sealed class GitHubCollector : IPullRequestCollector
                     "pull request reviews",
                     review =>
                     {
-                        if (ReadReview(row, authorId, opsMemberIds, review) is { } submitted)
+                        if (ReadReview(row, isAuthor, opsMemberIds, review) is { } submitted)
                         {
                             events.Add(submitted);
                         }
@@ -194,7 +210,7 @@ public sealed class GitHubCollector : IPullRequestCollector
     /// One review as an event, classified, or null for one that was not submitted (a pending review has no
     /// submission time and is not a review yet). Nothing of the reviewer is kept but the class.
     /// </summary>
-    private static RawPullRequestEvent? ReadReview(RawPullRequest pullRequest, long? authorId, HashSet<long> opsMemberIds, JsonElement review)
+    private static RawPullRequestEvent? ReadReview(RawPullRequest pullRequest, Func<long, bool> isAuthor, HashSet<long> opsMemberIds, JsonElement review)
     {
         if (JiraJson.Optional(review, "submitted_at") is not { } submittedAt)
         {
@@ -226,7 +242,7 @@ public sealed class GitHubCollector : IPullRequestCollector
             {
                 ("Bot", _) => PullRequestEventActors.Automation,
                 (_, null) => PullRequestEventActors.Unknown,
-                (_, { } id) when id == authorId => PullRequestEventActors.Author,
+                (_, { } id) when isAuthor(id) => PullRequestEventActors.Author,
                 (_, { } id) when opsMemberIds.Contains(id) => PullRequestEventActors.Ops,
                 ("User", _) => PullRequestEventActors.Human,
                 _ => PullRequestEventActors.Unknown,
