@@ -91,13 +91,19 @@ public static class PullRequestTiming
                 .ToList();
             foreach (var measure in Measures)
             {
-                // A pull request whose own events the host did not give (PullRequestHistoryStates.Failed) has no
-                // wait that rests on them: an event that was not read can be its first. Its merge is still counted.
-                if (RestsOnReviews(measure) && (withoutReviews.Contains(seen.Host) || seen.History != PullRequestHistoryStates.Read))
+                // A host that is without its reviews has no wait that rests on them, for any pull request. Its merges are still counted.
+                if (RestsOnReviews(measure) && withoutReviews.Contains(seen.Host))
                 {
                     continue;
                 }
 
+                // A pull request whose own events the host did not give at its last collection
+                // (PullRequestHistoryStates.Failed) is not asked about here, on purpose. The events the store
+                // holds of it are from reads that ended, and no event is ever deleted, so one that was not read
+                // is later than all of them: when the stored events already give the first code review or
+                // approval, it stands, and the wait stays in the sprint it was counted in. When they give
+                // none, the event that was not read may be the first, and there is no wait, as for any pull
+                // request without such an event; PullRequestsWithoutReview then counts it as not read.
                 // An end before the opening is no wait the tool can state: the measure has none.
                 if (EndOf(measure, seen, itsEvents) is { } ended && ended >= seen.Opened)
                 {

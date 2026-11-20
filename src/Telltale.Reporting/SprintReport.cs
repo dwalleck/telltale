@@ -617,7 +617,7 @@ public static class SprintReport
             .Append("Ops only: something by the Ops group, whatever automation did besides").Append(hosts.Contains(PullRequestHosts.Ado) ? "; Azure DevOps has no Ops group set apart" : "")
             .Append(". Automation only: something by automation and nothing by the Ops group. No activity: nothing, or only the author's own; the pull request's history was read and holds nothing else.\n")
             .Append("- Cannot be classified: something that could have been the first code review cannot be told to be one or not, so the pull request has no first code review that can be relied on. It is in none of the columns before.\n")
-            .Append("- History not read: the pull request's reviews could not be read when it was last collected, so it cannot be said whether it was reviewed. That is not a history that was read and found empty, and the pull request is in none of the columns before.\n")
+            .Append("- History not read: the pull request's reviews could not be read when it was last collected, and no first code review of it was collected before that, so it cannot be said whether it was reviewed. That is not a history that was read and found empty, and the pull request is in none of the columns before.\n")
             .Append("- Like the figures above, these numbers are not subject to the minimum group size, and none is of a person.\n");
     }
 

@@ -74,15 +74,20 @@ public static class PullRequestsWithoutReview
             : beforeClosing.Any(happened => happened.Actor == PullRequestEventActors.Automation) ? PullRequestReviewActivities.AutomationOnly
             : PullRequestReviewActivities.None;
 
-        // Events that were not read can hold the first code review, so nothing is said of what the read ones show.
-        if (seen.History != PullRequestHistoryStates.Read)
-        {
-            return (PullRequestReviewStates.HistoryNotRead, activity);
-        }
-
+        // A first code review the stored events already give by that moment stands, whatever the row's
+        // history says now: stored events are from reads that ended and are never deleted, so an event that
+        // was not read since is later than all of them and cannot come before it. A read that fails today
+        // therefore does not put the pull request back into the sprints after its review.
         if (PullRequestTiming.FirstCodeReviewOf(seen, events) is not null)
         {
             return null;
+        }
+
+        // The stored events give none, and events that were not read can hold the first code review: nothing
+        // more is said of what the read ones show.
+        if (seen.History != PullRequestHistoryStates.Read)
+        {
+            return (PullRequestReviewStates.HistoryNotRead, activity);
         }
 
         // The host's rule found no first code review. It stops at an event it cannot classify, which could

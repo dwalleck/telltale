@@ -72,6 +72,42 @@ public class PullRequestReviewsRefusedTests
     }
 
     [Test]
+    public async Task A_first_code_review_already_stored_stays_counted_when_a_later_read_of_the_reviews_fails()
+    {
+        // Review 2, finding 12. Pull request 1 got its first code review and approval in sprint 41 and stays
+        // open. Pull request 2 has no review yet. Both are stored, read.
+        await using var pipeline = SuppressionOff();
+        pipeline.Jira.AddSprints41And42();
+        var github = FakeGitHub.For(pipeline);
+        var settled = github.AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 6, 12)).Reviewed(Accounts.Reviewer, "APPROVED", Local(2026, 1, 7, 12));
+        var open = github.AddPullRequest(2, Accounts.AuthorTwo, Local(2026, 1, 20, 12));
+        await pipeline.RunAllAsync(["sync"], ["derive"]);
+
+        const string Reviews = "SELECT sprint_id || ' ' || measure || ': ' || sample_count || ', ' || median_elapsed_days FROM pr_timing_per_sprint WHERE sample_count > 0 AND sprint_id IS NOT NULL ORDER BY sprint_id, measure_position";
+        const string WithoutReview = "SELECT sprint_id || ': waiting ' || waiting || ', history not read ' || history_not_read FROM pr_without_review_per_sprint ORDER BY sprint_id";
+        await Assert.That((await pipeline.QueryAsync<string>(Reviews)).ToArray()).IsEquivalentTo(new[] { "41 first_code_review: 1, 1.0", "41 first_code_approval: 1, 1.0" });
+        await Assert.That((await pipeline.QueryAsync<string>(WithoutReview)).ToArray()).IsEquivalentTo(new[] { "41: waiting 0, history not read 0", "42: waiting 1, history not read 0" });
+
+        // Both get a review in sprint 42, and at the next sync neither's reviews can be read.
+        settled.Reviewed(Accounts.Reviewer, "COMMENTED", Local(2026, 1, 27, 12));
+        open.Reviewed(Accounts.Reviewer, "COMMENTED", Local(2026, 1, 27, 12));
+        foreach (var number in new[] { 1, 2 })
+        {
+            pipeline.Jira.Handler.Override(HttpMethod.Get, $"{PullsPath}/{number}/reviews", _ => true, Answer("a refusal"));
+        }
+
+        await pipeline.RunAllAsync(["sync"], ["derive"]);
+        await Assert.That((await pipeline.QueryAsync<string>(Histories)).ToArray()).IsEquivalentTo(new[] { "1: failed", "2: failed" });
+
+        // Pull request 1's first code review and approval are settled by what the store holds: a review that
+        // was not read cannot come before them. Its waits stay in sprint 41, and no sprint counts it as a
+        // history that was not read. Pull request 2 has none in the store, so the review that was not read may
+        // be its first: it has no wait, and is a history not read in the sprint it is looked at in.
+        await Assert.That((await pipeline.QueryAsync<string>(Reviews)).ToArray()).IsEquivalentTo(new[] { "41 first_code_review: 1, 1.0", "41 first_code_approval: 1, 1.0" });
+        await Assert.That((await pipeline.QueryAsync<string>(WithoutReview)).ToArray()).IsEquivalentTo(new[] { "41: waiting 0, history not read 0", "42: waiting 0, history not read 1" });
+    }
+
+    [Test]
     public async Task Three_such_pull_requests_in_a_row_stop_the_read_and_those_already_stored_as_unread_do_not_count_at_the_next()
     {
         await using var pipeline = SuppressionOff();

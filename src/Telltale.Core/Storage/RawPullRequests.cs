@@ -67,7 +67,8 @@ public static class PullRequestHistoryStates
     /// The pull request's own events were asked for and the host did not give them: it refused or failed the
     /// request, its answer was not understood, or its list did not come to an end. Nothing of that read was
     /// stored, so events may be missing, and they are asked for again at the next sync. Until they are read
-    /// no wait of this pull request that rests on them is stated; the other pull requests of the host are not
+    /// no wait of this pull request that rests on them is stated, unless the events stored by earlier reads
+    /// already give the event that ends it; the other pull requests of the host are not
     /// affected, which is the difference from <see cref="NotRead"/>.
     /// </summary>
     public const string Failed = "failed";

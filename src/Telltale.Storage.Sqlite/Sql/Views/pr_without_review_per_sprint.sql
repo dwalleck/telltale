@@ -14,7 +14,8 @@
 --   unclassifiable         an event that could have been its first code review cannot be classified, so it
 --                          has no first code review that can be relied on
 --   history_not_read       its events were not read at the last collection (the host refused them, or the
---                          Ops group's members could not be read), so whether it was reviewed is not known.
+--                          Ops group's members could not be read) and the events stored before give no
+--                          first code review by that moment, so whether it was reviewed is not known.
 --                          This is not a history that was read and found empty, which counts as no_activity.
 -- The other three columns split waiting and closed_without_review together by what had been submitted before
 -- the pull request closed, so they repeat those pull requests and add none: no_activity + automation_only +
