@@ -1,0 +1,75 @@
+using Telltale.Pipeline.Tests.Harness;
+using static Telltale.Pipeline.Tests.Harness.Scenarios;
+using static Telltale.Tests.Shared.TeamTime;
+
+namespace Telltale.Pipeline.Tests;
+
+/// <summary>
+/// Pull request figures are not subject to the minimum group size (owner decision D114): the sprint report and
+/// the owner's <c>query</c> show them whatever the numbers are, while the Jira figures of the same run are
+/// withheld as before. No pull request result is per person.
+/// </summary>
+public class PullRequestFiguresNotWithheldTests
+{
+    private const string EveryRow = "SELECT * FROM pr_timing_per_sprint ORDER BY sprint_id, measure_position;";
+
+    /// <summary>
+    /// Sprint 41 with four Jira assignees, which the default numbers withhold whole, and one pull request by a
+    /// single author, opened Tuesday 6 January at noon and reviewed two days later.
+    /// </summary>
+    private static void AddAFourPersonSprintAndOnePullRequest(PipelineHarness pipeline)
+    {
+        AddSprint41WithFourAssignees(pipeline.Jira);
+        FakeGitHub.For(pipeline).AddPullRequest(1, Accounts.AuthorOne, Local(2026, 1, 6, 12)).Reviewed(Accounts.Reviewer, "COMMENTED", Local(2026, 1, 8, 12));
+    }
+
+    [Test]
+    public async Task By_the_default_numbers_a_single_authors_pull_request_figures_are_shown_in_the_report_while_the_jira_figures_are_withheld()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddAFourPersonSprintAndOnePullRequest(pipeline);
+
+        await pipeline.RunAllAsync(["backfill"], ["run", "--sprint", "41"]);
+
+        var report = await pipeline.ReadReportAsync(41);
+        await Assert.That(report).Contains("\nDelivered issues: suppressed\n\n## Cycle time by point bucket\n\nsuppressed\n\n## Time in status\n\nsuppressed\n");
+        await Assert.That(report).Contains(
+            "\n## Pull request timing\n\n| Wait from opening to | Pull requests | Median (elapsed days) |\n| --- | ---: | ---: |\n| First code review | 1 | 2.0 |\n| Merge | 0 | none |\n\n- These are");
+        await Assert.That(report).Contains("- Pull request figures are not subject to the minimum group size: none is withheld for the number of people behind it, and none is reported per person.\n");
+    }
+
+    [Test]
+    public async Task By_the_default_numbers_the_owner_query_gives_the_same_pull_request_figures_and_still_withholds_the_jira_ones()
+    {
+        await using var pipeline = new PipelineHarness();
+        AddAFourPersonSprintAndOnePullRequest(pipeline);
+        await pipeline.RunAllAsync(["backfill"], ["run", "--sprint", "41"]);
+
+        // The view has no flag to set: a figure is there, or there is no wait and so no figure.
+        await Assert.That(await HarnessSteps.QueryAsync(pipeline, EveryRow, "SELECT sprint_id, delivered_count, suppressed FROM delivered_per_sprint;")).IsEqualTo(
+            """
+            | sprint_id | measure | measure_position | sample_count | median_elapsed_days |
+            | --- | --- | --- | --- | --- |
+            | 41 | first_code_review | 1 | 1 | 2 |
+            | 41 | merge | 2 | 0 | NULL |
+            | sprint_id | delivered_count | suppressed |
+            | --- | --- | --- |
+            | 41 | NULL | 1 |
+
+            """.ReplaceLineEndings("\n"));
+    }
+
+    [Test]
+    public async Task The_pull_request_figures_are_the_same_whatever_the_numbers_are()
+    {
+        await using var byDefault = new PipelineHarness();
+        await using var off = SuppressionOff();
+        foreach (var pipeline in new[] { byDefault, off })
+        {
+            AddAFourPersonSprintAndOnePullRequest(pipeline);
+            await pipeline.RunAllAsync(["backfill"], ["derive"]);
+        }
+
+        await Assert.That(await HarnessSteps.QueryAsync(byDefault, EveryRow)).IsEqualTo(await HarnessSteps.QueryAsync(off, EveryRow));
+    }
+}

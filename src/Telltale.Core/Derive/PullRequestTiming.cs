@@ -80,7 +80,7 @@ public static class PullRequestTiming
                 {
                     var wait = new Interval(seen.Opened, ended);
                     waits.Add(new PullRequestWait(
-                        seen.Host, seen.Repository, seen.Number, measure, seen.AuthorHash, seen.Opened, ended,
+                        seen.Host, seen.Repository, seen.Number, measure, seen.Opened, ended,
                         ElapsedDays: wait.Duration / TimeSpan.FromDays(1),
                         BusinessDays: calendar.BusinessDays(wait),
                         SprintId: SprintOf(ended, windows, asOf)));

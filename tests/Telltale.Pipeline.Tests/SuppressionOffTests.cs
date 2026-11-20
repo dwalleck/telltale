@@ -463,7 +463,6 @@ public class SuppressionOffTests
             | data_quality.suppressed | 1 | 0 |
             | delivered_per_sprint.suppressed | 3 | 0 |
             | delivered_per_sprint.team_suppressed | 3 | 0 |
-            | pr_timing_per_sprint.suppressed | 0 | 0 |
             | sprint_team.delivered_suppressed | 3 | 0 |
             | sprint_team.team_suppressed | 3 | 0 |
             | time_in_status_per_sprint.suppressed | 8 | 0 |

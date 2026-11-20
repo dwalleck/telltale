@@ -310,14 +310,13 @@ public sealed record DerivedData(
 /// (see <c>PullRequestTiming</c>). <see cref="SprintId"/> is the sprint whose window holds <see cref="Ended"/>;
 /// null when no window or more than one holds it. <see cref="ElapsedDays"/> is the whole wait divided by 24
 /// hours, and <see cref="BusinessDays"/> the same wait in business days; neither is clipped to a sprint.
-/// <see cref="AuthorHash"/> is the pull request's author, for the minimum group size only.
+/// It carries no author: pull request figures are not grouped or counted by person.
 /// </summary>
 public sealed record PullRequestWait(
     string Host,
     string Repository,
     long Number,
     string Measure,
-    string? AuthorHash,
     DateTimeOffset Opened,
     DateTimeOffset Ended,
     double ElapsedDays,

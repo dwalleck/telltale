@@ -561,13 +561,13 @@ public sealed class SqliteStore : ITelltaleStore
             connection,
             transaction,
             """
-            INSERT INTO pr_wait (host, repository, pr_number, measure, author_hash, opened, ended, elapsed_days, business_days, sprint_id)
-            VALUES (@host, @repository, @number, @measure, @authorHash, @opened, @ended, @elapsedDays, @businessDays, @sprintId);
+            INSERT INTO pr_wait (host, repository, pr_number, measure, opened, ended, elapsed_days, business_days, sprint_id)
+            VALUES (@host, @repository, @number, @measure, @opened, @ended, @elapsedDays, @businessDays, @sprintId);
             """,
-            ["@host", "@repository", "@number", "@measure", "@authorHash", "@opened", "@ended", "@elapsedDays", "@businessDays", "@sprintId"],
+            ["@host", "@repository", "@number", "@measure", "@opened", "@ended", "@elapsedDays", "@businessDays", "@sprintId"],
             derived.PullRequestWaits.Select(wait => new object?[]
             {
-                wait.Host, wait.Repository, wait.Number, wait.Measure, wait.AuthorHash, StoredTime.ToStored(wait.Opened), StoredTime.ToStored(wait.Ended),
+                wait.Host, wait.Repository, wait.Number, wait.Measure, StoredTime.ToStored(wait.Opened), StoredTime.ToStored(wait.Ended),
                 wait.ElapsedDays, wait.BusinessDays, wait.SprintId,
             }),
             cancellationToken);
