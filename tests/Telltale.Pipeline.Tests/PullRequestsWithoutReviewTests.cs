@@ -19,12 +19,13 @@ public class PullRequestsWithoutReviewTests
         "\n### Without a first code review\n\n"
         + "Pull requests of the configured repositories that had no first code review when the sprint closed, or at the as-of time for a sprint that is still running. "
         + "These are numbers of pull requests, not waits: none of them is in the first code review row above, and none is counted as a wait of zero.\n\n"
-        + "| Host | Still waiting | Closed without one | No activity | Automation only | Ops only | Cannot be classified | History not read |\n"
+        + "| Pull requests of | Still waiting | Closed without one | No activity | Automation only | Ops only | Cannot be classified | History not read |\n"
         + "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n";
 
     internal static async Task<(string Sprint, string Scope, long Waiting, long Closed, long NoActivity, long AutomationOnly, long? OpsOnly, long Unclassifiable, long NotRead)[]> CountsAsync(PipelineHarness pipeline, string where) =>
         [.. await pipeline.QueryAsync<(string, string, long, long, long, long, long?, long, long)>(
-            $"{Counts} WHERE {where} ORDER BY sprint_id, CASE host_scope WHEN 'github' THEN 1 WHEN 'ado' THEN 2 ELSE 3 END")];
+            "SELECT sprint_id, host_scope, COALESCE(waiting, -1), COALESCE(closed_without_review, -1), COALESCE(no_activity, -1), COALESCE(automation_only, -1), ops_only, COALESCE(unclassifiable, -1), COALESCE(history_not_read, -1) "
+            + $"FROM pr_without_review_per_sprint WHERE {where} ORDER BY sprint_id, host_scope_position")];
 
     /// <summary>
     /// Sprint 41 with four Jira assignees, which the default numbers withhold whole, and three pull requests by
@@ -66,9 +67,9 @@ public class PullRequestsWithoutReviewTests
 
         await Assert.That(await HarnessSteps.QueryAsync(pipeline, "SELECT * FROM pr_without_review_per_sprint;", "SELECT sprint_id, delivered_count, suppressed FROM delivered_per_sprint;")).IsEqualTo(
             """
-            | sprint_id | host_scope | waiting | closed_without_review | no_activity | automation_only | ops_only | unclassifiable | history_not_read |
-            | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-            | 41 | github | 1 | 1 | 2 | 0 | 0 | 0 | 0 |
+            | sprint_id | host_scope | host_scope_position | coverage | waiting | closed_without_review | no_activity | automation_only | ops_only | unclassifiable | history_not_read |
+            | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+            | 41 | github | 1 | read | 1 | 1 | 2 | 0 | 0 | 0 | 0 |
             | sprint_id | delivered_count | suppressed |
             | --- | --- | --- |
             | 41 | NULL | 1 |
@@ -150,10 +151,12 @@ public class PullRequestsWithoutReviewTests
         await pipeline.RunAllAsync(["run", "--sprint", "42"]);
 
         // Neither history was read: the one that will turn out empty is not said to be empty yet. The merge is known.
-        await Assert.That(await CountsAsync(pipeline, "sprint_id = '42' AND host_scope = 'github'")).IsEquivalentTo(new[] { ("42", "github", 0L, 0L, 0L, 0L, (long?)0L, 0L, 2L) });
+        await Assert.That(await CountsAsync(pipeline, "sprint_id = '42' AND host_scope = 'github'")).IsEquivalentTo(new[] { ("42", "github", -1L, -1L, -1L, -1L, (long?)null, -1L, 2L) });
         var report = await pipeline.ReadReportAsync(42);
         await Assert.That(report).Contains("| Merge | 1 | 2.0 | 2.0 | 2.0 | 2.0 |\n");
-        await Assert.That(report).Contains("| GitHub | 0 | 0 | 0 | 0 | 0 | 0 | 2 |\n");
+        await Assert.That(report).Contains(
+            "| GitHub | not known | not known | not known | not known | not known | not known | 2 |\n\n"
+            + "- \"not known\" stands where a row does not rest on a full read of its reviews (the lines under the table above say which and why) and the store holds no such pull request: that is not a count of zero.\n- Still waiting");
 
         // Read: one was reviewed and is in no column, and the other's history is empty, which is waiting with no activity.
         refused = false;

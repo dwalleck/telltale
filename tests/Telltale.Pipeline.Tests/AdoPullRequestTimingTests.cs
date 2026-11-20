@@ -169,7 +169,7 @@ public class AdoPullRequestTimingTests
         await pipeline.RunAllAsync(["run", "--sprint", "42"]);
 
         // The same number on two hosts is two pull requests: waits of two and four days.
-        await Assert.That((await pipeline.QueryAsync<(string, string, long, double)>(Figures)).ToArray()).IsEquivalentTo(new[] { ("42", "first_code_review", 2L, 3d) });
+        await Assert.That((await pipeline.QueryAsync<(string, string, long, double)>(Figures.Replace("WHERE", "WHERE host_scope = 'combined' AND", StringComparison.Ordinal))).ToArray()).IsEquivalentTo(new[] { ("42", "first_code_review", 2L, 3d) });
         var report = await pipeline.ReadReportAsync(42);
         await Assert.That(report).Contains("\n- A first code review is the first submitted review by someone other than the author");
         await Assert.That(report).Contains("\n- On Azure DevOps, a first code review is the first vote other than a reset, or the first text comment on a file, by someone other than the author");

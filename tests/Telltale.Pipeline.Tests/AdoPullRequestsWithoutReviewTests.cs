@@ -121,6 +121,6 @@ public class AdoPullRequestsWithoutReviewTests
             PullRequestsWithoutReviewTests.TableHead
             + "| GitHub | 1 | 1 | 1 | 0 | 1 | 0 | 0 |\n"
             + "| Azure DevOps | 1 | 0 | 1 | 0 | no Ops group | 0 | 0 |\n"
-            + "| Both hosts | 2 | 1 | 2 | 0 | 1 | 0 | 0 |\n\n- Still waiting");
+            + "| Combined | 2 | 1 | 2 | 0 | 1 | 0 | 0 |\n\n- Still waiting");
     }
 }

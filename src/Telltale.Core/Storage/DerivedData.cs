@@ -316,6 +316,47 @@ public sealed record DerivedData(
 
     /// <summary>The pull requests that had no first code review at a sprint's close: at most one row per sprint and pull request. Empty when no pull request host is configured.</summary>
     public IReadOnlyList<PullRequestWithoutReview> PullRequestsWithoutReview { get; init; } = [];
+
+    /// <summary>What the store holds of each configured pull request host for each measure: one row per host and measure. Empty when no pull request host is configured.</summary>
+    public IReadOnlyList<PullRequestHostCoverage> PullRequestCoverage { get; init; } = [];
+}
+
+/// <summary>
+/// What the store holds of one configured pull request host for one measure (see <c>PullRequestTiming.Coverage</c>).
+/// </summary>
+/// <param name="Host">One of <see cref="PullRequestHosts"/>.</param>
+/// <param name="Position">The host's place among the configured hosts, from 1.</param>
+/// <param name="Measure">One of <c>PullRequestTiming.Measures</c>.</param>
+/// <param name="Coverage">One of <see cref="PullRequestCoverageStates"/>.</param>
+public sealed record PullRequestHostCoverage(string Host, long Position, string Measure, string Coverage);
+
+/// <summary>
+/// The values of <see cref="PullRequestHostCoverage.Coverage"/>, and those of a combined row of the view
+/// <c>pr_timing_per_sprint</c>. Only under <see cref="Read"/> (and, combined, <see cref="Complete"/>) is the
+/// absence of a wait a count of zero; under every other value it is not known.
+/// </summary>
+public static class PullRequestCoverageStates
+{
+    /// <summary>The host's last collection ended and what the measure rests on was read, however little there was.</summary>
+    public const string Read = "read";
+
+    /// <summary>The host's last collection failed: what the store holds of it is what earlier collections read.</summary>
+    public const string FailedRead = "failed read";
+
+    /// <summary>The host is configured and no collection of it has ended or failed yet.</summary>
+    public const string NotRead = "not read";
+
+    /// <summary>The host was read, and the reviews the measure rests on were not: the measure has no wait from it.</summary>
+    public const string ReviewsNotRead = "reviews not read";
+
+    /// <summary>A combined row for which every configured host is <see cref="Read"/>.</summary>
+    public const string Complete = "complete";
+
+    /// <summary>A combined row for which at least one configured host is not <see cref="Read"/>: it holds only what the store has.</summary>
+    public const string Partial = "partial";
+
+    /// <summary>The host scope of the rows that hold every configured host's waits together.</summary>
+    public const string CombinedScope = "combined";
 }
 
 /// <summary>
