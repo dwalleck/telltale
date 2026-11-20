@@ -121,12 +121,17 @@ public sealed class AdoCollector : IPullRequestCollector
                 // does not stop the others from being read: its row says so, none of its threads is stored
                 // from this read, and no wait that rests on them is stated until a sync reads them. A few such
                 // pull requests one after another is the host failing, not a pull request: that stops the read.
+                // One that the store already holds as not read for this reason is not counted among them: it
+                // failed at an earlier sync too, so its failing again says nothing new about the host, and a
+                // few such pull requests would otherwise fail every later read of the host, where those
+                // between them are closed and no longer asked for.
+                var failedBefore = before?.History == PullRequestHistoryStates.Failed;
                 var itsEvents = new List<RawPullRequestEvent>();
                 try
                 {
                     await ForEachThreadAsync(ado, repository, row.Number, thread => itsEvents.AddRange(ReadThread(row, authorId, thread)), cancellationToken);
                 }
-                catch (UserFacingException exception) when (++unreadInARow < MaxUnreadHistoriesInARow)
+                catch (UserFacingException exception) when (failedBefore || ++unreadInARow < MaxUnreadHistoriesInARow)
                 {
                     rows.Add(row with { History = PullRequestHistoryStates.Failed });
                     // The failure's own words end by saying nothing was stored, which is true of a read that
