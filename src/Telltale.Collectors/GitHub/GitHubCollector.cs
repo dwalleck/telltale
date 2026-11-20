@@ -95,6 +95,9 @@ public sealed class GitHubCollector : IPullRequestCollector
         var known = stored.PullRequests.Where(pullRequest => pullRequest.Host == Host).ToDictionary(pullRequest => (pullRequest.Repository, pullRequest.Number));
         var pullRequests = new Dictionary<(string Repository, long Number), (RawPullRequest Row, Func<long, bool> IsAuthor, bool ReadReviews)>();
 
+        // The stored pull requests the list gives without the closing the store holds, each with that closing.
+        var reopened = new Dictionary<(string Repository, long Number), (GitHubRepository Repository, DateTimeOffset Closed)>();
+
         // Stopping at a page with nothing new is right only when the last read of the host ended: one that
         // failed may have stored some pull requests and not others (see below), in no order the list has, so
         // a page of stored ones says nothing about the pages after it. The read after a failed one, and the
@@ -155,6 +158,12 @@ public sealed class GitHubCollector : IPullRequestCollector
                     // The store holds a pull request only with the reviews read for the entry it holds, since
                     // a batch is written whole or not at all, so an entry that is as stored needs no request.
                     // The exception is a row written while the roster could not be read: it says so itself.
+                    if (before?.Closed is { } closedBefore && closedBefore != row.Closed)
+                    {
+                        // The store holds a closing the list no longer gives: the pull request was reopened.
+                        reopened[(row.Repository, row.Number)] = (repository, closedBefore);
+                    }
+
                     var readReviews = before is null || before.Merged != row.Merged || before.Closed != row.Closed || before.Updated != row.Updated
                         || (row.Updated is null && row.Closed is null)
                         || before.History != PullRequestHistoryStates.Read;
@@ -206,11 +215,36 @@ public sealed class GitHubCollector : IPullRequestCollector
         // failed is not counted among them: its failing again says nothing new about the host, and a few such
         // pull requests would otherwise stop every later read at the same place. A client that gave up
         // (HostGaveUpException) is never about one pull request, and stops the read at once.
+        var storedWithoutReviews = new List<string>();
+
+        // A pull request found reopened: the list gives it with no closing time, or with another one, and
+        // does not say when it was opened again. The store keeps the closing it held, ended by this read's
+        // time (RawPullRequestPastClosure), but a review can have been made while the pull request was closed,
+        // or soon after it was reopened, and both lie before this read. Its issue events tell them apart: they
+        // give each closing and each reopening with its time. They are asked for here and nowhere else, so
+        // only for a pull request seen reopened, once: the next read finds the closing as stored.
+        // A failure that is about the pull request (GitHub refuses its events, or they cannot be understood
+        // or read to their end) leaves the closing as the collections saw it, and the read goes on. A client
+        // that gave up stops the read before anything is stored, so the next one finds the reopening again.
+        var pastClosures = new List<RawPullRequestPastClosure>();
+        foreach (var ((repositoryKey, number), (repository, closedBefore)) in reopened)
+        {
+            try
+            {
+                pastClosures.AddRange(await PastClosuresAsync(github, repository, number, closedBefore, cancellationToken));
+            }
+            catch (UserFacingException exception) when (exception is not HostGaveUpException)
+            {
+                storedWithoutReviews.Add(
+                    $"GitHub: when a reopened pull request was closed and reopened could not be read ({exception.Message.Replace(" Nothing was stored.", "", StringComparison.Ordinal)}). "
+                    + "Its closing is kept as the collections saw it: closed until this one, and a review made in that time is counted.");
+            }
+        }
+
         var events = new List<RawPullRequestEvent>();
         var unread = pullRequests.Where(pullRequest => pullRequest.Value.ReadReviews).Select(pullRequest => pullRequest.Key).ToHashSet();
         var toRead = unread.Count;
         var (readWhole, unreadInARow) = (0, 0);
-        var storedWithoutReviews = new List<string>();
         try
         {
             foreach (var repository in _settings.Repositories)
@@ -276,7 +310,11 @@ public sealed class GitHubCollector : IPullRequestCollector
                     events,
                     new RawPullRequestHost(Host, PullRequestHostStates.Failed, PullRequestRosterStates.NotRead) { CollectFrom = storedFrom, Repositories = PullRequestCollection.RepositoriesRead(stored, Host) },
                     IdentityHash.SaltFingerprint(_salt),
-                    _clock.GetUtcNow()),
+                    _clock.GetUtcNow())
+                {
+                    // Only of the pull requests that are stored: one left out is found reopened again by the next read.
+                    PastClosures = [.. pastClosures.Where(closure => !unread.Contains((closure.Repository, closure.Number)))],
+                },
                 failure);
         }
 
@@ -290,7 +328,64 @@ public sealed class GitHubCollector : IPullRequestCollector
                 _settings.OpsTeam is null ? PullRequestRosterStates.NotConfigured : rosterRead ? PullRequestRosterStates.Read : PullRequestRosterStates.Failed)
             { CollectFrom = collectedFrom, Repositories = [.. _settings.Repositories.Select(repository => repository.Key)] },
             IdentityHash.SaltFingerprint(_salt),
-            _clock.GetUtcNow());
+            _clock.GetUtcNow())
+        {
+            PastClosures = pastClosures,
+        };
+    }
+
+    /// <summary>
+    /// The closings of a pull request that were ended by a reopening, each with the time of that reopening,
+    /// from its issue events: GitHub records a <c>closed</c> and a <c>reopened</c> event with the time of
+    /// each (<c>created_at</c>). A closing with no reopening after it is the one that stands, and is not
+    /// given. <paramref name="closedBefore"/>, the closing the store holds, is given with the first reopening
+    /// after it even if no <c>closed</c> event has exactly its time, so that the store's row gets its end.
+    /// Nothing else of an event is read: not who closed or reopened it.
+    /// </summary>
+    private async Task<IReadOnlyList<RawPullRequestPastClosure>> PastClosuresAsync(HostClient github, GitHubRepository repository, long number, DateTimeOffset closedBefore, CancellationToken cancellationToken)
+    {
+        var happened = new List<(bool Closed, DateTimeOffset At)>();
+        await ForEachAsync(
+            github,
+            $"repos/{repository.Owner}/{repository.Name}/issues/{number.ToString(CultureInfo.InvariantCulture)}/events?per_page={PageSize}",
+            "pull request events",
+            issueEvent =>
+            {
+                var kind = JiraJson.Text(issueEvent, "event");
+                if (kind is "closed" or "reopened")
+                {
+                    happened.Add((kind == "closed", StoredTime.AsStored(JiraTime.Parse(issueEvent.GetProperty("created_at")))));
+                }
+
+                return true;
+            },
+            cancellationToken);
+
+        // In the order they happened; at the same instant a closing comes before a reopening.
+        happened = [.. happened.OrderBy(one => one.At).ThenByDescending(one => one.Closed)];
+        var ended = new Dictionary<DateTimeOffset, DateTimeOffset>();
+        DateTimeOffset? closed = null;
+        foreach (var (isClosing, at) in happened)
+        {
+            if (isClosing)
+            {
+                closed ??= at;
+            }
+            else if (closed is { } closing)
+            {
+                ended[closing] = at;
+                closed = null;
+            }
+        }
+
+        if (!ended.ContainsKey(closedBefore) && happened.Where(one => !one.Closed && one.At >= closedBefore).Select(one => (DateTimeOffset?)one.At).FirstOrDefault() is { } reopenedAt)
+        {
+            ended[closedBefore] = reopenedAt;
+        }
+
+        // ReopenedBy is the store's to set: the time of the read that gives these.
+        var collectedAt = _clock.GetUtcNow();
+        return [.. ended.Select(closure => new RawPullRequestPastClosure(Host, repository.Key, number, closure.Key, collectedAt) { Reopened = closure.Value })];
     }
 
     private async Task SayAsync(IEnumerable<string> notices)
