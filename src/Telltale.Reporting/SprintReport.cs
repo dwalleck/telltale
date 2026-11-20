@@ -920,7 +920,6 @@ public static class SprintReport
             report.Append(" With a team of ").Append(team).Append(" or more, every figure of the sprint itself is shown, whatever the number of assignees behind it.");
         }
 
-
         report.Append(briefVisitsChecked ? " The footer's two counts of the whole store" : " The footer's two counts").Append(" read \"suppressed\" when ");
         if (numbers.TeamCheck)
         {
