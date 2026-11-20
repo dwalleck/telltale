@@ -49,10 +49,27 @@ public sealed record TelltaleSettings
     /// The repositories whose pull requests count, by host (<see cref="PullRequestHosts"/>), each under the name
     /// the store keeps its rows by. Empty when no pull request host is configured. Another host adds its entry here.
     /// </summary>
-    public IReadOnlyDictionary<string, IReadOnlyList<string>> PullRequestRepositories =>
-        GitHub is null
-            ? new Dictionary<string, IReadOnlyList<string>>()
-            : new Dictionary<string, IReadOnlyList<string>> { [PullRequestHosts.GitHub] = [.. GitHub.Repositories.Select(repository => repository.Key)] };
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> PullRequestRepositories
+    {
+        get
+        {
+            var repositories = new Dictionary<string, IReadOnlyList<string>>();
+            if (GitHub is not null)
+            {
+                repositories[PullRequestHosts.GitHub] = [.. GitHub.Repositories.Select(repository => repository.Key)];
+            }
+
+            if (Ado is not null)
+            {
+                repositories[PullRequestHosts.Ado] = [.. Ado.Repositories.Select(repository => repository.Key)];
+            }
+
+            return repositories;
+        }
+    }
+
+    /// <summary>Where pull requests are read from on Azure DevOps, or null when the setting is left out: then nothing is asked of Azure DevOps.</summary>
+    public AdoSettings? Ado { get; init; }
 
     /// <summary>
     /// The settings as a rebuild records them, apart from the raw data's digest, the brief visit thresholds and
@@ -108,6 +125,7 @@ public sealed record TelltaleSettings
             BriefVisitThresholds = briefVisitThresholds,
             BriefVisitTreatment = briefVisitTreatment,
             GitHub = config.GitHub is null ? null : GitHubSettings.Checked(config.GitHub),
+            Ado = config.Ado is null ? null : AdoSettings.Checked(config.Ado),
             Recorded = new DerivedSource(
                 RawDigest: "",
                 config.TimeZone,

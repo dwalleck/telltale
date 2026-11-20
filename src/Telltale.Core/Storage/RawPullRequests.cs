@@ -4,6 +4,9 @@ namespace Telltale.Core.Storage;
 public static class PullRequestHosts
 {
     public const string GitHub = "github";
+
+    /// <summary>Azure DevOps.</summary>
+    public const string Ado = "ado";
 }
 
 /// <summary>
@@ -95,6 +98,12 @@ public static class PullRequestEventKinds
 {
     /// <summary>A submitted review.</summary>
     public const string Review = "review";
+
+    /// <summary>A reviewer's vote on Azure DevOps, other than a reset to no vote: its time is the vote's own thread's, never the reviewer's current vote, which has none.</summary>
+    public const string Vote = "vote";
+
+    /// <summary>A text comment on a file on Azure DevOps. A comment on the pull request as a whole is general conversation and is not stored.</summary>
+    public const string FileComment = "file comment";
 }
 
 /// <summary>The values of <see cref="RawPullRequestEvent.Outcome"/>: what the event said, as the host reported it when the event was first fetched.</summary>

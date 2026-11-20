@@ -141,16 +141,18 @@ A new file gets `minimumGroupSize` with five and three. A rerun never changes th
 
 `discover` never writes `briefVisitTreatment` either. A rerun keeps the setting as a value and in its place in the file, and never changes or removes it. It does not keep the file byte for byte: a rerun that changes anything else rewrites the file in the tool's layout and drops comments, and says so. A rerun on a file whose `briefVisitTreatment` would be refused writes nothing, leaves the file untouched and prints the same line, followed by the message `run` would give. It prints no part of a key written under the setting, and no part of a key written twice anywhere in the file: what was typed as a key could be a secret pasted into the wrong place. The one name it gives is the tool's own: a part of the setting written twice is refused as `run` refuses it, by the part's name. When a file has more than one fault, `discover` and `run` may each report a different one: each checks in its own order and stops at the first. Each message is true of the file, and correcting one fault brings the next.
 
-### `secrets set <jira-email|jira-api-token|hashing-salt|github-token>`
+### `secrets set <jira-email|jira-api-token|hashing-salt|github-token|ado-token>`
 
 Stores one secret in Windows Credential Manager. The value is asked for at a prompt, or piped in with `--stdin`; it is never taken as an argument.
 
 `github-token` is needed only when the configuration file has the `github` setting. It is a token that can read the pull requests of the listed repositories and the members of the Ops team; the tool only reads. Without the setting no command asks for it.
 
+`ado-token` is needed only when the configuration file has the `ado` setting. It is an Azure DevOps personal access token with the Code (Read) scope for the listed repositories; the tool only reads. Without the setting no command asks for it. Neither host's token is needed for the other host.
+
 - `--generate` stores a new random hashing salt.
 - `--replace` is required to change a salt once people have been hashed with it. Every stored person hash stops matching, so run `backfill` afterwards.
 
-Off Windows, `secrets set` cannot store anything. Set `TELLTALE_JIRA_EMAIL`, `TELLTALE_JIRA_API_TOKEN` and `TELLTALE_HASHING_SALT` in the environment, and `TELLTALE_GITHUB_TOKEN` when the `github` setting is there.
+Off Windows, `secrets set` cannot store anything. Set `TELLTALE_JIRA_EMAIL`, `TELLTALE_JIRA_API_TOKEN` and `TELLTALE_HASHING_SALT` in the environment, and `TELLTALE_GITHUB_TOKEN` when the `github` setting is there. Set `TELLTALE_ADO_TOKEN` when the `ado` setting is there.
 
 ### `backfill`
 
@@ -159,6 +161,8 @@ Fetches every issue in the board's projects updated on or after `backfillStart`,
 It refuses to replace a non-empty store with an empty fetch, because that usually means a wrong setting or lost access. `--allow-empty` overrides this.
 
 With the `github` setting, `backfill` and `sync` then read pull requests: the list of each listed repository's pull requests, open, merged or closed, most recently updated first, and the submitted reviews of each pull request that is new to the store or whose list entry changed (its merge, its close or its last update). A pull request listed exactly as it is stored costs no request of its own. `sync` stops reading the list at the first page on which nothing is new; `backfill` reads the list to its end. So the first read costs one request per pull request, bounded by `github.collectFrom`, and a later `sync` costs one per pull request that changed. Stored pull requests are updated and never removed, by `backfill` either. If GitHub cannot be read the command fails after the Jira data is stored, and the pull requests already in the store stay as they were. See [Pull requests](#pull-requests).
+
+With the `ado` setting, `backfill` and `sync` read Azure DevOps the same way, with these differences. The list of a repository's pull requests does not say when one last changed, so both commands read the whole list, and both ask for the threads of every pull request that is still open, at every run. A completed or abandoned pull request is asked for once after it closed and never again. `ado.collectFrom` leaves out pull requests closed before the date. If Azure DevOps cannot be read the command fails after the Jira data is stored, and what is already in the store stays as it was.
 
 ### `sync`
 
@@ -243,6 +247,13 @@ The view has two more columns, `left_out_issue_count` and `left_out_suppressed`:
     "opsTeam": "example-org/ops",
     "apiUrl": "https://github.example.com/api/v3/",
     "collectFrom": "2026-07-01"
+  },
+  // Where pull requests are read from on Azure DevOps. Optional; without it nothing is asked of Azure DevOps.
+  "ado": {
+    "organization": "example-org",
+    "repositories": ["Payments/payments-api"],
+    "automationIdentities": ["00000000-0000-0000-0000-000000000000"],
+    "collectFrom": "2026-07-01"
   }
 }
 ```
@@ -265,6 +276,7 @@ The view has two more columns, `left_out_issue_count` and `left_out_suppressed`:
 | `briefVisitThresholds` | An object of status ID (a string of digits, as in `statusRoles`) to threshold: a number of minutes greater than zero, not quoted. A fraction is allowed. Each status must be in `statusRoles` with a role other than `done`, and may be listed once. Optional; may be empty. | `{ "10001": 5, "10002": 0.5 }` |
 | `briefVisitTreatment` | An object with the parts `timeInStatus` and `cycleTime`, each `"count"` or `"exclude"`. Optional, and so is each part: a part left out is `"count"`. `"count"` changes no figure. `"exclude"` for `timeInStatus` leaves the time of every brief visit to a listed status out of time in status. `"exclude"` for `cycleTime` gives a delivered issue whose cycle starts with a brief visit no cycle time. `"exclude"` needs a status listed in `briefVisitThresholds`, and for `cycleTime` one with the role `work`. | `{ "timeInStatus": "exclude", "cycleTime": "count" }` |
 | `github` | An object. Optional. `repositories` is required: a list of repositories, each as `"owner/name"`, and only these are read. `opsTeam` is optional: the team whose reviews are not code reviews, as `"organization/team-slug"`. `apiUrl` is optional: the absolute `https://` address of the REST API, for GitHub Enterprise Server the host's address followed by `/api/v3/`; without it the address is `https://api.github.com/`. `collectFrom` is optional: a date as `"yyyy-MM-dd"`; a pull request last updated before the start of that day (UTC) is not collected. It bounds last activity, not opening, so a pull request opened earlier and reviewed or merged since is still read. Without it there is no bound. After moving the date back, run `backfill`: a `sync` stops at the first page of unchanged pull requests and would not reach the older ones. The token is a secret and has no place here. | `{ "repositories": ["example-org/payments"] }` |
+| `ado` | An object. Optional, and independent of `github`: either may be there without the other. `organization` is required: the organization's name as it stands in its address. `repositories` is required: a list of repositories, each as `"project/repository"`, and only these are read. `automationIdentities` is optional: a list of identity IDs (GUIDs) of accounts that act only as automation, such as a code scanner's; every comment and vote of such an account is automation. `apiUrl` is optional: the absolute `https://` address the organization is under, for Azure DevOps Server; without it the address is `https://dev.azure.com/`. `collectFrom` is optional: a date as `"yyyy-MM-dd"`; a pull request closed before the start of that day (UTC) is not collected, and one that is still open is collected whenever it was opened. | `{ "organization": "example-org", "repositories": ["Payments/payments-api"] }` |
 
 Things that are refused when the file is loaded, with a message that names the file:
 
@@ -344,6 +356,18 @@ Each row has the number of pull requests (`sample_count`) and four figures: the 
 - **Elapsed days.** The figure is the wait divided by 24 hours, weekends and holidays included.
 - **Privacy.** The store keeps when a pull request was opened, merged and closed, its author as a salted hash, and for each review its time and its class. It keeps no title, branch name, login or comment text, and nothing of who reviewed. Pull request figures are not subject to the minimum group size: `minimumGroupSize` withholds none of them, and they are never grouped by person.
 - **A changed list.** After changing `repositories`, run `sync` to read a newly listed repository and `derive` to recount. Pull requests of a repository taken off the list stay in the store and are in no figure.
+
+#### Azure DevOps
+
+With the `ado` setting the same section and view count the pull requests of the listed Azure DevOps repositories, with that host's own rules. With both settings, the pull requests of both hosts are counted together.
+
+- **What a code review is.** The first vote other than a reset, or the first text comment on a file, by someone other than the author, made before the pull request closed. A vote against (waiting for the author, rejected) is a review. Comments on the pull request as a whole are general conversation and are not reviews.
+- **What a code approval is.** `first_code_approval` is the wait to the first vote in favour, approved or approved with suggestions, by someone other than the author, made before the pull request closed.
+- **A vote's time and voter.** Both come from the record Azure DevOps keeps of the vote itself. The voter is the reviewer that record names, not the account the record was written under. A reviewer's current vote has no time and is never used: a vote whose record cannot be read is not dated from it.
+- **Merge.** Only a completed pull request has a merge time, its closing time. An abandoned pull request has none, and keeps the reviews it got before it was closed.
+- **Automation.** The accounts listed in `automationIdentities`, by identity ID, are automation whatever they write. Azure DevOps does not mark automation itself, so any other account that is not the author is taken for a person. No Ops team is set apart on Azure DevOps. A comment or vote is classified once, by the list at the sync that first stores it, and keeps that class: a change to the list applies to what is collected afterwards.
+- **What cannot be told.** A vote whose voter or value cannot be read may have been the first review or approval, so a pull request with such a vote before any other qualifying one has no figure for that wait. A deleted comment is passed over.
+- **Privacy.** For a vote or a file comment the store keeps its time, whether it was in favour, against or a comment, and its class. It keeps no comment text, file path, title, branch name, identity ID or name, and nothing of who reviewed. The author is kept as a salted hash.
 
 ### Brief visit thresholds
 

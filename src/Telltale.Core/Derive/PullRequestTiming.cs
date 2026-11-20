@@ -39,6 +39,7 @@ public static class PullRequestTiming
         new Dictionary<string, Func<RawPullRequest, IReadOnlyList<RawPullRequestEvent>, DateTimeOffset?>>(StringComparer.Ordinal)
         {
             [PullRequestHosts.GitHub] = GitHubReviewRules.FirstCodeApproval,
+            [PullRequestHosts.Ado] = AdoReviewRules.FirstCodeApproval,
         };
 
     /// <summary>
@@ -49,6 +50,7 @@ public static class PullRequestTiming
         new Dictionary<string, Func<RawPullRequest, IReadOnlyList<RawPullRequestEvent>, DateTimeOffset?>>(StringComparer.Ordinal)
         {
             [PullRequestHosts.GitHub] = GitHubReviewRules.FirstCodeReview,
+            [PullRequestHosts.Ado] = AdoReviewRules.FirstCodeReview,
         };
 
     /// <summary>

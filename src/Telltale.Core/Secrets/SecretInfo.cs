@@ -15,6 +15,7 @@ public sealed record SecretInfo(SecretName Name, string Label, string Argument, 
         new(SecretName.JiraApiToken, "'Jira API token'", "jira-api-token", "TELLTALE_JIRA_API_TOKEN", "Telltale/JiraApiToken"),
         new(SecretName.HashingSalt, "'hashing salt'", "hashing-salt", "TELLTALE_HASHING_SALT", "Telltale/HashingSalt"),
         new(SecretName.GitHubToken, "'GitHub token'", "github-token", "TELLTALE_GITHUB_TOKEN", "Telltale/GitHubToken"),
+        new(SecretName.AdoToken, "'Azure DevOps token'", "ado-token", "TELLTALE_ADO_TOKEN", "Telltale/AdoToken"),
     ];
 
     public static SecretInfo Of(SecretName name) =>

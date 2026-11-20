@@ -20,6 +20,12 @@ public sealed record CollectionSecrets(string JiraEmail, string JiraApiToken, st
     /// </summary>
     public CollectionSecrets WithGitHubToken(ISecretStore secrets) => this with { GitHubToken = secrets.Require(SecretName.GitHubToken) };
 
+    /// <summary>The Azure DevOps token, when that host is configured (<see cref="WithAdoToken"/>).</summary>
+    public string? AdoToken { get; init; }
+
+    /// <summary>These secrets with the Azure DevOps token, read now and required, as <see cref="WithGitHubToken"/> does for GitHub's.</summary>
+    public CollectionSecrets WithAdoToken(ISecretStore secrets) => this with { AdoToken = secrets.Require(SecretName.AdoToken) };
+
     /// <summary>
     /// Reads the secrets in the order they are listed (<see cref="SecretInfo.All"/>) and stops with a message
     /// naming the first that is not set and how to set it. A missing hashing salt is two different situations:

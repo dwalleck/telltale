@@ -42,6 +42,11 @@ internal sealed class PipelineSession : IDisposable
             {
                 secrets = secrets.WithGitHubToken(services.Secrets);
             }
+
+            if (settings.Ado is not null)
+            {
+                secrets = secrets.WithAdoToken(services.Secrets);
+            }
         }
         else if (!File.Exists(services.DatabasePath))
         {
