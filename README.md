@@ -6,7 +6,7 @@ It reports on the team's work, never on individuals. Person fields are hashed be
 
 ## Status
 
-The Jira path works end to end: collect a Scrum board, derive the metrics, write a sprint report. Pull request timing from GitHub (the wait for a first code review and for merge) is built and has run against synthetic data only. Other GitHub review metrics, Azure DevOps, AI agent session logs, quality measures and Confluence publishing are planned and not built.
+The Jira path works end to end: collect a Scrum board, derive the metrics, write a sprint report. Pull request timing from GitHub and from Azure DevOps (the waits for a first code review, for a first code approval and for merge, and the pull requests left without a first code review) is built and has run against synthetic data only. Other review metrics, AI agent session logs, quality measures and Confluence publishing are planned and not built.
 
 The first owner-assisted run on the managed Windows laptop produced a real Jira sprint report. The Windows test suite passes; detailed real-site edge-case checks remain open in [ticket 13](.scratch/jira-flow-report/issues/13-first-real-run-on-work-laptop.md).
 
@@ -18,7 +18,7 @@ One markdown file per sprint, with:
 - **Cycle time by point bucket:** median and 85th percentile, in business days, for issues grouped by story points.
 - **Time in status:** how many issues spent time in each workflow status, their median time and total business days. Totals sum issue time within the sprint and membership windows, not effort.
 - **Baseline columns:** cycle-time medians and P85s and time-in-status medians pooled over a fixed list of earlier sprints, for comparison.
-- **Pull request timing:** when the configuration has the `github` setting, how many pull requests of the listed repositories got their first code review in the sprint and how many were merged in it, each with the median and the P85 of the wait since the pull request was opened, in elapsed days and in business days. See [Pull requests](#pull-requests).
+- **Pull request timing:** when the configuration has the `github` setting, the `ado` setting (Azure DevOps) or both, how many pull requests of the listed repositories got their first code review in the sprint, how many their first code approval and how many were merged in it, each with the median and the P85 of the wait since the pull request was opened, in elapsed days and in business days; and under that, how many pull requests had no first code review when the sprint closed. With both settings each host has its own rows, beside combined ones. These figures are not subject to the minimum group size. See [Pull requests](#pull-requests).
 - **Method note and data quality footer:** how the figures were computed and what was left out.
 - **Brief visit lines in the footer:** when the configuration lists statuses under `briefVisitThresholds`, one line for each listed status that has a row in the sprint's time in status table, or had one before any brief visit was left out, says how many of the issues in the row before anything was left out had a visit shorter than the status's threshold, or reads `suppressed`. A listed status that had no such row has no line, and a sprint whose tables are withheld has none. No figure is changed because of a brief visit unless `briefVisitTreatment` says so. See [Brief visit thresholds](#brief-visit-thresholds).
 - **A cycle time line in the footer:** when a listed status has the role `work`, the footer's last line says how many of the sprint's delivered issues have a cycle that starts with a brief visit, or reads `suppressed`.
@@ -36,6 +36,7 @@ Reporting no per-person results is a hard constraint of the design. Withholding 
 - **With `assigneesBehindAFigure` at zero or one, a figure in a report can be the work of a single person.** The people are still not named, but anyone who knows who did the work can tell whose figure it is.
 - **A report written below the defaults says so.** When either number is below its default, a line under the report's heading gives the numbers in force, or says that small-group suppression is off. The method note of every report states the rule the report was written under.
 - **The rule lives in the database views.** `report` and `query` both read through them, so neither can show a figure that the numbers in force withhold.
+- **Pull request figures are not withheld for group size.** The two pull request views apply neither number, whatever `minimumGroupSize` says, and still give nothing per person. See [Pull requests](#pull-requests).
 - **Opening the database file in another program bypasses the rule.** That program reads every table.
 - **Whoever edits the configuration file is trusted with it.** The rule is applied to each brief visit count on its own. Someone who derives twice under different `briefVisitThresholds` can subtract one shown count from the other, and the difference can rest on fewer people than the numbers in force allow. Someone who derives twice under different values of `briefVisitTreatment` can set a figure under `count` beside the same figure under `exclude`, which says something about the issues left out even when their count is withheld. See [Brief visit thresholds](#brief-visit-thresholds) and [Brief visit treatment](#brief-visit-treatment).
 
@@ -184,7 +185,7 @@ Runs `sync`, `derive` and `report` in one step.
 
 ### `query "<sql>"`
 
-Runs one `SELECT` over the metric views and prints the rows as a markdown table. Use `--file <path>` to read the SQL from a file. It reads only the metric views, so withheld figures stay withheld.
+Runs one `SELECT` over the metric views and prints the rows as a markdown table. Use `--file <path>` to read the SQL from a file. It reads only the metric views, so withheld figures stay withheld. The two pull request views, `pr_timing_per_sprint` and `pr_without_review_per_sprint`, withhold nothing for group size: their figures are not subject to `minimumGroupSize` (see [Pull requests](#pull-requests)), and they give no figure per person.
 
 ```
 telltale query "SELECT * FROM delivered_per_sprint"
@@ -342,7 +343,7 @@ The setting changes only this rule. Person fields are still hashed before they a
 
 ### Pull requests
 
-With the `github` setting, each sprint report has a **Pull request timing** section, and the metric view `pr_timing_per_sprint` has one row per sprint and measure: `sample_count` and `median_elapsed_days`. Without the setting the report has no such section and the view has no rows.
+With the `github` setting, each sprint report has a **Pull request timing** section, and the metric view `pr_timing_per_sprint` has one row per sprint and measure. Azure DevOps is read with the `ado` setting, which has its own subsection below; with both, the view has a row per sprint, measure and host scope (see "More than one host"). With neither setting the report has no such section and the view has no rows.
 
 Each row has the number of pull requests (`sample_count`) and four figures: the median and the P85 of the waits in elapsed days (`median_elapsed_days`, `p85_elapsed_days`) and in business days (`median_business_days`, `p85_business_days`). The median and the nearest-rank P85 are picked as for every other figure of the report, for each clock on its own, from the waits before any rounding; only the report rounds, to one decimal. A row with no pull request has no figure: the report says `none` and the view gives `NULL`, never zero. The view has one more row per measure with no sprint (`sprint_id` is `NULL`): the waits counted in no sprint. The report gives their number under the table when there are any.
 
