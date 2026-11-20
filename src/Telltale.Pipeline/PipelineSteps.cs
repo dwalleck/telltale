@@ -66,11 +66,15 @@ public sealed class PipelineSteps
     {
         // The store is this pipeline's alone (the host sees to it), so nothing changes it between the counts and the write.
         var before = await _store.CountRawAsync(cancellationToken);
-        await CollectAsync(CollectionMode.Backfill, allowEmpty, cancellationToken);
+        await CollectFromJiraAsync(CollectionMode.Backfill, allowEmpty, cancellationToken);
+
+        // Said as soon as Jira's batch is committed, and before any pull request host is asked: a host that
+        // then fails ends the command, and what the backfill replaced must not go unsaid with it.
         var now = await _store.CountRawAsync(cancellationToken);
         await _environment.Out.WriteLineAsync(string.Create(
             CultureInfo.InvariantCulture,
             $"The store now holds what Jira returned. Issues: {before.Issues} before, {now.Issues} now. Sprints: {before.Sprints} before, {now.Sprints} now. Changes: {before.Changes} before, {now.Changes} now."));
+        await CollectPullRequestsAsync(CollectionMode.Backfill, cancellationToken);
     }
 
     /// <summary>
@@ -86,19 +90,33 @@ public sealed class PipelineSteps
     }
 
     /// <summary>Brings the raw tables up to date with what changed in Jira since the last sync or backfill.</summary>
-    public Task SyncAsync(CancellationToken cancellationToken) => CollectAsync(CollectionMode.Incremental, allowEmpty: false, cancellationToken);
+    public async Task SyncAsync(CancellationToken cancellationToken)
+    {
+        await CollectFromJiraAsync(CollectionMode.Incremental, allowEmpty: false, cancellationToken);
+        await CollectPullRequestsAsync(CollectionMode.Incremental, cancellationToken);
+    }
+
+    /// <summary>The secrets a collection needs, which a host that collects passes in.</summary>
+    private CollectionSecrets SecretsOfACollection =>
+        _secrets ?? throw new InvalidOperationException("This command was started without the secrets a collection needs.");
 
     /// <summary>
-    /// Jira first: the sprints come from its board, and its batch settles which salt the store's people are
-    /// hashed with. Then each configured pull request host. A backfill removes no pull request; it reads each
-    /// host's whole list, where a sync stops once it reaches pull requests that have not changed.
+    /// Jira is read first, before any pull request host (<see cref="CollectPullRequestsAsync"/>): the sprints
+    /// come from its board, and its batch settles which salt the store's people are hashed with.
     /// </summary>
-    private async Task CollectAsync(CollectionMode mode, bool allowEmpty, CancellationToken cancellationToken)
-    {
-        var secrets = _secrets ?? throw new InvalidOperationException("This command was started without the secrets a collection needs.");
-        await new JiraCollector(_environment.HttpHandler, _settings.Jira, secrets, _environment.Clock, _environment.Notices)
+    private Task CollectFromJiraAsync(CollectionMode mode, bool allowEmpty, CancellationToken cancellationToken) =>
+        new JiraCollector(_environment.HttpHandler, _settings.Jira, SecretsOfACollection, _environment.Clock, _environment.Notices)
             .BringUpToDateAsync(_store, mode, allowEmpty, cancellationToken);
-        await PullRequestCollection.BringUpToDateAsync(PullRequestCollectors(secrets), _store, everything: mode == CollectionMode.Backfill, IdentityHash.SaltFingerprint(secrets.HashingSalt), cancellationToken);
+
+    /// <summary>
+    /// Each configured pull request host, once Jira's batch is stored. A backfill removes no pull request; it
+    /// reads each host's whole list, where a sync stops once it reaches pull requests that have not changed.
+    /// A host that cannot be read fails this step after the store has recorded that, with the host's message.
+    /// </summary>
+    private Task CollectPullRequestsAsync(CollectionMode mode, CancellationToken cancellationToken)
+    {
+        var secrets = SecretsOfACollection;
+        return PullRequestCollection.BringUpToDateAsync(PullRequestCollectors(secrets), _store, everything: mode == CollectionMode.Backfill, IdentityHash.SaltFingerprint(secrets.HashingSalt), cancellationToken);
     }
 
     /// <summary>
