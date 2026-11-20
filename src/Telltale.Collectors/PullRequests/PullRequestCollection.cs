@@ -19,9 +19,34 @@ public interface IPullRequestCollector
     /// lacks, and costs no request of its own. With <paramref name="everything"/> (a backfill) the whole list
     /// is read; without it (a sync) a collector whose host lists the most recently updated first may stop
     /// where nothing has changed. Fails with a <see cref="UserFacingException"/> when the host cannot be read:
-    /// an answer that is missing is never an empty one.
+    /// an answer that is missing is never an empty one. A collector that had read some pull requests whole by
+    /// then may fail with a <see cref="PullRequestReadStoppedException"/>, which carries them to be stored.
     /// </summary>
     Task<PullRequestBatch> FetchAsync(RawData stored, bool everything, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// A read of a host that stopped part-way, with what it had read whole by then: pull requests each with every
+/// one of its events, so that the next read need not ask for them again. A first read of a large repository
+/// can take more requests than a host allows in an hour, and would otherwise start from nothing every time.
+/// The read still failed: <see cref="Read"/> records the host as <see cref="PullRequestHostStates.Failed"/>,
+/// so nothing takes what is stored for the whole of what the host has, and the message says what was kept.
+/// </summary>
+public sealed class PullRequestReadStoppedException : UserFacingException
+{
+    public PullRequestReadStoppedException(string message, PullRequestBatch read, Exception innerException)
+        : base(message, innerException)
+    {
+        if (read.HostState.State != PullRequestHostStates.Failed)
+        {
+            throw new ArgumentException("What a stopped read gives to be stored must record the host as failed.", nameof(read));
+        }
+
+        Read = read;
+    }
+
+    /// <summary>What to store: the pull requests read whole, their events, and the host recorded as failed.</summary>
+    public PullRequestBatch Read { get; }
 }
 
 /// <summary>Brings the store's pull requests up to date, host by host, the same way for a sync and a backfill.</summary>
@@ -29,8 +54,9 @@ public static class PullRequestCollection
 {
     /// <summary>
     /// Reads each host in turn and writes its batch. A host that cannot be read fails the command, and the
-    /// store then says so (<see cref="PullRequestHostStates.Failed"/>): its rows of earlier reads stay, and
-    /// nothing reads them as a host that was read and found empty. The hosts after it are still read first,
+    /// store then says so (<see cref="PullRequestHostStates.Failed"/>): its rows of earlier reads stay, with
+    /// those the failed read had read whole when its collector gives them (<see cref="PullRequestReadStoppedException"/>),
+    /// and nothing reads them as a host that was read and found empty. The hosts after it are still read first,
     /// so that what one host has does not go unread because another could not be reached; the command then
     /// fails with what each host that could not be read said.
     /// </summary>
@@ -45,6 +71,13 @@ public static class PullRequestCollection
             try
             {
                 batch = await collector.FetchAsync(await store.ReadRawAsync(cancellationToken), everything, cancellationToken);
+            }
+            catch (PullRequestReadStoppedException stopped)
+            {
+                // The read failed like any other, and what it read whole before that is kept.
+                await store.WritePullRequestsAsync(stopped.Read, cancellationToken);
+                failures.Add(stopped);
+                continue;
             }
             catch (UserFacingException failure)
             {

@@ -81,6 +81,12 @@ public sealed class GitHubCollector : IPullRequestCollector
 
         var known = stored.PullRequests.Where(pullRequest => pullRequest.Host == Host).ToDictionary(pullRequest => (pullRequest.Repository, pullRequest.Number));
         var pullRequests = new Dictionary<(string Repository, long Number), (RawPullRequest Row, Func<long, bool> IsAuthor, bool ReadReviews)>();
+
+        // Stopping at a page with nothing new is right only when the last read of the host ended: one that
+        // failed may have stored some pull requests and not others (see below), in no order the list has, so
+        // a page of stored ones says nothing about the pages after it. The read after a failed one, and the
+        // first one, go through the whole list; that costs list pages only, never reviews already read.
+        var readInFull = stored.PullRequestHosts.Any(host => host.Host == Host && host.State == PullRequestHostStates.Read);
         foreach (var repository in _settings.Repositories)
         {
             // Every state: an old pull request can be reviewed, merged or reopened at any time. The most
@@ -125,7 +131,7 @@ public sealed class GitHubCollector : IPullRequestCollector
                     return true;
                 },
                 cancellationToken,
-                stopAtAPageWithNothingNew: !everything);
+                stopAtAPageWithNothingNew: !everything && readInFull);
         }
 
         // A stored pull request whose reviews were not read is read now, whether or not the list pass came to
@@ -136,34 +142,62 @@ public sealed class GitHubCollector : IPullRequestCollector
         if (rosterRead)
         {
             var configured = _settings.Repositories.Select(repository => repository.Key).ToHashSet(StringComparer.Ordinal);
-            foreach (var unread in known.Values.Where(pullRequest => pullRequest.History != PullRequestHistoryStates.Read
+            foreach (var withoutReviews in known.Values.Where(pullRequest => pullRequest.History != PullRequestHistoryStates.Read
                 && configured.Contains(pullRequest.Repository)
                 && !pullRequests.ContainsKey((pullRequest.Repository, pullRequest.Number))))
             {
-                pullRequests[(unread.Repository, unread.Number)] = (unread with { History = PullRequestHistoryStates.Read }, id => AuthorHash(id) == unread.AuthorHash, true);
+                pullRequests[(withoutReviews.Repository, withoutReviews.Number)] = (withoutReviews with { History = PullRequestHistoryStates.Read }, id => AuthorHash(id) == withoutReviews.AuthorHash, true);
             }
         }
 
+        // The reviews are read one pull request at a time, and a pull request counts as read only with all of
+        // them. When a request fails after some pull requests were read whole, those are given to be stored
+        // with the failure: a first read of a large repository can need more requests than GitHub allows in an
+        // hour, and would start from nothing at every attempt if a failed read kept nothing. Those not reached
+        // are left out, row and all, so the next read finds them new or changed and asks for them. The host is
+        // recorded as failed then, never as read, and the read after a failed one goes through the whole list.
         var events = new List<RawPullRequestEvent>();
-        foreach (var repository in _settings.Repositories)
+        var unread = pullRequests.Where(pullRequest => pullRequest.Value.ReadReviews).Select(pullRequest => pullRequest.Key).ToHashSet();
+        var toRead = unread.Count;
+        try
         {
-            foreach (var (row, isAuthor, _) in pullRequests.Values.Where(pullRequest => pullRequest.ReadReviews && pullRequest.Row.Repository == repository.Key).OrderBy(pullRequest => pullRequest.Row.Number))
+            foreach (var repository in _settings.Repositories)
             {
-                await ForEachAsync(
-                    github,
-                    $"repos/{repository.Owner}/{repository.Name}/pulls/{row.Number.ToString(CultureInfo.InvariantCulture)}/reviews?per_page={PageSize}",
-                    "pull request reviews",
-                    review =>
-                    {
-                        if (ReadReview(row, isAuthor, opsMemberIds, review) is { } submitted)
+                foreach (var (row, isAuthor, _) in pullRequests.Values.Where(pullRequest => pullRequest.ReadReviews && pullRequest.Row.Repository == repository.Key).OrderBy(pullRequest => pullRequest.Row.Number))
+                {
+                    var itsEvents = new List<RawPullRequestEvent>();
+                    await ForEachAsync(
+                        github,
+                        $"repos/{repository.Owner}/{repository.Name}/pulls/{row.Number.ToString(CultureInfo.InvariantCulture)}/reviews?per_page={PageSize}",
+                        "pull request reviews",
+                        review =>
                         {
-                            events.Add(submitted);
-                        }
+                            if (ReadReview(row, isAuthor, opsMemberIds, review) is { } submitted)
+                            {
+                                itsEvents.Add(submitted);
+                            }
 
-                        return true;
-                    },
-                    cancellationToken);
+                            return true;
+                        },
+                        cancellationToken);
+                    events.AddRange(itsEvents);
+                    unread.Remove((row.Repository, row.Number));
+                }
             }
+        }
+        catch (UserFacingException failure) when (unread.Count < toRead)
+        {
+            // The failure's own words may end by saying nothing was stored, which is not true of this read.
+            throw new PullRequestReadStoppedException(
+                $"{failure.Message.Replace(" Nothing was stored.", "", StringComparison.Ordinal)} "
+                + $"The reviews of {(toRead - unread.Count).ToString(CultureInfo.InvariantCulture)} of {toRead.ToString(CultureInfo.InvariantCulture)} pull requests were read before that and are stored, and the next sync reads the rest. "
+                + "Until a read of GitHub finishes, a report says that GitHub's figures rest on a read that failed.",
+                new PullRequestBatch(
+                    [.. pullRequests.Where(pullRequest => !unread.Contains(pullRequest.Key)).Select(pullRequest => pullRequest.Value.Row)],
+                    events,
+                    new RawPullRequestHost(Host, PullRequestHostStates.Failed, PullRequestRosterStates.NotRead),
+                    IdentityHash.SaltFingerprint(_salt)),
+                failure);
         }
 
         return new PullRequestBatch(

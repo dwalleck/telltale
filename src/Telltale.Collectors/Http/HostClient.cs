@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -168,8 +169,9 @@ internal sealed class HostClient : IDisposable
     public void Dispose() => _http.Dispose();
 
     /// <summary>
-    /// Sends a request and reads the JSON answer. A rate-limited answer (429) is waited out and the request
-    /// sent again; so is, a few times, a failure that can pass by itself (<see cref="MaxTransientRetries"/>).
+    /// Sends a request and reads the JSON answer. A rate-limited answer (429, or a used-up limit that names
+    /// its reset, see <see cref="RateLimitReset"/>) is waited out and the request sent again, unless the wait
+    /// asked for is longer than <see cref="LongestWait"/>; so is, a few times, a failure that can pass by itself (<see cref="MaxTransientRetries"/>).
     /// Every other way this can fail for reasons outside the tool becomes a
     /// <see cref="UserFacingException"/> that names the request and never quotes the response, which can hold
     /// issue or person data.
@@ -268,6 +270,30 @@ internal sealed class HostClient : IDisposable
             // An answer came back through the proxy, so the route to Jira works.
             _hostHasAnswered = true;
 
+            if (RateLimitReset(response) is { } reset)
+            {
+                // The host says its limit is used up and when it takes requests again (GitHub). A reset within
+                // the longest wait is waited out like any rate-limited answer. A later one ends the run at
+                // once, naming the time: the tool does not sit silent for the rest of an hour.
+                LastRefusal = response.StatusCode;
+                var usedUp = $"{_host}'s rate limit is used up: it answered {(int)response.StatusCode} ({response.StatusCode}) to {call}";
+                var wait = reset - _clock.GetUtcNow();
+                if (wait > LongestWait)
+                {
+                    throw new UserFacingException(
+                        $"{usedUp} and takes requests again at {reset.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)} UTC. Run the command again after that.");
+                }
+
+                if (await RetryAsync($"{_host}'s rate limit is used up", usedUp, call, started, () => wait > ShortestWait ? wait : ShortestWait, cancellationToken,
+                        (retries.RateLimited, MaxRetries)) is { } gaveUp)
+                {
+                    throw new UserFacingException(gaveUp);
+                }
+
+                retries.RateLimited++;
+                return null;
+            }
+
             if (response.StatusCode == HttpStatusCode.TooManyRequests)
             {
                 // Whatever ends the run below, the request reached Jira and Jira refused it.
@@ -313,6 +339,32 @@ internal sealed class HostClient : IDisposable
             {
                 throw new UserFacingException($"The answer to {call} was not JSON. A proxy or sign-in page may have been served in place of {_host}'s answer.", exception);
             }
+        }
+    }
+
+    /// <summary>
+    /// When the host takes requests again, for an answer that says its rate limit is used up the way GitHub
+    /// says it: 403 or 429 with <c>x-ratelimit-remaining: 0</c> and the time in <c>x-ratelimit-reset</c>, in
+    /// seconds since the Unix epoch. Null for every other answer, a 403 with requests left among them: that
+    /// one is a refusal, and waiting does not change it. Null too when the time cannot be read.
+    /// </summary>
+    private static DateTimeOffset? RateLimitReset(HttpResponseMessage response)
+    {
+        if (response.StatusCode is not (HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)
+            || !response.Headers.TryGetValues("x-ratelimit-remaining", out var remaining) || string.Concat(remaining).Trim() != "0"
+            || !response.Headers.TryGetValues("x-ratelimit-reset", out var resets)
+            || !long.TryParse(string.Concat(resets).Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var seconds))
+        {
+            return null;
+        }
+
+        try
+        {
+            return DateTimeOffset.FromUnixTimeSeconds(seconds);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return null;
         }
     }
 
